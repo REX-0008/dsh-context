@@ -39,6 +39,9 @@ import { aggregateByTurn, attachMarkers, jumpTargetOf, makeTrendChart, turnSteps
 import { subscribeContextFocus, takeContextFocus } from '../viewFocus'
 import { revealInScrollParent } from '../revealScroll'
 import { makeErrorBoundary } from './errorBoundary'
+// OUR INSERT POINT (PATCHES.md #3): the context-management card (see src/our/).
+import { ContextManager } from '../../our/client/ContextManager'
+import { ToolToggle } from '../../our/client/ToolToggle'
 
 // The context page scrolls inside the conversation's shared `[data-conversation-scroll]` container, which the chat bottom-anchors — mirror
 // the chat's chatScroll pattern: a module-level per-session position ledger (survives tab remounts), restored once content renders; first
@@ -521,6 +524,10 @@ export function makeContextView(
         loadImage={loadImage}
         detailState={source.detailState}
         onDetailRetry={source.retryDetail}
+        /* OUR INSERT POINT (PATCHES.md #6): the write layer's per-row action. */
+        rowAction={typeof sessionId === 'string'
+          ? (kind, name) => (kind === 'tool' ? <ToolToggle sessionId={sessionId} toolName={name} /> : null)
+          : undefined}
       />
     )
 
@@ -549,6 +556,10 @@ export function makeContextView(
             All columns share the 360px floor (`min-w-[min(360px,100%)]`): the
             rows wrap at it, and a sub-360px pane narrows the column instead
             of overflowing. */}
+        {/* OUR INSERT POINT (PATCHES.md #4): the write layer's management card,
+            one full-width row above the read-only columns. */}
+        {typeof sessionId === 'string' ? <ContextManager sessionId={sessionId} /> : null}
+
         <div className="lc-cols lc-cols-main">
           <div className="lc-col flex-1 min-w-[min(360px,100%)]">{compositionCard}{trendCard}</div>
           {/* `lc-col-browser` stretches the browser card to the left column's

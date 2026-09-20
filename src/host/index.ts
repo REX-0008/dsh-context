@@ -33,6 +33,9 @@ import { watchStepIdentity } from './stepIdentity'
 import { createContextTimelineDefinition } from './timeline'
 import { detectHarnessVersion } from './version'
 import { meetsBaseline } from '../shared/version'
+// OUR INSERT POINT (PATCHES.md #1): the context-management write layer lives
+// entirely under src/our/; upstream code above is untouched.
+import { applyOur } from '../our/index'
 
 export const name = 'dsh-context'
 
@@ -84,6 +87,10 @@ export function apply(ctx: Context, config: Config): void {
   // the plugin's fetch route the first time it opens.
   watchActivityBackfill(ctx)
   installSettings(ctx)
+  // OUR INSERT POINT (PATCHES.md #2): mount the write layer alongside upstream's
+  // read-only projections. It registers its own settings namespace, its own
+  // projection key (contextSections), and its own web routes.
+  applyOur(ctx)
 }
 
 // ---- public type surface (stable for downstream consumers) -------------------
