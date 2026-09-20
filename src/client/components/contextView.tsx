@@ -557,7 +557,13 @@ export function makeContextView(
             same props), so the browser lives inside it — not beside it. */}
         {typeof sessionId === 'string' ? (
           <div className="lc-cols lc-cols-main">
-            <ContextManagementPanel sessionId={sessionId} browser={browserCard} />
+            {/* The column wrapper is what carries the width: `flex-1` claims the
+                row's spare space and `min-w-[min(360px,100%)]` is the shared
+                floor every card in this view rides. A card placed directly in
+                the row (no wrapper) collapses to its content width. */}
+            <div className="lc-col flex-1 min-w-[min(360px,100%)]">
+              <ContextManagementPanel sessionId={sessionId} browser={browserCard} />
+            </div>
             <div className="lc-col flex-1 min-w-[min(360px,100%)]"><ContextManager sessionId={sessionId} /></div>
           </div>
         ) : null}
