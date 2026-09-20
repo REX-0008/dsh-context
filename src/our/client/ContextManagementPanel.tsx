@@ -55,7 +55,11 @@ export interface ContextManagementPanelProps {
    * switch, copy) so a section expands exactly like a tool schema.
    */
   browser: (hooks: {
-    systemRows: (row: BrowserRowBuilder, body: (name: string, text: string, extra?: ReactNode) => ReactNode) => ReactNode
+    systemRows: (
+      row: BrowserRowBuilder,
+      body: (name: string, text: string, extra?: ReactNode) => ReactNode,
+      toolbar: (value: string, onChange: (next: string) => void) => ReactNode,
+    ) => ReactNode
     systemCount: number
     /** Caption for the delivered-prompt row kept below the split list. */
     deliveredLabel: string
@@ -70,6 +74,7 @@ export function ContextManagementPanel({ sessionId, browser }: ContextManagement
   const [comparing, setComparing] = useState<string | null>(null)
   const [weightOpen, setWeightOpen] = useState<string | null>(null)
   const [weightDraft, setWeightDraft] = useState('')
+  const [query, setQuery] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -98,7 +103,18 @@ export function ContextManagementPanel({ sessionId, browser }: ContextManagement
   const systemRows = (
     row: BrowserRowBuilder,
     body: (name: string, text: string, extra?: ReactNode) => ReactNode,
-  ): ReactNode => (
+    toolbar: (value: string, onChange: (next: string) => void) => ReactNode,
+  ): ReactNode => {
+    // The row filter: matches a section's name, its source plugin, and its text,
+    // which is what makes a long section list navigable.
+    const needle = query.trim().toLowerCase()
+    const shown = needle === ''
+      ? sections
+      : sections.filter(section =>
+        section.name.toLowerCase().includes(needle)
+        || (section.plugin ?? '').toLowerCase().includes(needle)
+        || section.text.toLowerCase().includes(needle))
+    return (
     <>
       {stale ? (
         <div className="lc-br-note" title={'实际排序与内置对照表的数值不一致，表需要按当前 dsh 版本重新生成'}>
@@ -108,10 +124,16 @@ export function ContextManagementPanel({ sessionId, browser }: ContextManagement
       {sections.length === 0 ? (
         <div className="lc-br-note">{'该会话尚未组装过系统提示词：开始一轮对话后这里会列出各分节。'}</div>
       ) : null}
+      {/* The category's own filter toolbar, mounted even when nothing matches so
+          the filter can always be cleared. */}
+      {sections.length === 0 ? null : toolbar(query, setQuery)}
+      {sections.length > 0 && shown.length === 0 ? (
+        <div className="lc-br-note">{'没有匹配的分节。'}</div>
+      ) : null}
       {/* Scoped so the token-column alignment below applies to OUR rows only:
           upstream's tool/message rows keep their original figure width. */}
       <div className="lc-our-sections">
-      {sections.map((section) => {
+      {shown.map((section) => {
         const open = editing === section.name
         const weightEdited = section.weight !== undefined
         const weightValue = weightEdited ? section.weight : section.order
@@ -245,7 +267,8 @@ export function ContextManagementPanel({ sessionId, browser }: ContextManagement
       })}
       </div>
     </>
-  )
+    )
+  }
 
   // No card of our own: the panel IS the browser (its system category lists the
   // prompt's sections), so the title is retitled in place rather than framed by

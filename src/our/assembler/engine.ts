@@ -172,6 +172,44 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
     return modules.sort((a, b) => a.order - b.order)
   }
 
+  /**
+   * Resolve a live agent by its id.
+   *
+   * Read on demand rather than only tracked from `agent/created`: the registry
+   * is the authoritative source, and a panel opened for an agent that was
+   * created before this plugin mounted (or whose creation event this plugin
+   * never received) still resolves. Falls back to whatever the creation event
+   * already recorded.
+   * @param sessionId - the agent (= session) id.
+   * @returns the agent, or undefined when none is live under that id.
+   */
+  private agentFor(sessionId: string): Agent | undefined {
+    const tracked = this.agentBySession.get(sessionId)
+    if (tracked !== undefined) return tracked
+    try {
+      const agents = (this.hostCtx as unknown as {
+        agents?: { get(id: string): Agent | undefined }
+      } | undefined)?.agents
+      const found = agents?.get(sessionId)
+      if (found !== undefined) this.agentBySession.set(sessionId, found)
+      return found
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
+   * The host context, kept so agents can be resolved on demand (see `agentFor`).
+   * Set by the wiring; absent in a standalone engine, which then relies on
+   * `registerForAgent` alone.
+   */
+  private hostCtx: unknown
+
+  /** @inheritdoc */
+  setHostContext(ctx: unknown): void {
+    this.hostCtx = ctx
+  }
+
   /** @inheritdoc */
   registerForAgent(agent: Agent): void {
     this.agentBySession.set(agent.id, agent)
@@ -270,25 +308,26 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
 
   /** @inheritdoc */
   getModuleViewForSession(sessionId: string): PromptModule[] {
-    return this.agentBySession.has(sessionId) ? this.mergedModules(sessionId) : []
+    return this.agentFor(sessionId) === undefined ? [] : this.mergedModules(sessionId)
   }
 
   /** @inheritdoc */
   presetEntriesForSession(sessionId: string): PresetEntryInfo[] {
-    const agent = this.agentBySession.get(sessionId)
+    const agent = this.agentFor(sessionId)
     return agent === undefined ? [] : presetEntriesOf(agent, this.projectionReader)
   }
 
   /** @inheritdoc */
   async assembleSectionsForSession(sessionId: string): Promise<Array<{ name: string; text: string }> | null> {
-    // Prefer the UNFILTERED list captured by the assemble waterfall: it is the
-    // real assembly the loop built (and it includes sections this layer is
-    // currently suppressing, which the panel must still show).
+    // The UNFILTERED list captured by the assemble waterfall is the real
+    // assembly the loop built (and it includes sections this layer is currently
+    // suppressing, which the panel must still show). It only exists once a turn
+    // has assembled, so the service is asked directly otherwise — which is also
+    // why the agent is resolved on demand rather than tracked from an event.
+    const agent = this.agentFor(sessionId)
+    if (agent === undefined) return null
     const captured = this.lastSections.get(sessionId)
     if (captured !== undefined && captured.length > 0) return captured
-    // Cold start (no turn has assembled yet): ask the prompt service directly.
-    const agent = this.agentBySession.get(sessionId)
-    if (agent === undefined) return null
     try {
       const scope = scopeOf(agent.ctx)
       const assembly = await agent.ctx.systemPrompt.assemble(scope === undefined ? {} : { scope })

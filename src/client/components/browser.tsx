@@ -75,7 +75,16 @@ export interface ContextBrowserProps {
    * schemas, surface nodes) instead of a look-alike. A caller gets the same
    * builder the built-in rows use and returns the rows to show.
    */
-  systemRows?: (row: BrowserRowBuilder, body: (name: string, text: string, extra?: ReactNode) => ReactNode) => ReactNode
+  systemRows?: (
+    row: BrowserRowBuilder,
+    body: (name: string, text: string, extra?: ReactNode) => ReactNode,
+    /**
+     * Builds the category's filter toolbar bound to the CALLER's query state —
+     * the same toolbar the tools and surface categories use, so filtering looks
+     * and behaves identically here.
+     */
+    toolbar: (value: string, onChange: (next: string) => void) => ReactNode,
+  ) => ReactNode
   /**
    * OUR INSERT POINT (PATCHES.md #6): the `system` category's item count while
    * `systemRows` supplies the rows (the built-in count is the lone prompt row).
@@ -958,7 +967,11 @@ export function makeContextBrowser(
             : null
           return (
             <>
-              {props.systemRows(elemRow, (name, text, extra) => <SectionBody name={name} text={text} extraActions={extra} />)}
+              {props.systemRows(
+                elemRow,
+                (name, text, extra) => <SectionBody name={name} text={text} extraActions={extra} />,
+                (value, onChange) => <RowToolbar value={value} placeholder={t('browser.search.system')} onChange={onChange} />,
+              )}
               <div className="lc-br-divider" />
               {delivered}
             </>

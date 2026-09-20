@@ -16,6 +16,12 @@ export interface ContextAssemblerService {
    */
   setConfigReader(reader: () => import('../types').ContextPanelSettings): void
   /**
+   * Hand the engine the host context so it can resolve agents on demand
+   * (`ctx.agents.get`), instead of relying solely on creation-time tracking.
+   * @param ctx - the host plugin context.
+   */
+  setHostContext(ctx: unknown): void
+  /**
    * 新会话创建（agent/created）：按当前配置注册该 agent 的模块与工具限制，存注册快照。
    * @param agent - 新 agent。
    */

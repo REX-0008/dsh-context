@@ -341,6 +341,9 @@ export function applyOur(ctx: Context): void {
         applies: 'live',
       }) as unknown as SettingsScope<ContextPanelSettings>
       const engine = new ContextAssemblerEngine()
+      // The engine resolves agents on demand (an agent created before this
+      // plugin mounted still resolves), so it needs the host context.
+      engine.setHostContext(ctx)
       engine.setConfigReader(() => scope.get())
       // Live section-origin observation (placement order + registering package):
       // the assemble interface carries neither, so they are captured at the
