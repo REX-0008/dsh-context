@@ -68,7 +68,31 @@ export interface ContextBrowserProps {
    */
   detailState?: DetailState
   onDetailRetry?: () => void
+  /**
+   * OUR INSERT POINT (PATCHES.md #5): when supplied, the `system` category
+   * renders these entries as one row each — built through THIS component's own
+   * row renderer, so they are visually identical to every other row (tool
+   * schemas, surface nodes) instead of a look-alike. A caller gets the same
+   * builder the built-in rows use and returns the rows to show.
+   */
+  systemRows?: (row: BrowserRowBuilder) => ReactNode
+  /**
+   * OUR INSERT POINT (PATCHES.md #6): the `system` category's item count while
+   * `systemRows` supplies the rows (the built-in count is the lone prompt row).
+   */
+  systemCount?: number
 }
+
+/**
+ * Builds one browser row: the renderer behind every category row in this
+ * component (chevron, tag, preview, trailing chips, time, token figure, and the
+ * expanded body). Exposed to `systemRows` so a caller's rows are the real thing.
+ */
+export type BrowserRowBuilder = (
+  key: string, tag: ReactNode | null, preview: string,
+  tokens: number, time: number | undefined, body: ReactNode,
+  err?: boolean, trailing?: ReactNode,
+) => ReactNode
 
 interface ParamSchema {
   type?: unknown
@@ -800,13 +824,21 @@ export function makeContextBrowser(
       focusScrollRef.current = true
     }
 
-    const toolCount = (c: string): number => countOf(view, byCat, c)
+    // OUR INSERT POINT (PATCHES.md #7): a caller-supplied system row list also
+    // supplies that category's count, so the header reads "N items" like every
+    // other category instead of the built-in lone-prompt "1".
+    const toolCount = (c: string): number => {
+      if (c === 'system' && props.systemRows !== undefined) return props.systemCount ?? 0
+      return countOf(view, byCat, c)
+    }
 
     // A category holding exactly one item opens that row with the category, so
     // one click lands on the content directly (the lone prompt / tool schema /
     // surface node).
     const singleKeyOf = (c: string): string | null => {
-      if (c === 'system') return view.system !== null ? 'sys' : null
+      // With a caller's row list the category holds many rows, so opening it must
+      // reveal the list rather than auto-expanding one row.
+      if (c === 'system') return props.systemRows !== undefined ? null : (view.system !== null ? 'sys' : null)
       if (c === 'tools') {
         const tools = view.header?.tools
         return tools !== undefined && tools.length === 1 ? 'tool:' + tools[0].name : null
@@ -821,6 +853,7 @@ export function makeContextBrowser(
       // Empty cats stay shut — except system/tools with no header epoch, which open to explain the degradation note.
       const openable = toolCount(c) > 0
         || ((c === 'system' || c === 'tools') && view.header === null)
+        || (c === 'system' && props.systemRows !== undefined)
       if (!openable) return
       if (openCat === c) {
         setCat(null)
@@ -862,6 +895,11 @@ export function makeContextBrowser(
 
     const catBody = (c: string): ReactNode => {
       if (c === 'system') {
+        // OUR INSERT POINT (PATCHES.md #8): a caller may supply the rows for this
+        // category (used to split the joined prompt into per-section rows). The
+        // rows are built with THIS component's row builder, so they carry the
+        // same frame, chips and expansion as every other row.
+        if (props.systemRows !== undefined) return props.systemRows(elemRow)
         // No prompt in force at this step. The category only opens without one
         // when there is no header epoch at all (the openable guard above), so
         // the note names the missing PROJECTION — no headers service versus

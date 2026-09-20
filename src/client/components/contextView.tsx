@@ -39,6 +39,7 @@ import { aggregateByTurn, attachMarkers, jumpTargetOf, makeTrendChart, turnSteps
 import { subscribeContextFocus, takeContextFocus } from '../viewFocus'
 import { revealInScrollParent } from '../revealScroll'
 import { makeErrorBoundary } from './errorBoundary'
+import type { ContextBrowserProps } from './browser'
 // OUR INSERT POINT (PATCHES.md #3): the context-management card (see src/our/).
 import { ContextManager } from '../../our/client/ContextManager'
 import { ContextManagementPanel } from '../../our/client/ContextManagementPanel'
@@ -507,7 +508,11 @@ export function makeContextView(
           )}
       </div>
     )
-    const browserCard = (
+    // The browser's props are identical wherever it is mounted; only the
+    // `system` category's rows differ, and only when a caller supplies them
+    // (see our context-management panel). Keeping this a builder lets the same
+    // browser serve both places without duplicating the prop list.
+    const browser = (hooks?: { systemRows?: ContextBrowserProps['systemRows']; systemCount?: number }): ReactElement => (
       <ContextBrowser
         data={data}
         headers={headers}
@@ -524,8 +529,10 @@ export function makeContextView(
         loadImage={loadImage}
         detailState={source.detailState}
         onDetailRetry={source.retryDetail}
+        {...(hooks ?? {})}
       />
     )
+    const browserCard = browser()
 
     return (
       <div className="lc-root" ref={rootRef}>
@@ -562,7 +569,7 @@ export function makeContextView(
                 floor every card in this view rides. A card placed directly in
                 the row (no wrapper) collapses to its content width. */}
             <div className="lc-col flex-1 min-w-[min(360px,100%)]">
-              <ContextManagementPanel sessionId={sessionId} browser={browserCard} />
+              <ContextManagementPanel sessionId={sessionId} browser={hooks => browser(hooks)} />
             </div>
             <div className="lc-col flex-1 min-w-[min(360px,100%)]"><ContextManager sessionId={sessionId} /></div>
           </div>
