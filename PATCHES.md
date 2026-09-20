@@ -51,57 +51,35 @@ import { applyOur } from '../our/index'
 import { ContextManager } from '../../our/client/ContextManager'
 ```
 
-## 4. `src/client/components/contextView.tsx` — the management card row
+## 4. `src/client/components/contextView.tsx` — our own row of cards
 
 **Anchor**: inside the returned tree, immediately **before**
 `<div className="lc-cols lc-cols-main">`
 
 ```tsx
-        {/* OUR INSERT POINT (PATCHES.md #4): the write layer's management card,
-            one full-width row above the read-only columns. */}
-        {typeof sessionId === 'string' ? <ContextManager sessionId={sessionId} /> : null}
+        {/* OUR INSERT POINT (PATCHES.md #4): the write layer's own row — the new
+            context-management panel (his browser shell, our section editing)
+            beside the older management card. One card per column keeps both
+            readable at the shared 360px floor. */}
+        {typeof sessionId === 'string' ? (
+          <div className="lc-cols lc-cols-main">
+            <div className="lc-col flex-1 min-w-[min(360px,100%)]"><ContextBrowserPanel sessionId={sessionId} /></div>
+            <div className="lc-col flex-1 min-w-[min(360px,100%)]"><ContextManager sessionId={sessionId} /></div>
+          </div>
+        ) : null}
 ```
 
-## 5. `src/client/components/browser.tsx` — the `rowAction` prop
-
-**Anchor**: `ContextBrowserProps`, right after `onDetailRetry?: () => void`
+with the matching imports next to #3:
 
 ```ts
-  /**
-   * OUR INSERT POINT (PATCHES.md #5): an optional per-row action renderer. The
-   * write layer passes this to hang its own controls (e.g. a tool on/off
-   * switch) on a row's trailing slot; absent, rendering is byte-identical to
-   * upstream. `kind` names the row family, `name` the thing it is about.
-   */
-  rowAction?: (kind: 'tool' | 'system', name: string) => ReactNode
+import { ContextManager } from '../../our/client/ContextManager'
+import { ContextBrowserPanel } from '../../our/client/ContextBrowserPanel'
 ```
 
-## 6. `src/client/components/browser.tsx` — the render hook
-
-**Anchor**: in the tool row's `trailing` fragment, right after the hits chip line
-`<span className="lc-br-hits" ...>{'×' + fmt(toolHitsOf(tool))}</span>`
-
-```tsx
-                  {props.rowAction !== undefined ? props.rowAction('tool', tool.name) : null}
-```
-
-## 7. `src/client/components/contextView.tsx` — passing the row action
-
-**Anchor**: the `<ContextBrowser …/>` element, right after `onDetailRetry={source.retryDetail}`
-
-```tsx
-        /* OUR INSERT POINT (PATCHES.md #6): the write layer's per-row action. */
-        rowAction={typeof sessionId === 'string'
-          ? (kind, name) => (kind === 'tool' ? <ToolToggle sessionId={sessionId} toolName={name} /> : null)
-          : undefined}
-```
-
-with the matching import next to #3:
-
-```ts
-import { ToolToggle } from '../../our/client/ToolToggle'
-```
-
+> History: insert points #5/#6 (a `rowAction` prop on `browser.tsx`) were
+> **reverted** — the write layer now renders upstream's browser as a whole
+> component inside its own card, so `browser.tsx` is back to byte-identical with
+> upstream. Only the two insert points above remain.
 ---
 
 ## Local identity (not an insert point)

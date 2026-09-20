@@ -131,7 +131,7 @@ export function ContextManager({ sessionId }: { sessionId: string }): ReactEleme
   return (
     <div className="lc-card">
       <div className="lc-card-title">
-        <span className="lc-card-title-text">{'上下文管理'}</span>
+        <span className="lc-card-title-text">{'上下文管理-旧'}</span>
         <span className="lc-br-tag">{scope === 'conversation' ? '本对话' : 'Agent'}</span>
         {dirty ? <span className="lc-br-tag">{'有未应用的修改'}</span> : null}
       </div>

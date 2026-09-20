@@ -130,6 +130,12 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
    * the engine usable standalone (the panel then simply shows no preset origin).
    */
   private projectionReader: (agent: Agent, key: string) => unknown = () => undefined
+  /**
+   * The last UNFILTERED section list seen by this agent's assemble waterfall.
+   * The panel reads it so a disabled section still appears (greyed) and can be
+   * switched back on; the delivered assembly alone cannot show what was removed.
+   */
+  private readonly lastSections = new Map<string, Array<{ name: string; text: string }>>()
 
   /** @inheritdoc */
   setProjectionReader(reader: (agent: Agent, key: string) => unknown): void {
@@ -173,13 +179,19 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
       this.registered.set(agent.id, { disposers: new Map(), toolRestrictionsDisposers: [], snapshotDigest: '', pending: false })
     }
     const current = this.registered.get(agent.id)!
-    // 全局 section 开关：assemble 瀑布里移除被禁用的 section（每 agent 注册一次，不随模块重注册）。
+    // The assemble waterfall is where "read → intercept → rewrite → send" happens
+    // (packages/core/system-prompt: the waterfall hands every listener the
+    // sectioned assembly, and the returned value is what the loop renders).
+    // Registered once per agent; the config is read live so edits apply without
+    // re-registering.
     if (current.waterfallDisposer === undefined) {
       current.waterfallDisposer = agent.ctx.on('system-prompt/assemble', async (assembly, _context, next) => {
         const transformed = await next()
-        const disabled = new Set(this.getConfig().disabledSections ?? [])
-        if (disabled.size === 0) return transformed
-        return { ...transformed, sections: transformed.sections.filter((s) => !disabled.has(s.name)) }
+        // Record the UNFILTERED section list first: the panel must be able to
+        // list a disabled section (greyed out) and let the user re-enable it,
+        // so the pre-filter view is the one worth keeping.
+        this.lastSections.set(agent.id, transformed.sections.map(s => ({ name: s.name, text: s.text })))
+        return this.rewriteSections(agent.id, transformed)
       })
     }
     this.reregister(agent, current)
@@ -268,6 +280,12 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
 
   /** @inheritdoc */
   async assembleSectionsForSession(sessionId: string): Promise<Array<{ name: string; text: string }> | null> {
+    // Prefer the UNFILTERED list captured by the assemble waterfall: it is the
+    // real assembly the loop built (and it includes sections this layer is
+    // currently suppressing, which the panel must still show).
+    const captured = this.lastSections.get(sessionId)
+    if (captured !== undefined && captured.length > 0) return captured
+    // Cold start (no turn has assembled yet): ask the prompt service directly.
     const agent = this.agentBySession.get(sessionId)
     if (agent === undefined) return null
     try {
@@ -277,6 +295,47 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
     } catch {
       return null
     }
+  }
+
+  /**
+   * Apply this layer's decisions to one assembly: drop disabled sections,
+   * substitute edited text, and re-order by the configured weights.
+   *
+   * The other two source kinds need no prompt rewrite — our own modules are
+   * registered by this plugin (so their text is already ours) and preset text
+   * is written back to the preset file — which is why only "plugin" sections
+   * end up needing an override here.
+   * @param agentId - the agent whose config applies.
+   * @param assembly - the assembly produced by upstream listeners.
+   * @returns the assembly to send onward.
+   */
+  private rewriteSections<T extends { sections: Array<{ name: string; text: string }> }>(agentId: string, assembly: T): T {
+    const config = this.getConfig()
+    const disabled = new Set(config.disabledSections ?? [])
+    const overrides = config.sectionOverrides?.[agentId] ?? {}
+    const weights = config.sectionWeights?.[agentId] ?? {}
+    if (disabled.size === 0 && Object.keys(overrides).length === 0 && Object.keys(weights).length === 0) return assembly
+    const sections = assembly.sections
+      .filter(section => !disabled.has(section.name))
+      .map(section => {
+        const override = overrides[section.name]
+        return override === undefined ? section : { ...section, text: override }
+      })
+    // Re-order ONLY the weighted sections: they are sorted by their weight and
+    // placed at the positions the weighted members already occupied, so an
+    // untouched section never drifts (a plain sort would push every unweighted
+    // section to one end and silently rewrite the prompt).
+    const weighted = sections.filter(section => weights[section.name] !== undefined)
+    if (weighted.length > 1) {
+      const ordered = [...weighted].sort((a, b) => (weights[a.name] as number) - (weights[b.name] as number))
+      let next = 0
+      for (let i = 0; i < sections.length; i += 1) {
+        if (weights[sections[i].name] === undefined) continue
+        sections[i] = ordered[next]
+        next += 1
+      }
+    }
+    return { ...assembly, sections }
   }
 
   /** 渲染当前生效模块为一段可读文本（快照/展示用）。 */

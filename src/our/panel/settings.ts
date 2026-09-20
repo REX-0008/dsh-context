@@ -46,6 +46,9 @@ export const CONTEXT_PANEL_SCHEMA: z<ContextPanelSettings> = z.object({
   conversationOverrides: z.dict(z.dict(PatchSchema)),
   toolRestrictions: z.dict(z.object({ allow: z.array(z.string()), deny: z.array(z.string()) })),
   disabledSections: z.array(z.string()),
+  sectionOverrides: z.dict(z.dict(z.string())),
+  sectionWeights: z.dict(z.dict(z.number())),
+  sectionOriginals: z.dict(z.dict(z.string())),
 })
 
 /** 合并两段补丁（后者覆盖前者，undefined 字段忽略）。 */

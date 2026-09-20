@@ -64,6 +64,23 @@ export interface ContextPanelSettings {
   toolRestrictions: Record<string, { allow?: string[]; deny?: string[] }>
   /** 全局注入的 section 开关（按 section 名；waterfall 组装时移除被禁用的）。 */
   disabledSections: string[]
+  /**
+   * Per-agent section text overrides, keyed by section name: the "plugin"
+   * source kind is adjusted here instead of in its own file, so a third-party
+   * plugin's prompt can be rewritten without touching that plugin.
+   */
+  sectionOverrides?: Record<string, Record<string, string>>
+  /**
+   * Per-agent section weights, keyed by section name. Editing a number
+   * re-orders the prompt; sections without a weight keep their position.
+   */
+  sectionWeights?: Record<string, Record<string, number>>
+  /**
+   * What an overridden section's original text looked like when it was edited,
+   * one backup per section. When the plugin later changes that original, the
+   * two differ and the panel offers a comparison.
+   */
+  sectionOriginals?: Record<string, Record<string, string>>
 }
 
 /** 空配置（settings 未就绪时的兜底）。 */
@@ -75,4 +92,7 @@ export const EMPTY_CONFIG: ContextPanelSettings = {
   conversationOverrides: {},
   toolRestrictions: {},
   disabledSections: [],
+  sectionOverrides: {},
+  sectionWeights: {},
+  sectionOriginals: {},
 }

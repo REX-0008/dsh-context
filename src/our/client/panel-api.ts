@@ -19,12 +19,32 @@ export interface PresetEntryInfo {
   config?: unknown
 }
 
-/** One assembled system-prompt section (exact section name plus text, order-sorted). */
+/**
+ * Where a section comes from, which decides how an edit is applied.
+ * - `config`: one of our own modules — edited in our settings, effective at once;
+ * - `preset`: injected by a preset (agent recipe) — written back to the preset file, next session;
+ * - `plugin`: a plugin's (or the harness's own) section — adjusted on the way out, its file untouched.
+ */
+export type SectionKind = 'config' | 'preset' | 'plugin'
+
+/** One assembled system-prompt section, decorated for the panel. */
 export interface SystemSectionInfo {
   /** Section name (e.g. harness:identity / deployment:persona / tool:* / our:*). */
   name: string
-  /** The resolved text. */
+  /** The resolved text: the edited one when an edit exists, otherwise the original. */
   text: string
+  /** Where this section comes from. */
+  kind: SectionKind
+  /** False when the user has switched this section off (it stays listed, greyed). */
+  enabled: boolean
+  /** True when the text has been edited by the user. */
+  edited: boolean
+  /** True when the plugin's original has changed since the edit (offers a comparison). */
+  originalChanged: boolean
+  /** The plugin's current text; present only while `originalChanged` (for the comparison). */
+  originalText?: string
+  /** Ordering weight, when one is set. */
+  weight?: number
 }
 
 /** The state route's value. */

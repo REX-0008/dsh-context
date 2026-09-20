@@ -39,6 +39,21 @@ interface Wiring {
   engine?: ContextAssemblerService
 }
 
+/**
+ * Classify a section by where it comes from, which decides how an edit must be
+ * applied: our own modules are edited in our settings; preset-injected sections
+ * are written back to the preset file (next session); everything else is a
+ * plugin's text and is adjusted on the way out, never in the plugin's file.
+ * @param name - the section name as the assembly reports it.
+ * @returns the source kind.
+ */
+function inferKind(name: string): 'preset' | 'plugin' {
+  // Preset-mounted plugins contribute named sections (deployment:* is the
+  // persona line; plan:* comes from the plan-mode row). Anything else is a
+  // plugin/native section, which is the majority and the adjust-on-send case.
+  return name.startsWith('deployment:') ? 'preset' : 'plugin'
+}
+
 /** GET /api/context-panel-write/state — settings + dirty + section attribution. */
 function stateHandler(wiring: Wiring) {
   return async (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse): Promise<void> => {
@@ -49,7 +64,38 @@ function stateHandler(wiring: Wiring) {
       // Per-section assembly (the ONLY source of section-level truth: the
       // rendered system message is already joined into one string before it is
       // logged, so the split is read in-process from systemPrompt.assemble()).
-      const systemSections = engine === undefined ? null : await engine.assembleSectionsForSession(sessionId)
+      const sections = engine === undefined ? null : await engine.assembleSectionsForSession(sessionId)
+      const value = scope === undefined ? null : scope.get()
+      // Decorate each section for the panel: source kind, whether it is
+      // currently suppressed, whether its text was edited, and — when the
+      // plugin has since changed the original — that the backup no longer
+      // matches (which is what offers a comparison).
+      const disabled = new Set(value?.disabledSections ?? [])
+      const overrides = value?.sectionOverrides?.[sessionId] ?? {}
+      const weights = value?.sectionWeights?.[sessionId] ?? {}
+      const originals = value?.sectionOriginals?.[sessionId] ?? {}
+      const ownModules = new Set(
+        engine === undefined ? [] : engine.getModuleViewForSession(sessionId).map(m => m.name),
+      )
+      const systemSections = sections === null ? null : sections.map((section) => {
+        const edited = overrides[section.name] !== undefined
+        const backup = originals[section.name]
+        // "Changed" compares the ONE stored backup against the plugin's CURRENT
+        // text: the backup is what the text looked like when it was edited, so a
+        // difference means the plugin moved on underneath our edit.
+        const originalChanged = edited && backup !== undefined && backup !== section.text
+        return {
+          name: section.name,
+          text: edited ? (overrides[section.name] as string) : section.text,
+          kind: ownModules.has(section.name) ? 'config' as const : inferKind(section.name),
+          enabled: !disabled.has(section.name),
+          edited,
+          originalChanged,
+          /** The plugin's current text, delivered only for the comparison. */
+          ...(originalChanged ? { originalText: section.text } : {}),
+          weight: weights[section.name],
+        }
+      })
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })
       res.end(JSON.stringify({
         ok: true,
@@ -94,6 +140,69 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
     if (enabled) current.delete(name)
     else current.add(name)
     return scope.update({ disabledSections: [...current] })
+  },
+  /**
+   * Edit one section's text. The first edit also stores a backup of the
+   * plugin's original; later edits keep that single backup (the panel only
+   * needs one "what it used to be" per section).
+   */
+  setSectionText: async ({ scope, p, sessionId }) => {
+    const name = String(p.name)
+    const text = String(p.text ?? '')
+    const value = scope.get()
+    const overrides = { ...(value.sectionOverrides ?? {}) }
+    const session = { ...(overrides[sessionId] ?? {}) }
+    session[name] = text
+    overrides[sessionId] = session
+    const originals = { ...(value.sectionOriginals ?? {}) }
+    const sessionOriginals = { ...(originals[sessionId] ?? {}) }
+    if (typeof p.original === 'string' && sessionOriginals[name] === undefined) {
+      sessionOriginals[name] = p.original
+    }
+    originals[sessionId] = sessionOriginals
+    await scope.update({ sectionOverrides: overrides, sectionOriginals: originals })
+  },
+  /** Drop an edit: the plugin's own text is used again (its backup goes too). */
+  clearSectionText: async ({ scope, p, sessionId }) => {
+    const name = String(p.name)
+    const value = scope.get()
+    const overrides = { ...(value.sectionOverrides ?? {}) }
+    const session = { ...(overrides[sessionId] ?? {}) }
+    delete session[name]
+    overrides[sessionId] = session
+    const originals = { ...(value.sectionOriginals ?? {}) }
+    const sessionOriginals = { ...(originals[sessionId] ?? {}) }
+    delete sessionOriginals[name]
+    originals[sessionId] = sessionOriginals
+    await scope.update({ sectionOverrides: overrides, sectionOriginals: originals })
+  },
+  /**
+   * Accept the plugin's current text as the new baseline after a comparison:
+   * the edit is dropped and the backup is replaced, so the reminder clears.
+   */
+  acceptSectionOriginal: async ({ scope, p, sessionId }) => {
+    const name = String(p.name)
+    const value = scope.get()
+    const overrides = { ...(value.sectionOverrides ?? {}) }
+    const session = { ...(overrides[sessionId] ?? {}) }
+    delete session[name]
+    overrides[sessionId] = session
+    const originals = { ...(value.sectionOriginals ?? {}) }
+    const sessionOriginals = { ...(originals[sessionId] ?? {}) }
+    delete sessionOriginals[name]
+    originals[sessionId] = sessionOriginals
+    await scope.update({ sectionOverrides: overrides, sectionOriginals: originals })
+  },
+  /** Set (or clear, with null) one section's ordering weight. */
+  setSectionWeight: async ({ scope, p, sessionId }) => {
+    const name = String(p.name)
+    const value = scope.get()
+    const weights = { ...(value.sectionWeights ?? {}) }
+    const session = { ...(weights[sessionId] ?? {}) }
+    if (p.weight === null || p.weight === undefined) delete session[name]
+    else session[name] = Number(p.weight)
+    weights[sessionId] = session
+    await scope.update({ sectionWeights: weights })
   },
   apply: ({ service, sessionId }) => service.applyChanges(sessionId),
   editSkillDirs: ({ service, p, sessionId }) => service.editSkillDirs((p.dirs as string[] | undefined) ?? [], sessionId),

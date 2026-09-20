@@ -68,13 +68,6 @@ export interface ContextBrowserProps {
    */
   detailState?: DetailState
   onDetailRetry?: () => void
-  /**
-   * OUR INSERT POINT (PATCHES.md #5): an optional per-row action renderer. The
-   * write layer passes this to hang its own controls (e.g. a tool on/off
-   * switch) on a row's trailing slot; absent, rendering is byte-identical to
-   * upstream. `kind` names the row family, `name` the thing it is about.
-   */
-  rowAction?: (kind: 'tool' | 'system', name: string) => ReactNode
 }
 
 interface ParamSchema {
@@ -974,7 +967,6 @@ export function makeContextBrowser(
                     </span>
                     : null}
                   <span className="lc-br-hits" title={t('tool.hitsTip')}>{'×' + fmt(toolHitsOf(tool))}</span>
-                  {props.rowAction !== undefined ? props.rowAction('tool', tool.name) : null}
                 </>
               )
               return elemRow('tool:' + tool.name, null, tool.name, tool.tokens, undefined,
