@@ -41,7 +41,7 @@ import { revealInScrollParent } from '../revealScroll'
 import { makeErrorBoundary } from './errorBoundary'
 // OUR INSERT POINT (PATCHES.md #3): the context-management card (see src/our/).
 import { ContextManager } from '../../our/client/ContextManager'
-import { ContextBrowserPanel } from '../../our/client/ContextBrowserPanel'
+import { ContextManagementPanel } from '../../our/client/ContextManagementPanel'
 
 // The context page scrolls inside the conversation's shared `[data-conversation-scroll]` container, which the chat bottom-anchors — mirror
 // the chat's chatScroll pattern: a module-level per-session position ledger (survives tab remounts), restored once content renders; first
@@ -552,22 +552,20 @@ export function makeContextView(
             All columns share the 360px floor (`min-w-[min(360px,100%)]`): the
             rows wrap at it, and a sub-360px pane narrows the column instead
             of overflowing. */}
-        {/* OUR INSERT POINT (PATCHES.md #4): the write layer's own row — the new
-            context-management panel (his browser shell, our section editing)
-            beside the older management card. One card per column keeps both
-            readable at the shared 360px floor. */}
+        {/* OUR INSERT POINT (PATCHES.md #4): the write layer's own row. Our panel
+            IS upstream's browser with a section list on top (same component,
+            same props), so the browser lives inside it — not beside it. */}
         {typeof sessionId === 'string' ? (
           <div className="lc-cols lc-cols-main">
-            <div className="lc-col flex-1 min-w-[min(360px,100%)]"><ContextBrowserPanel sessionId={sessionId} /></div>
+            <ContextManagementPanel sessionId={sessionId} browser={browserCard} />
             <div className="lc-col flex-1 min-w-[min(360px,100%)]"><ContextManager sessionId={sessionId} /></div>
           </div>
         ) : null}
 
         <div className="lc-cols lc-cols-main">
           <div className="lc-col flex-1 min-w-[min(360px,100%)]">{compositionCard}{trendCard}</div>
-          {/* `lc-col-browser` stretches the browser card to the left column's
-              height; the /context modal, which draws its own stack, must stay
-              content-sized. */}
+          {/* In his own tab the browser still sits in its own column; our panel
+              above carries a second instance for the management view. */}
           <div className="lc-col lc-col-browser flex-1 min-w-[min(360px,100%)]">{browserCard}</div>
         </div>
 

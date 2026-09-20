@@ -1,23 +1,26 @@
 /**
- * The context-management panel: upstream's Context browser shell with our
- * section controls on top.
+ * The context-management panel: upstream's Context browser with our
+ * system-prompt section controls placed above it, inside the same card.
  *
- * Layout (top to bottom):
- * 1. **Our system-prompt section list** — one row per section, in upstream's own
- *    row style, carrying the source tag (config / preset / plugin), an editable
- *    ordering weight, the section's size, an on/off switch and an edit entry.
- * 2. Upstream's **Context browser** below it, unchanged: that is the "what the
- *    model actually received" record, and it is what makes this panel a full
- *    replacement for upstream's own tab.
+ * This is deliberately "his browser plus our content", not a new list:
+ * the browser is rendered by upstream's own `makeContextBrowser` factory with
+ * the very props upstream's view passes, so the DNA switch, the step picker
+ * ("current / next request"), the estimate-vs-actual totals and the composition
+ * bar all behave exactly as they do in upstream's tab. The only addition is the
+ * section list on top.
  *
- * Why the split: the assembled system prompt is joined into ONE string before
- * it reaches the log, so the per-section split exists only in-process (the
- * plugin's own state route reads it off `systemPrompt.assemble()`). Upstream has
- * no per-section view at all — everything above the browser is our addition.
+ * Why the section list has to live here: the assembled system prompt is joined
+ * into ONE string before it reaches the session log, so a per-section split
+ * exists only in-process (our own state route reads it off
+ * `systemPrompt.assemble()`). Upstream therefore has no per-section view at all.
  *
- * @module @our/context-panel-write/our/client/ContextBrowserPanel
+ * The data props are the SAME ones upstream's view computes for its browser
+ * card; phase 2 (replacing upstream's view wholesale) will supply them from this
+ * panel's own plumbing instead of being handed down.
+ *
+ * @module @our/context-panel-write/our/client/ContextManagementPanel
  */
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactElement, type ReactNode } from 'react'
 import { dispatchAction, fetchState, type PanelState, type SectionKind, type SystemSectionInfo } from './panel-api'
 
 /** Human label per source kind. */
@@ -39,17 +42,26 @@ function sizeOf(text: string): number {
   return Math.ceil(text.length / 4) + 4
 }
 
-/** Props: the session this panel is looking at. */
-export interface ContextBrowserPanelProps {
+/** Props: the session, plus upstream's browser already rendered by the caller. */
+export interface ContextManagementPanelProps {
   sessionId: string
+  /**
+   * Upstream's browser card as a ready element. The caller builds it with the
+   * same props upstream's own view passes, so this panel gets that browser
+   * verbatim (DNA switch, step picker, totals, composition bar included) rather
+   * than a re-implementation of it.
+   */
+  browser: ReactNode
 }
 
-/** The panel (his browser shell + our section controls). */
-export function ContextBrowserPanel({ sessionId }: ContextBrowserPanelProps): ReactElement {
+/** The panel: our section controls above upstream's browser, one card. */
+export function ContextManagementPanel(props: ContextManagementPanelProps): ReactElement {
+  const { sessionId, browser } = props
   const [state, setState] = useState<PanelState | null>(null)
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [comparing, setComparing] = useState<string | null>(null)
+  const [collapsed, setCollapsed] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -74,23 +86,7 @@ export function ContextBrowserPanel({ sessionId }: ContextBrowserPanelProps): Re
     }
   }, [refresh, sessionId])
 
-  const toggle = (section: SystemSectionInfo): void => {
-    void dispatch('setGlobalSectionEnabled', { name: section.name, enabled: !section.enabled }, )
-  }
-
-  const saveEdit = (section: SystemSectionInfo): void => {
-    void dispatch('setSectionText', { name: section.name, text: draft, original: section.text })
-      .then(() => setEditing(null))
-  }
-
-  const clearEdit = (section: SystemSectionInfo): void => {
-    void dispatch('clearSectionText', { name: section.name }).then(() => { setComparing(null); setEditing(null) })
-  }
-
-  const setWeight = (section: SystemSectionInfo, raw: string): void => {
-    const trimmed = raw.trim()
-    void dispatch('setSectionWeight', { name: section.name, weight: trimmed === '' ? null : Number(trimmed) })
-  }
+  const offCount = sections.filter(section => !section.enabled).length
 
   return (
     <div className="lc-card">
@@ -98,41 +94,50 @@ export function ContextBrowserPanel({ sessionId }: ContextBrowserPanelProps): Re
         <span className="lc-card-title-text">{'上下文管理'}</span>
         <span className="lc-br-tag">{'系统提示词分节'}</span>
         {state?.dirty === true ? <span className="lc-br-tag">{'有未应用的修改'}</span> : null}
+        <button type="button" className="lc-gran-btn"
+          onClick={() => setCollapsed(value => !value)}>
+          {collapsed ? '展开分节' : '收起分节'}
+        </button>
       </div>
 
       {error !== null ? <div className="lc-error">{error}</div> : null}
 
-      {sections.length === 0 ? (
+      {collapsed ? (
+        <div className="lc-empty">
+          {sections.length === 0
+            ? '（开始一轮对话后可列出系统提示词分节）'
+            : '共 ' + String(sections.length) + ' 节' + (offCount > 0 ? '，其中 ' + String(offCount) + ' 节已停用' : '')}
+        </div>
+      ) : null}
+
+      {!collapsed && sections.length === 0 ? (
         <div className="lc-empty">{'（该会话尚未组装过系统提示词：开始一轮对话后这里会列出各分节）'}</div>
       ) : null}
 
-      {sections.map((section) => {
+      {!collapsed ? sections.map((section) => {
         const open = editing === section.name
         return (
-          <div key={section.name} className={'lc-br-elem' + (section.enabled ? '' : ' lc-br-cat-empty')}
-            style={section.enabled ? undefined : { opacity: 0.55 }}>
+          <div key={section.name} className="lc-br-elem" style={section.enabled ? undefined : { opacity: 0.5 }}>
             <div className="lc-br-elem-row" title={KIND_HINT[section.kind]}>
-              <span className="lc-br-chev" />
               <span className="lc-br-tag">{KIND_LABEL[section.kind]}</span>
               <span className="lc-br-preview">{section.name}</span>
-              {section.edited ? <span className="lc-br-tag" title={'已修改过：发出去的是你的版本'}>{'已改'}</span> : null}
+              {section.edited ? <span className="lc-br-tag" title={'已修改：发出去的是你的版本'}>{'已改'}</span> : null}
               {section.originalChanged ? (
-                <button type="button" className="lc-br-tag"
-                  title={'插件的原文已变化，点击查看对比'}
+                <button type="button" className="lc-br-tag" title={'插件的原文已变化，点击查看对比'}
                   onClick={(event) => { event.stopPropagation(); setComparing(comparing === section.name ? null : section.name) }}>
                   {'原文已变 · 对比'}
                 </button>
               ) : null}
               <span className="lc-br-tokens">{'≈' + String(sizeOf(section.text))}</span>
-              <input
-                className="lc-br-hits"
-                style={{ width: '5em' }}
+              <input className="lc-br-hits" style={{ width: '5em' }}
                 defaultValue={section.weight === undefined ? '' : String(section.weight)}
-                title={'排序权重：填数字即可调整顺序（留空 = 保持原位置）'}
-                onBlur={(event) => setWeight(section, event.target.value)}
-              />
+                title={'排序权重：填数字调整顺序（留空 = 保持原位置）'}
+                onBlur={(event) => {
+                  const raw = event.target.value.trim()
+                  void dispatch('setSectionWeight', { name: section.name, weight: raw === '' ? null : Number(raw) })
+                }} />
               <button type="button" className="lc-gran-btn"
-                onClick={(event) => { event.stopPropagation(); toggle(section) }}>
+                onClick={(event) => { event.stopPropagation(); void dispatch('setGlobalSectionEnabled', { name: section.name, enabled: !section.enabled }) }}>
                 {section.enabled ? '停用' : '启用'}
               </button>
               <button type="button" className="lc-gran-btn"
@@ -153,7 +158,8 @@ export function ContextBrowserPanel({ sessionId }: ContextBrowserPanelProps): Re
                     <pre className="lc-br-preview" style={{ whiteSpace: 'pre-wrap' }}>{section.originalText ?? ''}</pre>
                   </div>
                 </div>
-                <button type="button" className="lc-gran-btn" onClick={() => clearEdit(section)}>
+                <button type="button" className="lc-gran-btn"
+                  onClick={() => { void dispatch('clearSectionText', { name: section.name }).then(() => setComparing(null)) }}>
                   {'以插件新原文为准（放弃我的修改）'}
                 </button>
               </div>
@@ -164,16 +170,21 @@ export function ContextBrowserPanel({ sessionId }: ContextBrowserPanelProps): Re
                 <textarea value={draft} onChange={(event) => setDraft(event.target.value)} rows={8}
                   style={{ width: '100%' }} />
                 <div>
-                  <button type="button" className="lc-gran-btn" onClick={() => saveEdit(section)}>{'保存'}</button>
+                  <button type="button" className="lc-gran-btn"
+                    onClick={() => { void dispatch('setSectionText', { name: section.name, text: draft, original: section.text }).then(() => setEditing(null)) }}>
+                    {'保存'}
+                  </button>
                   <button type="button" className="lc-gran-btn" onClick={() => setEditing(null)}>{'取消'}</button>
                 </div>
               </div>
             ) : null}
           </div>
         )
-      })}
+      }) : null}
 
-      <div className="lc-empty">{'上面的开关只决定"发不发出去"；下方是模型实际收到的原文。'}</div>
+      {/* Upstream's own Context browser: identical to the one in his tab,
+          because it IS the same component with the same props. */}
+      {browser}
     </div>
   )
 }
