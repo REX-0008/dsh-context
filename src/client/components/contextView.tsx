@@ -40,6 +40,7 @@ import { subscribeContextFocus, takeContextFocus } from '../viewFocus'
 import { revealInScrollParent } from '../revealScroll'
 import { makeErrorBoundary } from './errorBoundary'
 import type { ContextBrowserProps } from './browser'
+import { makeRichText } from './richText'
 // OUR INSERT POINT (PATCHES.md #3): the context-management card (see src/our/).
 import { ContextManager } from '../../our/client/ContextManager'
 import { ContextManagementPanel } from '../../our/client/ContextManagementPanel'
@@ -76,6 +77,10 @@ export function makeContextView(
   const UpgradeGate = makeUpgradeGate(kit)
   const DetailNote = makeDetailNote(kit)
   const ContextBrowser = makeContextBrowser(kit, StackedBar, settings)
+  // The rich-text kit (rendered Markdown / raw / copy) the browser builds for its
+  // own detail sections; built here too so the management panel's section bodies
+  // render through the same code path.
+  const richKit = makeRichText(kit)
   const AgentGraph = makeAgentGraph(ctx, kit, heads)
   const ErrorBoundary = makeErrorBoundary(t)
 
@@ -512,7 +517,12 @@ export function makeContextView(
     // `system` category's rows differ, and only when a caller supplies them
     // (see our context-management panel). Keeping this a builder lets the same
     // browser serve both places without duplicating the prop list.
-    const browser = (hooks?: { systemRows?: ContextBrowserProps['systemRows']; systemCount?: number }): ReactElement => (
+    const browser = (hooks?: {
+      systemRows?: ContextBrowserProps['systemRows']
+      systemCount?: number
+      systemDeliveredLabel?: string
+      titleOverride?: string
+    }): ReactElement => (
       <ContextBrowser
         data={data}
         headers={headers}
@@ -569,7 +579,8 @@ export function makeContextView(
                 floor every card in this view rides. A card placed directly in
                 the row (no wrapper) collapses to its content width. */}
             <div className="lc-col flex-1 min-w-[min(360px,100%)]">
-              <ContextManagementPanel sessionId={sessionId} browser={hooks => browser(hooks)} />
+              <ContextManagementPanel sessionId={sessionId} rich={richKit}
+                browser={hooks => browser({ ...hooks, titleOverride: '上下文管理' })} />
             </div>
             <div className="lc-col flex-1 min-w-[min(360px,100%)]"><ContextManager sessionId={sessionId} /></div>
           </div>

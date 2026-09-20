@@ -81,6 +81,20 @@ export interface ContextBrowserProps {
    * `systemRows` supplies the rows (the built-in count is the lone prompt row).
    */
   systemCount?: number
+  /**
+   * OUR INSERT POINT (PATCHES.md #9): label for the delivered-prompt row kept
+   * under a caller-supplied `systemRows` list — the single whole-prompt row
+   * upstream draws, which callers keep so the split view and the actual sent
+   * text sit together.
+   */
+  systemDeliveredLabel?: string
+  /**
+   * OUR INSERT POINT (PATCHES.md #10): overrides the card's title text. The
+   * context-management panel replaces the browser's own title because the panel
+   * IS this browser — the sections it lists are the prompt's content, so no
+   * second card frames it.
+   */
+  titleOverride?: string
 }
 
 /**
@@ -899,7 +913,25 @@ export function makeContextBrowser(
         // category (used to split the joined prompt into per-section rows). The
         // rows are built with THIS component's row builder, so they carry the
         // same frame, chips and expansion as every other row.
-        if (props.systemRows !== undefined) return props.systemRows(elemRow)
+        if (props.systemRows !== undefined) {
+          // The delivered prompt, kept as ONE row below the split list: it is the
+          // text the model actually received, which the split view cannot show
+          // (it shows what the current configuration would produce).
+          const delivered = view.system !== null && headerContent.get(view.system.seq)?.system !== undefined
+            ? elemRow('sys-delivered', null,
+              (props.systemDeliveredLabel ?? catLabel('system')),
+              view.system.tokens, undefined,
+              <TextSection label={props.systemDeliveredLabel ?? catLabel('system')}
+                text={headerContent.get(view.system.seq)?.system ?? ''} rich={rich} lines={lineLabel} />)
+            : null
+          return (
+            <>
+              {props.systemRows(elemRow)}
+              <div className="lc-br-divider" />
+              {delivered}
+            </>
+          )
+        }
         // No prompt in force at this step. The category only opens without one
         // when there is no header epoch at all (the openable guard above), so
         // the note names the missing PROJECTION — no headers service versus
@@ -1126,7 +1158,7 @@ export function makeContextBrowser(
     return (
       <div className="lc-card" ref={rootRef}>
         <div className="lc-card-title">
-          <span className="lc-card-title-text">{t('browser.title')}</span>
+          <span className="lc-card-title-text">{props.titleOverride ?? t('browser.title')}</span>
           <span className="lc-gran lc-br-dna-ctl" role="group" title={t('browser.dnaTip')}>
             <button
               type="button"

@@ -43,8 +43,22 @@ export interface SystemSectionInfo {
   originalChanged: boolean
   /** The plugin's current text; present only while `originalChanged` (for the comparison). */
   originalText?: string
-  /** Ordering weight, when one is set. */
+  /** User-set ordering weight, when one exists (overrides `order` in the delivered prompt). */
   weight?: number
+  /** The section's real placement order, when known. */
+  order?: number
+  /** The package that registers this section, when resolvable. */
+  plugin?: string
+  /**
+   * Where `order`/`plugin` came from: observed live at registration, filled
+   * from the generated table, or unknown.
+   */
+  originFrom: 'observed' | 'table' | 'none'
+  /**
+   * The generated table disagrees with the live order — the table is stale and
+   * needs regenerating. The panel flags this instead of showing a stale number.
+   */
+  staleTable: boolean
 }
 
 /** The state route's value. */
@@ -53,6 +67,8 @@ export interface PanelState {
   dirty: boolean
   presetEntries: PresetEntryInfo[]
   systemSections: SystemSectionInfo[] | null
+  /** Which dsh version the fallback table was generated from. */
+  knownSectionsSource?: string
 }
 
 /** Read the panel state (settings, dirty flag, preset entries, per-section assembly). */
@@ -65,6 +81,7 @@ export async function fetchState(sessionId: string): Promise<PanelState> {
     dirty: json.value?.dirty ?? false,
     presetEntries: json.value?.presetEntries ?? [],
     systemSections: json.value?.systemSections ?? null,
+    knownSectionsSource: json.value?.knownSectionsSource,
   }
 }
 

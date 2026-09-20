@@ -61,6 +61,9 @@ import './styles/detailSections.css'
 import './styles/attachments.css'
 import './styles/agentGraph.css'
 import './styles/overview.css'
+// Ours last, so our additions win on equal specificity without editing upstream
+// sheets (all classes here are new; see contextManagement.css).
+import './styles/contextManagement.css'
 
 const NS = 'dsh-context'
 

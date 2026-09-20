@@ -27,6 +27,7 @@ import { scopeOf } from '@deepseek-ai/dsh-scope'
 import type { ContextPanelSettings, PromptModule, PromptModulePatch } from '../types'
 import { EMPTY_CONFIG } from '../types'
 import { presetEntriesOf, type PresetEntryInfo } from './preset-entries'
+import { presetEntryForSection } from '../preset/section-entries'
 import {
   AGENT_INSTRUCTIONS_ID,
   AGENT_INSTRUCTIONS_NAME,
@@ -336,6 +337,34 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
       }
     }
     return { ...assembly, sections }
+  }
+
+  /**
+   * Write an edited section's text back into the agent's preset composition.
+   *
+   * Only preset-injected sections can be written back: the text lives in a file
+   * this user owns (`.agent-presets/<id>/agent.cordis.yml`), whereas a plugin's
+   * prompt text lives inside that plugin's own package. The edit is line-level,
+   * so the rest of the composition survives, and it takes effect for the next
+   * session (the preset composes sessions, not turns).
+   * @param name - the section name (its owning entry is resolved by section name).
+   * @param text - the text to persist.
+   * @param agentId - the agent whose preset is written.
+   */
+  writeSectionBackToPreset(name: string, text: string, agentId: string): void {
+    // A section belongs to a preset ENTRY (its id) plus that entry's package
+    // name; the mapping is declared by the preset plugins themselves.
+    const entry = presetEntryForSection(name)
+    if (entry === undefined) return
+    try {
+      updatePresetPluginConfig(agentId, entry.id, entry.name, { text }, [
+        'Written back by context-panel-write from the Context tab.',
+        'Takes effect for sessions created after this one.',
+      ])
+    } catch {
+      // A preset whose file is absent or read-only stays untouched: the local
+      // edit still applies to the outgoing prompt, so nothing is lost.
+    }
   }
 
   /** 渲染当前生效模块为一段可读文本（快照/展示用）。 */

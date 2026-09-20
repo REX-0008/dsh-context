@@ -82,6 +82,18 @@ export interface ContextAssemblerService {
    * @param agentId - agent id。
    */
   editBaselineConfig(patch: Record<string, unknown>, agentId: string): void
+  /**
+   * Write an edited section's text back into the agent's preset composition.
+   *
+   * Only preset-injected sections can be written back: their text lives in a
+   * file this user owns, whereas a plugin's prompt text lives inside that
+   * plugin's package. Line-level edit, so the rest of the composition survives;
+   * applies to sessions created after this one.
+   * @param name - the section name (its owning entry is resolved from it).
+   * @param text - the text to persist.
+   * @param agentId - the agent whose preset is written.
+   */
+  writeSectionBackToPreset(name: string, text: string, agentId: string): void
   /** 卸载：注销全部已注册模块与工具限制。 */
   dispose(): void
 }

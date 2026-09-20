@@ -30,6 +30,8 @@ import { CONTEXT_PANEL_NS, CONTEXT_PANEL_SCHEMA, DEFAULT_SETTINGS } from './pane
 import { createPanelService, type ContextPanelService } from './panel/panel-service'
 import type { ContextAssemblerService } from './assembler/service'
 import { ContextAssemblerEngine } from './assembler/engine'
+import { createSectionRegistry, type SectionRegistry } from './section-registry'
+import { KNOWN_SECTIONS_SOURCE, knownSectionOf } from './known-sections'
 import type { ContextPanelSettings } from './types'
 
 /** Wiring refs the routes read lazily (settings/webServer inject asynchronously). */
@@ -37,6 +39,7 @@ interface Wiring {
   scope?: SettingsScope<ContextPanelSettings>
   service?: ContextPanelService
   engine?: ContextAssemblerService
+  sections?: SectionRegistry
 }
 
 /**
@@ -55,6 +58,41 @@ function inferKind(name: string): 'preset' | 'plugin' {
 }
 
 /** GET /api/context-panel-write/state — settings + dirty + section attribution. */
+/**
+ * Resolve one section's placement and owner.
+ *
+ * Live observation wins (it is the truth for anything registered after this
+ * plugin mounted); the generated table fills the boot-time sections it cannot
+ * see. When both know the section and their orders disagree, the table is stale
+ * — the panel surfaces that as a warning rather than silently showing a number
+ * that no longer matches the real order.
+ * @param registry - the live observation registry, when composed.
+ * @param name - the section name.
+ * @param index - the section's position in the delivered order (0-based).
+ * @returns the resolved origin, its source, and a staleness flag.
+ */
+function resolveOrigin(registry: SectionRegistry | undefined, name: string, index: number): {
+  order?: number
+  plugin?: string
+  from: 'observed' | 'table' | 'none'
+  staleTable: boolean
+} {
+  const seen = registry?.originOf(name)
+  const known = knownSectionOf(name)
+  if (seen !== undefined) {
+    return {
+      order: seen.order,
+      ...(seen.plugin !== undefined ? { plugin: seen.plugin } : (known !== undefined ? { plugin: known.plugin } : {})),
+      from: 'observed',
+      staleTable: known !== undefined && known.order !== seen.order,
+    }
+  }
+  if (known !== undefined) return { order: known.order, plugin: known.plugin, from: 'table', staleTable: false }
+  // Nothing knows it: report the position it actually arrived at, marked as
+  // unattributed, instead of inventing a number.
+  return { from: 'none', staleTable: false, order: undefined, ...(index >= 0 ? {} : {}) }
+}
+
 function stateHandler(wiring: Wiring) {
   return async (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse): Promise<void> => {
     try {
@@ -77,7 +115,8 @@ function stateHandler(wiring: Wiring) {
       const ownModules = new Set(
         engine === undefined ? [] : engine.getModuleViewForSession(sessionId).map(m => m.name),
       )
-      const systemSections = sections === null ? null : sections.map((section) => {
+      const systemSections = sections === null ? null : sections.map((section, index) => {
+        const origin = resolveOrigin(wiring.sections, section.name, index)
         const edited = overrides[section.name] !== undefined
         const backup = originals[section.name]
         // "Changed" compares the ONE stored backup against the plugin's CURRENT
@@ -91,6 +130,13 @@ function stateHandler(wiring: Wiring) {
           enabled: !disabled.has(section.name),
           edited,
           originalChanged,
+          // Placement/owner resolved above: observed live, filled from the
+          // generated table, or unknown. `staleTable` means the table disagrees
+          // with the live order, i.e. the table needs regenerating.
+          ...(origin.order === undefined ? {} : { order: origin.order }),
+          ...(origin.plugin === undefined ? {} : { plugin: origin.plugin }),
+          originFrom: origin.from,
+          staleTable: origin.staleTable,
           /** The plugin's current text, delivered only for the comparison. */
           ...(originalChanged ? { originalText: section.text } : {}),
           weight: weights[section.name],
@@ -104,6 +150,8 @@ function stateHandler(wiring: Wiring) {
           dirty: engine === undefined ? false : engine.isDirty(sessionId),
           presetEntries: engine === undefined ? [] : engine.presetEntriesForSession(sessionId),
           systemSections,
+          /** Where the fallback table was generated from (shown in the panel). */
+          knownSectionsSource: KNOWN_SECTIONS_SOURCE,
         },
       }))
     } catch (error) {
@@ -122,6 +170,7 @@ interface ActionContext {
   scope: SettingsScope<ContextPanelSettings>
   sessionId: string
   p: ActionPayload
+  engine?: ContextAssemblerService
 }
 type ActionHandler = (ac: ActionContext) => void | Promise<void>
 
@@ -193,6 +242,34 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
     originals[sessionId] = sessionOriginals
     await scope.update({ sectionOverrides: overrides, sectionOriginals: originals })
   },
+  /**
+   * Write an edited preset section's text back into the preset file (the only
+   * kind that CAN be written back; a plugin's file is not ours). Effective for
+   * sessions created after this, per the preset's next-session semantics.
+   */
+  writeBackPreset: ({ scope, p, sessionId, engine }) => {
+    const name = String(p.name)
+    const text = scope.get().sectionOverrides?.[sessionId]?.[name]
+    if (typeof text !== 'string' || engine === undefined) return
+    // The engine owns the preset file edit (line-level, so the rest of the
+    // composition survives).
+    engine.writeSectionBackToPreset(name, text, sessionId)
+  },
+  /**
+   * Accept the plugin's CURRENT original as the comparison baseline, keeping the
+   * user's edit: the backup is replaced, so the "original changed" reminder
+   * clears while the user's version stays in force.
+   */
+  refreshSectionBaseline: async ({ scope, p, sessionId }) => {
+    const name = String(p.name)
+    const original = typeof p.original === 'string' ? p.original : ''
+    const value = scope.get()
+    const originals = { ...(value.sectionOriginals ?? {}) }
+    const sessionOriginals = { ...(originals[sessionId] ?? {}) }
+    sessionOriginals[name] = original
+    originals[sessionId] = sessionOriginals
+    await scope.update({ sectionOriginals: originals })
+  },
   /** Set (or clear, with null) one section's ordering weight. */
   setSectionWeight: async ({ scope, p, sessionId }) => {
     const name = String(p.name)
@@ -241,7 +318,7 @@ function actionHandler(wiring: Wiring) {
       return
     }
     try {
-      await handler({ service, scope, sessionId: parsed.sessionId ?? '', p: parsed.payload ?? {} })
+      await handler({ service, scope, sessionId: parsed.sessionId ?? '', p: parsed.payload ?? {}, ...(wiring.engine === undefined ? {} : { engine: wiring.engine }) })
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })
       res.end(JSON.stringify({ ok: true }))
     } catch (error) {
@@ -265,6 +342,10 @@ export function applyOur(ctx: Context): void {
       }) as unknown as SettingsScope<ContextPanelSettings>
       const engine = new ContextAssemblerEngine()
       engine.setConfigReader(() => scope.get())
+      // Live section-origin observation (placement order + registering package):
+      // the assemble interface carries neither, so they are captured at the
+      // registration call instead.
+      wiring.sections = createSectionRegistry(ctx)
       const service = createPanelService(ctx, () => scope, engine)
       const disposeProvide = ctx.provide('contextPanelWrite', service)
       const disposeEngineProvide = ctx.provide('contextAssemblerWrite', engine)
