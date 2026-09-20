@@ -40,6 +40,8 @@ interface Wiring {
   service?: ContextPanelService
   engine?: ContextAssemblerService
   sections?: SectionRegistry
+  /** Host capabilities reused by this layer (see {@link OurHostBridge}). */
+  bridge?: OurHostBridge
 }
 
 /**
@@ -71,7 +73,13 @@ function inferKind(name: string): 'preset' | 'plugin' {
  * @param index - the section's position in the delivered order (0-based).
  * @returns the resolved origin, its source, and a staleness flag.
  */
-function resolveOrigin(registry: SectionRegistry | undefined, name: string, index: number): {
+function resolveOrigin(
+  registry: SectionRegistry | undefined,
+  name: string,
+  index: number,
+  registered?: Record<string, number>,
+  toolOwnerOf?: (name: string) => string | undefined,
+): {
   order?: number
   plugin?: string
   from: 'observed' | 'table' | 'none'
@@ -79,6 +87,17 @@ function resolveOrigin(registry: SectionRegistry | undefined, name: string, inde
 } {
   const seen = registry?.originOf(name)
   const known = knownSectionOf(name)
+  // The registry read is the widest source (it holds every registration's own
+  // argument, boot-time ones included); it outranks the stale generated table.
+  const real = registered?.[name]
+  if (seen === undefined && real !== undefined) {
+    return {
+      order: real,
+      ...(known !== undefined ? { plugin: known.plugin } : {}),
+      from: 'observed',
+      staleTable: known !== undefined && known.order !== real,
+    }
+  }
   if (seen !== undefined) {
     return {
       order: seen.order,
@@ -87,7 +106,17 @@ function resolveOrigin(registry: SectionRegistry | undefined, name: string, inde
       staleTable: known !== undefined && known.order !== seen.order,
     }
   }
-  if (known !== undefined) return { order: known.order, plugin: known.plugin, from: 'table', staleTable: false }
+  // A tool-guidance section is named `tool:<tool>`, so the host's own
+  // tool→plugin attribution answers for it — the same resolver the tool row
+  // uses, which covers third-party and MCP providers the table cannot know.
+  const toolName = name.startsWith('tool:') ? name.slice('tool:'.length) : undefined
+  const ownedBy = toolName === undefined ? undefined : toolOwnerOf?.(toolName)
+  if (known !== undefined) {
+    return { order: known.order, plugin: ownedBy ?? known.plugin, from: 'table', staleTable: false }
+  }
+  if (ownedBy !== undefined) {
+    return { order: undefined, plugin: ownedBy, from: 'observed', staleTable: false }
+  }
   // Nothing knows it: report the position it actually arrived at, marked as
   // unattributed, instead of inventing a number.
   return { from: 'none', staleTable: false, order: undefined, ...(index >= 0 ? {} : {}) }
@@ -116,7 +145,9 @@ function stateHandler(wiring: Wiring) {
         engine === undefined ? [] : engine.getModuleViewForSession(sessionId).map(m => m.name),
       )
       const systemSections = sections === null ? null : sections.map((section, index) => {
-        const origin = resolveOrigin(wiring.sections, section.name, index)
+        // The registry read (widest) is fetched once per request.
+      const registeredOrders = engine === undefined ? {} : engine.registeredOrdersForSession(sessionId)
+      const origin = resolveOrigin(wiring.sections, section.name, index, registeredOrders, wiring.bridge?.toolOwnerOf)
         const edited = overrides[section.name] !== undefined
         const backup = originals[section.name]
         // "Changed" compares the ONE stored backup against the plugin's CURRENT
@@ -332,9 +363,27 @@ function actionHandler(wiring: Wiring) {
  * Mount the write layer. Called from the fork's host entry (one line).
  * @param ctx - plugin root context.
  */
-export function applyOur(ctx: Context): void {
+/** Capabilities the host half shares with this layer (see PATches insert #2b). */
+export interface OurHostBridge {
+  /**
+   * The host's tool→plugin attribution: resolves a tool's owning package, from
+   * the live registration record, the pinned first-party map, or the MCP name
+   * prefix (its own order). Shared rather than reimplemented so a tool-guidance
+   * section is labelled exactly as the tool row is.
+   * @param name - the tool name.
+   * @returns the owning package label, or undefined when unattributed.
+   */
+  toolOwnerOf?: (name: string) => string | undefined
+}
+
+/**
+ * Mount the write layer.
+ * @param ctx - the host plugin context.
+ * @param bridge - host capabilities this layer reuses (optional).
+ */
+export function applyOur(ctx: Context, bridge?: OurHostBridge): void {
   ctx.effect(() => {
-    const wiring: Wiring = {}
+    const wiring: Wiring = bridge === undefined ? {} : { bridge }
     const disposeCore = ctx.inject(['settings', 'sessionProjections'], (sctx) => {
       const scope = sctx.settings.register(CONTEXT_PANEL_NS as never, CONTEXT_PANEL_SCHEMA as never, {
         base: DEFAULT_SETTINGS,

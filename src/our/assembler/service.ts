@@ -69,6 +69,14 @@ export interface ContextAssemblerService {
    */
   assembleSectionsForSession(sessionId: string): Promise<Array<{ name: string; text: string }> | null>
   /**
+   * Section name to its real placement order, read from the prompt registry —
+   * includes sections registered before this plugin mounted, which the live
+   * observation and the assembled value both miss.
+   * @param sessionId - the agent (= session) id.
+   * @returns the map; empty when the agent or registry is unavailable.
+   */
+  registeredOrdersForSession(sessionId: string): Record<string, number>
+  /**
    * 把当前生效模块装配说明原位写入用户级预设装配清单（agent.cordis.yml 的
    * context-assembler 行 config.modules），并保留 sidecar 备案（不影响运行时）。
    * @param agentId - agent id。

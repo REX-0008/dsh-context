@@ -90,7 +90,11 @@ export function apply(ctx: Context, config: Config): void {
   // OUR INSERT POINT (PATCHES.md #2): mount the write layer alongside upstream's
   // read-only projections. It registers its own settings namespace, its own
   // projection key (contextSections), and its own web routes.
-  applyOur(ctx)
+  // OUR INSERT POINT (PATCHES.md #2b): hand the write layer the same tool→plugin
+  // attribution this plugin already resolves, so a tool-guidance prompt section
+  // (`tool:<name>`) is labelled with its real owning package instead of being
+  // attributed from scratch and coming up empty.
+  applyOur(ctx, { toolOwnerOf: name => attribution.ownerOf(name) })
 }
 
 // ---- public type surface (stable for downstream consumers) -------------------

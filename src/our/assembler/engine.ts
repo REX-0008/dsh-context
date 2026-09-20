@@ -28,6 +28,22 @@ import type { ContextPanelSettings, PromptModule, PromptModulePatch } from '../t
 import { EMPTY_CONFIG } from '../types'
 import { presetEntriesOf, type PresetEntryInfo } from './preset-entries'
 import { presetEntryForSection } from '../preset/section-entries'
+
+/**
+ * The id spellings one session may be addressed by.
+ *
+ * A session id reaches this layer from several producers (the client's session
+ * list, the durable log, an agent's own `id`), and the harness mints some ids
+ * as `session-<n>` while others are bare uuids. The agent registry matches by
+ * exact string, so a lookup tries the equivalent spellings rather than assuming
+ * one.
+ * @param sessionId - the id as given.
+ * @returns the given id first, then its other equivalent spelling.
+ */
+export function sessionIdVariants(sessionId: string): string[] {
+  const bare = sessionId.startsWith('session-') ? sessionId.slice('session-'.length) : sessionId
+  return sessionId.startsWith('session-') ? [sessionId, bare] : [sessionId, 'session-' + bare]
+}
 import {
   AGENT_INSTRUCTIONS_ID,
   AGENT_INSTRUCTIONS_NAME,
@@ -187,12 +203,25 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
     const tracked = this.agentBySession.get(sessionId)
     if (tracked !== undefined) return tracked
     try {
-      const agents = (this.hostCtx as unknown as {
-        agents?: { get(id: string): Agent | undefined }
-      } | undefined)?.agents
-      const found = agents?.get(sessionId)
-      if (found !== undefined) this.agentBySession.set(sessionId, found)
-      return found
+      // Reached through ctx.get, NOT the property proxy: `agents` is not in
+      // this plugin's declared injections, and an undeclared service is invisible
+      // to the property proxy (dsh convention: optional services use ctx.get).
+      const host = this.hostCtx as { get?: (name: string, strict?: boolean) => unknown } | undefined
+      const agents = host?.get?.('agents', false) as { get(id: string): Agent | undefined } | undefined
+      // The registry keys agents by their EXACT session id, and an id reaches
+      // the panel in either spelling (`session-<uuid>` or a bare uuid,
+      // depending on how the session was created). Trying the equivalent
+      // spellings is what makes a lookup succeed whichever spelling the caller
+      // holds; without it a live session resolves to nothing and the list falls
+      // back to the static table — which is why the visible count varied.
+      for (const candidate of sessionIdVariants(sessionId)) {
+        const found = agents?.get(candidate)
+        if (found !== undefined) {
+          this.agentBySession.set(sessionId, found)
+          return found
+        }
+      }
+      return undefined
     } catch {
       return undefined
     }
@@ -317,6 +346,54 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
     return agent === undefined ? [] : presetEntriesOf(agent, this.projectionReader)
   }
 
+  /**
+   * Every section registered for one agent's scope, read straight from the
+   * prompt registry — including sections registered BEFORE this plugin mounted.
+   *
+   * This is the forward path the assembled value cannot give: `assemble()`
+   * reports only name+text, while the registry still holds each registration's
+   * own argument (which carries its placement order). The registry's layer
+   * tables are read defensively: the shape is verified before use, and an
+   * unrecognized shape degrades to "not available" rather than throwing.
+   * @param agent - the agent whose scope is read.
+   * @returns section name to placement order, or undefined when unreadable.
+   */
+  private registrySections(agent: Agent): Map<string, number> | undefined {
+    try {
+      const prompt = (agent.ctx as unknown as { systemPrompt?: { layers?: unknown } }).systemPrompt
+      // `layers.merge(scope, pick)` is the registry's own effective-view read:
+      // it applies the scope chain (nearest scope wins a name) exactly as
+      // assembly does, so the orders read here are the effective ones.
+      const layers = prompt?.layers as {
+        merge?: (scope: unknown, pick: (layer: unknown) => unknown) => Map<string, { order?: unknown }>
+      } | undefined
+      const merge = layers?.merge
+      if (typeof merge !== 'function') return undefined
+      const effective = merge.call(
+        layers,
+        scopeOf(agent.ctx),
+        (layer: unknown) => (layer as { sections?: unknown })?.sections,
+      )
+      if (!(effective instanceof Map)) return undefined
+      const out = new Map<string, number>()
+      for (const [name, section] of effective) {
+        const order = (section as { order?: unknown } | undefined)?.order
+        if (typeof name === 'string' && typeof order === 'number') out.set(name, order)
+      }
+      return out.size > 0 ? out : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  /** @inheritdoc */
+  registeredOrdersForSession(sessionId: string): Record<string, number> {
+    const agent = this.agentFor(sessionId)
+    if (agent === undefined) return {}
+    const registry = this.registrySections(agent)
+    return registry === undefined ? {} : Object.fromEntries(registry)
+  }
+
   /** @inheritdoc */
   async assembleSectionsForSession(sessionId: string): Promise<Array<{ name: string; text: string }> | null> {
     // The UNFILTERED list captured by the assemble waterfall is the real
@@ -326,8 +403,12 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
     // why the agent is resolved on demand rather than tracked from an event.
     const agent = this.agentFor(sessionId)
     if (agent === undefined) return null
-    const captured = this.lastSections.get(sessionId)
-    if (captured !== undefined && captured.length > 0) return captured
+    // The capture is keyed by the agent's own id, which may be spelled
+    // differently from the id the caller holds.
+    for (const candidate of sessionIdVariants(sessionId)) {
+      const captured = this.lastSections.get(candidate)
+      if (captured !== undefined && captured.length > 0) return captured
+    }
     try {
       const scope = scopeOf(agent.ctx)
       const assembly = await agent.ctx.systemPrompt.assemble(scope === undefined ? {} : { scope })
