@@ -80,6 +80,29 @@ import { ContextBrowserPanel } from '../../our/client/ContextBrowserPanel'
 > **reverted** — the write layer now renders upstream's browser as a whole
 > component inside its own card, so `browser.tsx` is back to byte-identical with
 > upstream. Only the two insert points above remain.
+## 5. `src/client/components/browser.tsx` — system-category hooks
+
+**Anchor**: `ContextBrowserProps`, right after `onDetailRetry?: () => void`
+
+```ts
+  systemRows?: (row: BrowserRowBuilder) => ReactNode
+  systemCount?: number
+  systemDeliveredLabel?: string
+  titleOverride?: string
+```
+
+plus the exported `BrowserRowBuilder` type right after the interface, three
+guard lines in `toolCount` / `singleKeyOf` / `toggleCat`, and the branch at the
+top of `catBody('system')` that renders the caller's rows above the delivered
+row. Without any of these props, rendering is unchanged.
+
+## 6. `src/client/index.ts` — our stylesheet
+**Anchor**: after the last upstream `styles/*.css` import.
+
+```ts
+import './styles/contextManagement.css'
+```
+
 ---
 
 ## Local identity (not an insert point)
