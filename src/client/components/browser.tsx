@@ -75,7 +75,7 @@ export interface ContextBrowserProps {
    * schemas, surface nodes) instead of a look-alike. A caller gets the same
    * builder the built-in rows use and returns the rows to show.
    */
-  systemRows?: (row: BrowserRowBuilder) => ReactNode
+  systemRows?: (row: BrowserRowBuilder, body: (name: string, text: string, extra?: ReactNode) => ReactNode) => ReactNode
   /**
    * OUR INSERT POINT (PATCHES.md #6): the `system` category's item count while
    * `systemRows` supplies the rows (the built-in count is the lone prompt row).
@@ -88,6 +88,7 @@ export interface ContextBrowserProps {
    * text sit together.
    */
   systemDeliveredLabel?: string
+
   /**
    * OUR INSERT POINT (PATCHES.md #10): overrides the card's title text. The
    * context-management panel replaces the browser's own title because the panel
@@ -641,6 +642,37 @@ export function makeContextBrowser(
   // descriptions, system text, and message bodies stay in sync.
   const lineLabel = (n: number): string => t(n === 1 ? 'block.line' : 'block.lines', { n })
 
+  /**
+   * One section's expanded body, using this module's own detail chrome: the
+   * foldable head (label + line count + rich switch + copy) over the rich text.
+   * `extraActions` renders beside the switch, so a caller's buttons (edit /
+   * write-back / compare) sit in the same head group as the built-in ones.
+   */
+  function SectionBody(props: {
+    name: string
+    text: string
+    extraActions?: ReactNode
+  }): ReactElement {
+    const [mode, setMode] = rich.useRichMode()
+    const lineCount = useMemo(() => lineCountOf(props.text), [props.text])
+    return (
+      <Section
+        label={props.name}
+        foldHead
+        actions={<>
+          {/* Order: the built-in 原文 · Markdown pair first, then the caller's
+              actions (编辑 …), then copy — matching the tool/message heads. */}
+          <rich.RichSwitch mode={mode} onPick={setMode} />
+          {props.extraActions}
+          <rich.RichCopy text={props.text} />
+        </>}
+        meta={<span className="lc-ts-card-meta">{lineLabel(lineCount)}</span>}
+      >
+        <rich.RichText text={props.text} mode={mode} />
+      </Section>
+    )
+  }
+
   return function ContextBrowser(props: ContextBrowserProps): ReactElement {
     const { data, headers } = props
     // 'live' = the current surface (the NEXT request's context); number = a retained step's seq.
@@ -926,7 +958,7 @@ export function makeContextBrowser(
             : null
           return (
             <>
-              {props.systemRows(elemRow)}
+              {props.systemRows(elemRow, (name, text, extra) => <SectionBody name={name} text={text} extraActions={extra} />)}
               <div className="lc-br-divider" />
               {delivered}
             </>

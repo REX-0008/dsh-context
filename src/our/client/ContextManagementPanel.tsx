@@ -6,9 +6,10 @@
  * joined into ONE string before it reaches the log, so upstream can only show
  * that string as a single row; the sections are read in-process instead (our own
  * state route) and handed back to upstream's browser through its `systemRows`
- * hook, which draws each one with the SAME row renderer the tool-schema rows
- * use. The sections therefore read as what they are — the system prompt's own
- * contents, one per row — with our controls riding the row's trailing slot.
+ * hook, which draws each one with the SAME row renderer — and the SAME expansion
+ * chrome (foldable head, line count, raw/Markdown switch, copy) — that the
+ * tool-schema and message rows use. The sections therefore read as what they
+ * are: the system prompt's own contents, one per row.
  *
  * Everything else in the card (DNA switch, step picker, estimate-vs-actual
  * totals, composition bar, every other category) is upstream's, untouched.
@@ -17,12 +18,11 @@
  */
 import { useCallback, useEffect, useState, type ReactElement, type ReactNode } from 'react'
 import type { BrowserRowBuilder } from '../../client/components/browser'
-import type { RichKit } from '../../client/components/richText'
 import { dispatchAction, fetchState, type PanelState, type SectionKind, type SystemSectionInfo } from './panel-api'
 
 /**
- * The source kinds, in the order the explanation column lists them. Each kind
- * changes differently, which is what the left tag states:
+ * The source kinds. Each kind changes differently, which is what the row's left
+ * tag states:
  * - `config`: our own module — the persisted edit IS its source;
  * - `preset`: injected by an agent preset — its file can be written back, next session;
  * - `plugin`: a plugin's (or the harness's) text — its file is not ours to change,
@@ -46,48 +46,28 @@ function sizeOf(text: string): number {
   return Math.ceil(text.length / 4) + 4
 }
 
-/**
- * Token figures share one width so the right edge lines up. The widest realistic
- * figure is `888k`, hence four digit slots plus the `≈`.
- */
-function tokenFigure(tokens: number): string {
-  const text = tokens >= 1000 ? (tokens / 1000).toFixed(1) + 'k' : String(tokens)
-  return '≈' + text.padStart(4, ' ')
-}
-
 /** Props: the session, plus a builder that decorates upstream's browser. */
 export interface ContextManagementPanelProps {
   sessionId: string
   /**
-   * Builds upstream's browser card, handing back the two hooks this panel fills
-   * in. The caller supplies the browser's own props; this panel only decides what
-   * the `system` category lists.
+   * Builds upstream's browser card, handing back the hooks this panel fills in.
+   * `body` is upstream's own expansion chrome (head, line count, raw/Markdown
+   * switch, copy) so a section expands exactly like a tool schema.
    */
   browser: (hooks: {
-    systemRows: (row: BrowserRowBuilder) => ReactNode
+    systemRows: (row: BrowserRowBuilder, body: (name: string, text: string, extra?: ReactNode) => ReactNode) => ReactNode
     systemCount: number
-    /** Label for the delivered-prompt row the browser keeps below the split list. */
+    /** Caption for the delivered-prompt row kept below the split list. */
     deliveredLabel: string
   }) => ReactNode
-  /**
-   * Upstream's rich-text kit (raw line numbers / rendered Markdown / copy). Used
-   * for the section body so the "MD preview" view is the SAME renderer the
-   * browser's own detail sections use, not a second markdown implementation.
-   */
-  rich: RichKit
 }
 
 /** The panel: upstream's browser with our section rows in its system category. */
-export function ContextManagementPanel({ sessionId, browser, rich }: ContextManagementPanelProps): ReactElement {
+export function ContextManagementPanel({ sessionId, browser }: ContextManagementPanelProps): ReactElement {
   const [state, setState] = useState<PanelState | null>(null)
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
   const [comparing, setComparing] = useState<string | null>(null)
-  // Per-section body mode: 'md' renders the section's text, 'edit' swaps in the
-  // editor. Held per section so switching one row never disturbs another.
-  const [bodyMode, setBodyMode] = useState<Record<string, 'md' | 'edit'>>({})
-  // Per-section render mode for the body ('md' renders, 'raw' shows the source).
-  const [richMode, setRichMode] = useState<Record<string, 'md' | 'raw'>>({})
   const [weightOpen, setWeightOpen] = useState<string | null>(null)
   const [weightDraft, setWeightDraft] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -115,11 +95,10 @@ export function ContextManagementPanel({ sessionId, browser, rich }: ContextMana
   const sections: SystemSectionInfo[] = state?.systemSections ?? []
   const stale = sections.some(section => section.staleTable)
 
-  /**
-   * The section rows, built through the browser's own row renderer so each one
-   * carries the same frame, chips and expansion as a tool-schema row.
-   */
-  const systemRows = (row: BrowserRowBuilder): ReactNode => (
+  const systemRows = (
+    row: BrowserRowBuilder,
+    body: (name: string, text: string, extra?: ReactNode) => ReactNode,
+  ): ReactNode => (
     <>
       {stale ? (
         <div className="lc-br-note" title={'实际排序与内置对照表的数值不一致，表需要按当前 dsh 版本重新生成'}>
@@ -129,122 +108,88 @@ export function ContextManagementPanel({ sessionId, browser, rich }: ContextMana
       {sections.length === 0 ? (
         <div className="lc-br-note">{'该会话尚未组装过系统提示词：开始一轮对话后这里会列出各分节。'}</div>
       ) : null}
+      {/* Scoped so the token-column alignment below applies to OUR rows only:
+          upstream's tool/message rows keep their original figure width. */}
+      <div className="lc-our-sections">
       {sections.map((section) => {
         const open = editing === section.name
         const weightEdited = section.weight !== undefined
         const weightValue = weightEdited ? section.weight : section.order
-        const body = (
+
+        // The expanded body: upstream's own chrome (head + line count + 原文 /
+        // Markdown switch + copy) with our actions in the same head group, in
+        // the order 原文 · Markdown · 编辑 · (写回预设 / 还原).
+        const extra = (
           <>
-            {open ? (
-              <>
-                <textarea value={draft} onChange={(event) => setDraft(event.target.value)} rows={12}
-                  style={{ width: '100%' }} />
-                <div>
-                  <button type="button" className="lc-gran-btn"
-                    onClick={() => { void dispatch('setSectionText', { name: section.name, text: draft, original: section.text }).then(() => setEditing(null)) }}>
-                    {'保存'}
-                  </button>
-                  <button type="button" className="lc-gran-btn" onClick={() => setEditing(null)}>{'取消'}</button>
-                  {section.kind === 'preset' ? (
-                    <button type="button" className="lc-gran-btn"
-                      title={'把当前文本写回预设文件；新会话生效'}
-                      onClick={() => { void dispatch('writeBackPreset', { name: section.name }) }}>
-                      {'写回预设'}
-                    </button>
-                  ) : null}
-                </div>
-              </>
-            ) : comparing === section.name ? (
-              <>
-                <div className="lc-cols">
-                  <div className="lc-col">
-                    <div className="lc-empty" style={{ textAlign: 'left' }}>{'你的版本（正在发出）'}</div>
-                    <pre className="lc-br-preview" style={{ whiteSpace: 'pre-wrap' }}>{section.text}</pre>
-                  </div>
-                  <div className="lc-col">
-                    <div className="lc-empty" style={{ textAlign: 'left' }}>{'插件现在的原文'}</div>
-                    <pre className="lc-br-preview" style={{ whiteSpace: 'pre-wrap' }}>{section.originalText ?? ''}</pre>
-                  </div>
-                </div>
-                <button type="button" className="lc-gran-btn"
-                  onClick={() => { void dispatch('refreshSectionBaseline', { name: section.name, original: section.originalText }).then(() => setComparing(null)) }}>
-                  {'以新原文为基准（保留我的修改）'}
-                </button>
-              </>
-            ) : bodyMode[section.name] === 'edit' ? (
-              <>
-                <textarea value={draft} onChange={(event) => setDraft(event.target.value)} rows={12}
-                  style={{ width: '100%' }} />
-                <div>
-                  <button type="button" className="lc-gran-btn"
-                    onClick={() => { void dispatch('setSectionText', { name: section.name, text: draft, original: section.text }).then(() => setBodyMode(m => ({ ...m, [section.name]: 'md' }))) }}>
-                    {'保存'}
-                  </button>
-                  <button type="button" className="lc-gran-btn"
-                    onClick={() => setBodyMode(m => ({ ...m, [section.name]: 'md' }))}>
-                    {'取消'}
-                  </button>
-                  {section.kind === 'preset' ? (
-                    <button type="button" className="lc-gran-btn"
-                      title={'把当前文本写回预设文件；新会话生效'}
-                      onClick={() => { void dispatch('writeBackPreset', { name: section.name }) }}>
-                      {'写回预设'}
-                    </button>
-                  ) : null}
-                </div>
-              </>
-            ) : (
-              // The body renders through upstream's own rich text (rendered
-              // Markdown, or raw when switched), so a section reads exactly like
-              // any other detail section in this browser.
-              <rich.RichText text={section.text} mode={richMode[section.name] ?? 'md'} />
-            )}
-            {comparing !== section.name ? (
-              <div>
-                <button type="button" className={'lc-gran-btn' + (bodyMode[section.name] === 'edit' ? ' lc-gran-on' : '')}
-                  title={'直接修改这一段文本'}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    if (bodyMode[section.name] === 'edit') setBodyMode(m => ({ ...m, [section.name]: 'md' }))
-                    else { setDraft(section.text); setBodyMode(m => ({ ...m, [section.name]: 'edit' })) }
-                  }}>
-                  {'编辑'}
-                </button>
-                <button type="button" className={'lc-gran-btn' + (bodyMode[section.name] !== 'edit' && (richMode[section.name] ?? 'md') === 'md' ? ' lc-gran-on' : '')}
-                  title={'以渲染后的 Markdown 预览这一段'}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    setBodyMode(m => ({ ...m, [section.name]: 'md' }))
-                    setRichMode(m => ({ ...m, [section.name]: 'md' }))
-                  }}>
-                  {'MD 预览'}
-                </button>
-                <button type="button" className={'lc-gran-btn' + (bodyMode[section.name] !== 'edit' && richMode[section.name] === 'raw' ? ' lc-gran-on' : '')}
-                  title={'查看未经渲染的原文'}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    setBodyMode(m => ({ ...m, [section.name]: 'md' }))
-                    setRichMode(m => ({ ...m, [section.name]: 'raw' }))
-                  }}>
-                  {'原文'}
-                </button>
-                {section.edited ? (
-                  <button type="button" className="lc-gran-btn" title={'放弃修改，恢复插件原文'}
-                    onClick={(event) => { event.stopPropagation(); void dispatch('clearSectionText', { name: section.name }) }}>
-                    {'还原'}
-                  </button>
-                ) : null}
-              </div>
+            {section.kind === 'preset' ? (
+              <button type="button" className="lc-rich-seg-btn"
+                title={'把当前文本写回预设文件；新会话生效'}
+                onClick={(event) => { event.stopPropagation(); void dispatch('writeBackPreset', { name: section.name }) }}>
+                {'写回预设'}
+              </button>
             ) : null}
+            {section.edited ? (
+              <button type="button" className="lc-rich-seg-btn" title={'放弃修改，恢复插件原文'}
+                onClick={(event) => { event.stopPropagation(); void dispatch('clearSectionText', { name: section.name }) }}>
+                {'还原'}
+              </button>
+            ) : null}
+            <button type="button" className={'lc-rich-seg-btn' + (open ? ' lc-rich-seg-on' : '')}
+              title={'直接修改这一段文本'}
+              onClick={(event) => {
+                event.stopPropagation()
+                if (open) setEditing(null)
+                else { setDraft(section.text); setEditing(section.name); setComparing(null) }
+              }}>
+              {'编辑'}
+            </button>
           </>
         )
-        // The row's trailing slot is where tool rows carry their plugin and hit
-        // chips; ours carry the plugin chip, the weight control and the switch.
+
+        const bodyNode = open ? (
+          <>
+            <textarea value={draft} onChange={(event) => setDraft(event.target.value)} rows={12}
+              style={{ width: '100%' }} />
+            <div>
+              <button type="button" className="lc-gran-btn"
+                onClick={() => { void dispatch('setSectionText', { name: section.name, text: draft, original: section.text }).then(() => setEditing(null)) }}>
+                {'保存'}
+              </button>
+              <button type="button" className="lc-gran-btn" onClick={() => setEditing(null)}>{'取消'}</button>
+            </div>
+          </>
+        ) : comparing === section.name ? (
+          <>
+            <div className="lc-cols">
+              <div className="lc-col">
+                <div className="lc-empty" style={{ textAlign: 'left' }}>{'你的版本（正在发出）'}</div>
+                <pre className="lc-br-preview" style={{ whiteSpace: 'pre-wrap' }}>{section.text}</pre>
+              </div>
+              <div className="lc-col">
+                <div className="lc-empty" style={{ textAlign: 'left' }}>{'插件现在的原文'}</div>
+                <pre className="lc-br-preview" style={{ whiteSpace: 'pre-wrap' }}>{section.originalText ?? ''}</pre>
+              </div>
+            </div>
+            <button type="button" className="lc-gran-btn"
+              onClick={() => { void dispatch('refreshSectionBaseline', { name: section.name, original: section.originalText }).then(() => setComparing(null)) }}>
+              {'以新原文为基准（保留我的修改）'}
+            </button>
+          </>
+        ) : body(section.name, section.text, extra)
+
+        // The row's trailing slot is where tool rows carry their plugin chip and
+        // hit tally; ours carry the same chips plus the weight control and switch.
         const trailing = (
           <>
+            {/* The registering plugin, in the same chip the tool rows use for
+                theirs — required on the COLLAPSED row, not only when expanded. */}
             {section.plugin !== undefined ? (
               <span className="lc-br-tag lc-br-tool-plugin" title={'来源插件'}>{section.plugin}</span>
-            ) : null}
+            ) : (
+              <span className="lc-br-tag lc-br-sect-unknown" title={'未观测到注册来源（该分节在本插件挂载前注册，且不在内置对照表中）'}>
+                {'来源未知'}
+              </span>
+            )}
             {section.edited ? <span className="lc-br-tag lc-br-sect-edited" title={'已修改：发出的是你的版本'}>{'已改'}</span> : null}
             {section.originalChanged ? (
               <button type="button" className="lc-br-tag lc-br-sect-edited" title={'插件的原文已变化，点击查看对比'}
@@ -253,9 +198,8 @@ export function ContextManagementPanel({ sessionId, browser, rich }: ContextMana
               </button>
             ) : null}
             {weightOpen === section.name ? (
-              <input className="lc-br-tag" style={{ width: '5em', textAlign: 'center' }}
-                autoFocus
-                value={weightDraft}
+              <input className="lc-br-tag" style={{ width: '4.5em', textAlign: 'center' }}
+                autoFocus value={weightDraft}
                 title={weightEdited && section.order !== undefined
                   ? '原本权重 ' + String(section.order) + '（半透明显示在输入框内）'
                   : '排序权重'}
@@ -271,7 +215,7 @@ export function ContextManagementPanel({ sessionId, browser, rich }: ContextMana
             ) : (
               <button type="button"
                 className={'lc-br-tag' + (weightEdited ? ' lc-br-sect-edited' : '') + (section.staleTable ? ' lc-br-sect-stale' : '')}
-                style={{ width: '5em', textAlign: 'center' }}
+                style={{ width: '4.5em', textAlign: 'center' }}
                 title={section.staleTable
                   ? '内置对照表与实际排序不一致，此数值需核对'
                   : weightEdited
@@ -288,19 +232,18 @@ export function ContextManagementPanel({ sessionId, browser, rich }: ContextMana
             </button>
           </>
         )
-        // The left tag slot states the SOURCE KIND (how a change lands), the
-        // same slot the surface rows use for their kind tag; an edited section's
-        // tag turns brand-coloured as the reminder. The right side carries the
-        // registering plugin's chip and the controls.
+
+        // The left tag slot states the SOURCE KIND (how a change lands) — the same
+        // slot surface rows use for their kind tag; an edited section's tag turns
+        // brand-coloured as the reminder.
         const kindTag = (
           <i className={'lc-br-kind' + (section.edited ? ' lc-br-kind-edited' : '')}>{KIND_LABEL[section.kind]}</i>
         )
-        return row('sec:' + section.name, kindTag, section.name + '  ' + tokenFigure(sizeOf(section.text)), 0, undefined, body, false, trailing)
+        // The token figure goes in its own column (the row's `tokens` slot, which
+        // right-aligns and now pads to a fixed width); the preview stays the name.
+        return row('sec:' + section.name, kindTag, section.name, sizeOf(section.text), undefined, bodyNode, false, trailing)
       })}
-
-      {/* The delivered prompt stays a row of its own, drawn by the browser
-          below this list (see its `deliveredLabel`), so "what I configured" and
-          "what was actually sent" sit in one column. */}
+      </div>
     </>
   )
 

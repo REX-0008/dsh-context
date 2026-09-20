@@ -35,6 +35,13 @@
   background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 14%, transparent);
 }
 
+/* An unresolvable registering plugin: stated rather than left blank, so the
+   column reads as "not observed" instead of "no plugin". */
+.lc-br-sect-unknown {
+  color: var(--dsw-alias-label-tertiary);
+  border-style: dashed;
+}
+
 /* A disabled section keeps its row (so it can be switched back on) but reads as
    inactive. */
 .lc-br-sect-off {
@@ -48,8 +55,14 @@
   background: var(--dsw-alias-border-l2);
 }
 
-/* One tabular figure column so the ≈ figures line up on the right edge. */
-.lc-br-tokens {
+/* The token figure column (`.lc-br-tokens`, upstream's own right-aligned slot):
+   the figures are tabular and the column takes a fixed width sized for the
+   widest realistic value (4 digits + unit, e.g. 888k), so the column stops
+   jittering between rows. The slot itself is untouched — this only widens it
+   and makes the digits evenly spaced. */
+.lc-our-sections .lc-br-tokens {
   font-variant-numeric: tabular-nums;
-  white-space: pre;
+  flex: none;
+  min-width: 4.5em;
+  text-align: right;
 }
