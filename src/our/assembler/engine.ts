@@ -355,6 +355,11 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
   }
 
   /** @inheritdoc */
+  isOwnModuleForSession(sessionId: string, name: string): boolean {
+    return this.getModuleViewForSession(sessionId).some(module => module.name === name)
+  }
+
+  /** @inheritdoc */
   presetIdForSession(sessionId: string): string | undefined {
     const agent = this.agentFor(sessionId)
     return agent === undefined ? undefined : this.presetIdFor(agent)
@@ -547,7 +552,9 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
     const entry = presetEntryForSection(name)
     if (entry === undefined) return
     try {
-      updatePresetPluginConfig(agentId, entry.id, entry.name, { text }, [
+      // The plugin's OWN config key (persona reads `prefix`/`suffix`), never a
+      // generic `text`: a key the plugin does not read writes nothing.
+      updatePresetPluginConfig(agentId, entry.id, entry.name, { [entry.textKey]: text }, [
         'Written back by context-panel-write from the Context tab.',
         'Takes effect for sessions created after this one.',
       ])
@@ -555,14 +562,6 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
       // A preset whose file is absent or read-only stays untouched: the local
       // edit still applies to the outgoing prompt, so nothing is lost.
     }
-  }
-
-  /** 渲染当前生效模块为一段可读文本（快照/展示用）。 */
-  renderModules(agentId: string): string {
-    return this.mergedModules(agentId)
-      .filter(m => m.enabled)
-      .map(m => `# ${m.name}（${m.channel}，order ${m.order}）\n${m.text}`)
-      .join('\n\n')
   }
 
   /** @inheritdoc */

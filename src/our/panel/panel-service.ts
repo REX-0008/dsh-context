@@ -1,9 +1,10 @@
 /**
- * ctx.contextPanel 服务实现（Profile 层面板后端）。
+ * The `contextPanelWrite` service: the panel's host-side backend.
  *
- * 前端经 webServer 路由（/api/context-panel/action）触发动作，本服务是 host 侧
- * 逻辑收口，直接持引擎实例（同包内 import）。settings 是配置单一数据源，
- * 由本服务与引擎在进程内读写。
+ * The client reaches it through this plugin's own routes
+ * (`/api/context-panel-write/{state,action}`). It holds the engine instance
+ * directly (a same-package import) and is one of the two in-process readers and
+ * writers of the settings namespace that is the single source of configuration.
  *
  * editSkillDirs / editBaselineConfig：委托引擎**原位修改** agent 预设装配清单
  * （.agent-presets/<agent>/agent.cordis.yml 对应插件行 config），新会话（换代）生效。

@@ -30,16 +30,6 @@ export interface PresetEntryInfo {
   config?: unknown
 }
 
-/**
- * Preset plugins known to register a system-prompt section (entry id to section
- * name). Everything else in a preset (skill-filesystem / tool-skill /
- * agent-instructions / persistent-shell …) contributes through the skill
- * registry, pre-step hooks or user context instead, so it is not listed.
- */
-export const KNOWN_PRESET_SECTIONS: Record<string, readonly string[]> = {
-  persona: ['deployment:persona'],
-}
-
 /** The agent's preset id, read from the registered `agentPreset` projection. */
 function presetIdOf(agent: Agent, readProjection: (agent: Agent, key: string) => unknown): string | undefined {
   try {

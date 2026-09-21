@@ -32,6 +32,8 @@ import type { ContextAssemblerService } from './assembler/service'
 import { ContextAssemblerEngine } from './assembler/engine'
 import { createSectionRegistry, type SectionRegistry } from './section-registry'
 import { KNOWN_SECTIONS_SOURCE, knownSectionOf } from './known-sections'
+import { presetEntryForSection } from './preset/section-entries'
+import { SEED_MODULES } from './preset/seeds'
 import type { ContextPanelSettings } from './types'
 
 /** Wiring refs the routes read lazily (settings/webServer inject asynchronously). */
@@ -53,10 +55,12 @@ interface Wiring {
  * @returns the source kind.
  */
 function inferKind(name: string): 'preset' | 'plugin' {
-  // Preset-mounted plugins contribute named sections (deployment:* is the
-  // persona line; plan:* comes from the plan-mode row). Anything else is a
-  // plugin/native section, which is the majority and the adjust-on-send case.
-  return name.startsWith('deployment:') ? 'preset' : 'plugin'
+  // A section is "preset" only when a preset ENTRY actually owns it — that is
+  // what makes a write-back possible. A bare prefix test would claim sections no
+  // entry can write (`deployment:persona` is never registered; only the
+  // -prefix/-suffix pair is), and the panel would offer a write-back that
+  // silently does nothing.
+  return presetEntryForSection(name) === undefined ? 'plugin' : 'preset'
 }
 
 /** GET /api/context-panel-write/state — settings + dirty + section attribution. */
@@ -147,23 +151,37 @@ function stateHandler(wiring: Wiring) {
       const overrides = value?.sectionOverrides?.[sessionId] ?? {}
       const weights = value?.sectionWeights?.[sessionId] ?? {}
       const originals = value?.sectionOriginals?.[sessionId] ?? {}
-      const ownModules = new Set(
-        engine === undefined ? [] : engine.getModuleViewForSession(sessionId).map(m => m.name),
-      )
+      const moduleView = engine === undefined ? [] : engine.getModuleViewForSession(sessionId)
+      const ownModules = new Map(moduleView.map(module => [module.name, module]))
       // The registry read is the widest source, so it is fetched once per request
       // rather than per section.
       const registeredOrders = engine === undefined ? {} : engine.registeredOrdersForSession(sessionId)
       const systemSections = sections === null ? null : sections.map((section, index) => {
         const origin = resolveOrigin(wiring.sections, section.name, index, registeredOrders, wiring.bridge?.toolOwnerOf)
-        const edited = overrides[section.name] !== undefined
+        // "Edited" means different things per kind, because the write path
+        // differs. Our own module's body IS the record, so an edit shows up as a
+        // body that no longer matches its seeded default; every other kind keeps
+        // a local override, so its presence is the marker.
+        const own = ownModules.get(section.name)
+        const seeded = SEED_MODULES[section.name]?.text
+        const edited = own !== undefined
+          ? seeded !== undefined && own.text !== seeded
+          : overrides[section.name] !== undefined
         const backup = originals[section.name]
         // "Changed" compares the ONE stored backup against the plugin's CURRENT
         // text: the backup is what the text looked like when it was edited, so a
-        // difference means the plugin moved on underneath our edit.
-        const originalChanged = edited && backup !== undefined && backup !== section.text
+        // difference means the plugin moved on underneath our edit. Only the
+        // kinds that keep a backup can report this.
+        const originalChanged = backup !== undefined && overrides[section.name] === undefined
+          ? false
+          : edited && backup !== undefined && backup !== section.text
         return {
           name: section.name,
-          text: edited ? (overrides[section.name] as string) : section.text,
+          // Our own module's text already IS the edited text (the section was
+          // rendered from that body); only the other kinds are overridden here.
+          text: own !== undefined
+            ? section.text
+            : (overrides[section.name] as string | undefined) ?? section.text,
           kind: ownModules.has(section.name) ? 'config' as const : inferKind(section.name),
           // Tri-state, naming which level switched it off so the panel can say
           // so rather than showing a bare "off".
@@ -272,9 +290,20 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
    * plugin's original; later edits keep that single backup (the panel only
    * needs one "what it used to be" per section).
    */
-  setSectionText: async ({ scope, p, sessionId }) => {
+  setSectionText: async ({ scope, p, sessionId, service, engine }) => {
     const name = String(p.name)
     const text = String(p.text ?? '')
+    // A section this plugin injects has no separate body: this plugin's persisted
+    // module registry IS both its source and its body, so the edit goes straight
+    // into that record. Keeping a shadow override for it would leave two bodies
+    // (the settings view reads the module, the panel would read the override) and
+    // the two would drift.
+    if (engine?.isOwnModuleForSession(sessionId, name) === true) {
+      await service.updateModule('agent', name, { text }, sessionId)
+      return
+    }
+    // Every other kind keeps its real text in someone else's file (a preset's or
+    // a plugin's), so the edit is held locally and applied on the way out.
     const value = scope.get()
     const overrides = { ...(value.sectionOverrides ?? {}) }
     const session = { ...(overrides[sessionId] ?? {}) }
@@ -289,25 +318,15 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
     await scope.update({ sectionOverrides: overrides, sectionOriginals: originals })
   },
   /** Drop an edit: the plugin's own text is used again (its backup goes too). */
-  clearSectionText: async ({ scope, p, sessionId }) => {
+  clearSectionText: async ({ scope, p, sessionId, service, engine }) => {
     const name = String(p.name)
-    const value = scope.get()
-    const overrides = { ...(value.sectionOverrides ?? {}) }
-    const session = { ...(overrides[sessionId] ?? {}) }
-    delete session[name]
-    overrides[sessionId] = session
-    const originals = { ...(value.sectionOriginals ?? {}) }
-    const sessionOriginals = { ...(originals[sessionId] ?? {}) }
-    delete sessionOriginals[name]
-    originals[sessionId] = sessionOriginals
-    await scope.update({ sectionOverrides: overrides, sectionOriginals: originals })
-  },
-  /**
-   * Accept the plugin's current text as the new baseline after a comparison:
-   * the edit is dropped and the backup is replaced, so the reminder clears.
-   */
-  acceptSectionOriginal: async ({ scope, p, sessionId }) => {
-    const name = String(p.name)
+    // Our own module has no override to clear — the body IS the edit — so
+    // "restore" means putting the seeded text back.
+    const seeded = SEED_MODULES[name]?.text
+    if (seeded !== undefined && engine?.isOwnModuleForSession(sessionId, name) === true) {
+      await service.updateModule('agent', name, { text: seeded }, sessionId)
+      return
+    }
     const value = scope.get()
     const overrides = { ...(value.sectionOverrides ?? {}) }
     const session = { ...(overrides[sessionId] ?? {}) }
@@ -348,8 +367,17 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
     await scope.update({ sectionOriginals: originals })
   },
   /** Set (or clear, with null) one section's ordering weight. */
-  setSectionWeight: async ({ scope, p, sessionId }) => {
+  setSectionWeight: async ({ scope, p, sessionId, service, engine }) => {
     const name = String(p.name)
+    // Our own module's placement IS its body field, so the weight is written
+    // there. A plugin's or preset's placement is decided by its own registration
+    // (a preset entry exposes no order key — persona's order comes from the
+    // harness's central table), so for those the weight is held locally as the
+    // outgoing order and applied at send time.
+    if (engine?.isOwnModuleForSession(sessionId, name) === true) {
+      await service.updateModule('agent', name, { order: p.weight === null || p.weight === undefined ? undefined : Number(p.weight) }, sessionId)
+      return
+    }
     const value = scope.get()
     const weights = { ...(value.sectionWeights ?? {}) }
     const session = { ...(weights[sessionId] ?? {}) }

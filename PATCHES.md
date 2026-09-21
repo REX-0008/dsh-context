@@ -42,68 +42,62 @@ import { applyOur } from '../our/index'
 > per-section view is served on demand from the plugin's own route, so upstream's
 > projection keys are untouched.
 
-## 3. `src/client/components/contextView.tsx` — import
+## 3. `src/client/components/contextView.tsx` — import + our panel
 
-**Anchor**: the import block, right after `import { makeErrorBoundary } from './errorBoundary'`
+**Import** (after `import { makeContextBrowser } from './browser'`):
 
 ```ts
-// OUR INSERT POINT (PATCHES.md #3): the context-management card (see src/our/).
-import { ContextManager } from '../../our/client/ContextManager'
+import type { ContextBrowserProps } from './browser'
 ```
 
-## 4. `src/client/components/contextView.tsx` — our own row of cards
-
-**Anchor**: inside the returned tree, immediately **before**
-`<div className="lc-cols lc-cols-main">`
+**Panel** — inside `.lc-cols-main`, the panel takes the BROWSER's own column and
+carries the browser inside it (one browser on the page, not two):
 
 ```tsx
-        {/* OUR INSERT POINT (PATCHES.md #4): the write layer's own row — the new
-            context-management panel (his browser shell, our section editing)
-            beside the older management card. One card per column keeps both
-            readable at the shared 360px floor. */}
-        {typeof sessionId === 'string' ? (
-          <div className="lc-cols lc-cols-main">
-            <div className="lc-col flex-1 min-w-[min(360px,100%)]"><ContextBrowserPanel sessionId={sessionId} /></div>
-            <div className="lc-col flex-1 min-w-[min(360px,100%)]"><ContextManager sessionId={sessionId} /></div>
-          </div>
-        ) : null}
+<div className="lc-col lc-col-browser flex-1 min-w-[min(360px,100%)]">
+  {typeof sessionId === 'string' ? (
+    <ContextManagementPanel sessionId={sessionId}
+      browser={hooks => browser({ ...hooks, titleOverride: '上下文管理' })} />
+  ) : browserCard}
+</div>
 ```
 
-with the matching imports next to #3:
+Rewritten lines: the original `const browserCard = (` call becomes
+`const browserCard = browser()` (a builder, so the panel can inject its hooks),
+and the browser's column now renders the panel instead of `{browserCard}`.
 
-```ts
-import { ContextManager } from '../../our/client/ContextManager'
-import { ContextBrowserPanel } from '../../our/client/ContextBrowserPanel'
-```
-
-> History: insert points #5/#6 (a `rowAction` prop on `browser.tsx`) were
-> **reverted** — the write layer now renders upstream's browser as a whole
-> component inside its own card, so `browser.tsx` is back to byte-identical with
-> upstream. Only the two insert points above remain.
-## 5. `src/client/components/browser.tsx` — system-category hooks
+## 4. `src/client/components/browser.tsx` — system-category hooks
 
 **Anchor**: `ContextBrowserProps`, right after `onDetailRetry?: () => void`
 
 ```ts
-  systemRows?: (row: BrowserRowBuilder) => ReactNode
+  systemRows?: (
+    row: BrowserRowBuilder,
+    body: (name: string, text: string, extra?: ReactNode) => ReactNode,
+    toolbar: (value: string, onChange: (next: string) => void) => ReactNode,
+    pinnedSeq: number | null,
+  ) => ReactNode
   systemCount?: number
   systemDeliveredLabel?: string
   titleOverride?: string
 ```
 
-plus the exported `BrowserRowBuilder` type right after the interface, three
-guard lines in `toolCount` / `singleKeyOf` / `toggleCat`, and the branch at the
-top of `catBody('system')` that renders the caller's rows above the delivered
-row. Without any of these props, rendering is unchanged.
+plus the exported `BrowserRowBuilder` type after the interface, the
+`SectionBody` helper, and four small branches in `toolCount` / `singleKeyOf` /
+`toggleCat` / `catBody('system')`. Without any of these props, rendering is
+unchanged.
 
-## 6. `src/client/index.ts` — our stylesheet
+Rewritten lines (3): `toolCount` gains the caller's count; `singleKeyOf('system')`
+returns null when the caller supplies rows; `catBody`'s system branch defers to
+them; the card title reads `titleOverride ?? t('browser.title')`.
+
+## 5. `src/client/index.ts` — our stylesheet
+
 **Anchor**: after the last upstream `styles/*.css` import.
 
 ```ts
 import './styles/contextManagement.css'
 ```
-
----
 
 ## Local identity (not an insert point)
 

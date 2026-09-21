@@ -565,27 +565,20 @@ export function makeContextView(
             All columns share the 360px floor (`min-w-[min(360px,100%)]`): the
             rows wrap at it, and a sub-360px pane narrows the column instead
             of overflowing. */}
-        {/* OUR INSERT POINT (PATCHES.md #4): the write layer's own row. Our panel
-            IS upstream's browser with a section list on top (same component,
-            same props), so the browser lives inside it — not beside it. */}
-        {typeof sessionId === 'string' ? (
-          <div className="lc-cols lc-cols-main">
-            {/* The column wrapper is what carries the width: `flex-1` claims the
-                row's spare space and `min-w-[min(360px,100%)]` is the shared
-                floor every card in this view rides. A card placed directly in
-                the row (no wrapper) collapses to its content width. */}
-            <div className="lc-col flex-1 min-w-[min(360px,100%)]">
-              <ContextManagementPanel sessionId={sessionId}
-                browser={hooks => browser({ ...hooks, titleOverride: '上下文管理' })} />
-            </div>
-          </div>
-        ) : null}
-
         <div className="lc-cols lc-cols-main">
           <div className="lc-col flex-1 min-w-[min(360px,100%)]">{compositionCard}{trendCard}</div>
-          {/* In his own tab the browser still sits in its own column; our panel
-              above carries a second instance for the management view. */}
-          <div className="lc-col lc-col-browser flex-1 min-w-[min(360px,100%)]">{browserCard}</div>
+          {/* OUR INSERT POINT (PATCHES.md #4): the management panel takes the
+              browser's own column and carries the browser inside it.
+              The panel IS the browser — same component, same props, only its
+              title changed — so exactly ONE browser is mounted. Rendering the
+              bare `browserCard` here as well would put two DNA switches, two
+              step pickers and two of every category on the page. */}
+          <div className="lc-col lc-col-browser flex-1 min-w-[min(360px,100%)]">
+            {typeof sessionId === 'string' ? (
+              <ContextManagementPanel sessionId={sessionId}
+                browser={hooks => browser({ ...hooks, titleOverride: '上下文管理' })} />
+            ) : browserCard}
+          </div>
         </div>
 
         <div className="lc-cols">

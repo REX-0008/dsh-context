@@ -62,6 +62,18 @@ export interface ContextAssemblerService {
    */
   presetEntriesForSession(sessionId: string): PresetEntryInfo[]
   /**
+   * Whether a section is injected by THIS plugin (a "config" section).
+   *
+   * It decides the write path: our own modules have no separate body — this
+   * plugin's persisted module registry IS both the source and the body — so an
+   * edit writes that record directly. Every other kind keeps its real text
+   * elsewhere and is only adjusted on the way out.
+   * @param sessionId - the agent (= session) id.
+   * @param name - the section name as the assembly reports it.
+   * @returns true when the section comes from this plugin's own modules.
+   */
+  isOwnModuleForSession(sessionId: string, name: string): boolean
+  /**
    * The preset id this conversation runs on — the key naming the preset-level
    * disable list, so a section can be switched off for a preset as a whole.
    * @param sessionId - the agent (= session) id.

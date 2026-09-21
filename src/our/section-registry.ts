@@ -30,13 +30,6 @@ export interface SectionOrigin {
 /** What this registry exposes to the rest of the plugin. */
 export interface SectionRegistry {
   /**
-   * Record one section's origin.
-   * @param name - section name.
-   * @param order - the order the registrant passed.
-   * @param plugin - the registrant's fiber name.
-   */
-  note(name: string, order: number, plugin: string | undefined): void
-  /**
    * Look one section's origin up.
    * @param name - section name.
    * @returns the observed origin, or undefined when this plugin never saw it register.
@@ -128,9 +121,6 @@ export function createSectionRegistry(ctx: Context): SectionRegistry {
   }
 
   return {
-    note(name, order, plugin) {
-      observed.set(name, { order, ...(plugin === undefined ? {} : { plugin }) })
-    },
     originOf(name) {
       return observed.get(name)
     },
