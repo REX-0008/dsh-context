@@ -62,8 +62,25 @@ export interface ContextPanelSettings {
   conversationOverrides: Record<string, Record<string, PromptModulePatch>>
   /** agent 级工具限制（按工具名 → filter）。 */
   toolRestrictions: Record<string, { allow?: string[]; deny?: string[] }>
-  /** 全局注入的 section 开关（按 section 名；waterfall 组装时移除被禁用的）。 */
-  disabledSections: string[]
+  /**
+   * Sections disabled for every conversation under the same PRESET (the
+   * "preset off" state): keyed by preset id, then section name is membership.
+   *
+   * Three levels exist; this pair covers the two the panel owns:
+   * - the deployment (profile) level is NOT managed here;
+   * - preset level = this field, so every conversation on that preset is affected;
+   * - conversation level = {@link conversationDisabledSections}.
+   *
+   * Disabling a section only stops its TEXT from being sent; it never unloads the
+   * plugin that registered it.
+   */
+  presetDisabledSections?: Record<string, string[]>
+  /**
+   * Sections disabled for ONE conversation only: keyed by session id, then
+   * section name is membership. Takes effect for this conversation alone, so a
+   * section can be off here and on in every other conversation.
+   */
+  conversationDisabledSections?: Record<string, string[]>
   /**
    * Per-agent section text overrides, keyed by section name: the "plugin"
    * source kind is adjusted here instead of in its own file, so a third-party
@@ -91,7 +108,8 @@ export const EMPTY_CONFIG: ContextPanelSettings = {
   modules: {},
   conversationOverrides: {},
   toolRestrictions: {},
-  disabledSections: [],
+  presetDisabledSections: {},
+  conversationDisabledSections: {},
   sectionOverrides: {},
   sectionWeights: {},
   sectionOriginals: {},

@@ -84,6 +84,11 @@ export interface ContextBrowserProps {
      * and behaves identically here.
      */
     toolbar: (value: string, onChange: (next: string) => void) => ReactNode,
+    /**
+     * The step currently shown, or null for "live". A caller uses it to tell an
+     * already-sent step from the one still being configured.
+     */
+    pinnedSeq: number | null,
   ) => ReactNode
   /**
    * OUR INSERT POINT (PATCHES.md #6): the `system` category's item count while
@@ -971,6 +976,7 @@ export function makeContextBrowser(
                 elemRow,
                 (name, text, extra) => <SectionBody name={name} text={text} extraActions={extra} />,
                 (value, onChange) => <RowToolbar value={value} placeholder={t('browser.search.system')} onChange={onChange} />,
+                sel === 'live' ? null : sel,
               )}
               <div className="lc-br-divider" />
               {delivered}

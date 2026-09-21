@@ -59,6 +59,11 @@ export interface SystemSectionInfo {
    * needs regenerating. The panel flags this instead of showing a stale number.
    */
   staleTable: boolean
+  /**
+   * Which level switched this section off: this conversation alone, or the
+   * preset (every conversation running it). Absent while it is enabled.
+   */
+  disabledAt?: 'conversation' | 'preset'
 }
 
 /** The state route's value. */
@@ -69,6 +74,8 @@ export interface PanelState {
   systemSections: SystemSectionInfo[] | null
   /** Which dsh version the fallback table was generated from. */
   knownSectionsSource?: string
+  /** The preset this conversation runs on (labels the preset-level state). */
+  presetId?: string
 }
 
 /** Read the panel state (settings, dirty flag, preset entries, per-section assembly). */
@@ -82,6 +89,7 @@ export async function fetchState(sessionId: string): Promise<PanelState> {
     presetEntries: json.value?.presetEntries ?? [],
     systemSections: json.value?.systemSections ?? null,
     knownSectionsSource: json.value?.knownSectionsSource,
+    presetId: json.value?.presetId,
   }
 }
 

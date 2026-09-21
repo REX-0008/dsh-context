@@ -137,7 +137,13 @@ function stateHandler(wiring: Wiring) {
       // currently suppressed, whether its text was edited, and — when the
       // plugin has since changed the original — that the backup no longer
       // matches (which is what offers a comparison).
-      const disabled = new Set(value?.disabledSections ?? [])
+      // Two disable levels the panel owns: this conversation, and the preset it
+      // runs on (a section off for a preset is off in every conversation using
+      // it). The deployment level exists but is deliberately not managed here.
+      const conversationOff = new Set(value?.conversationDisabledSections?.[sessionId] ?? [])
+      // The preset NAME (what the panel shows) and the per-preset off list.
+      const presetId = engine === undefined ? undefined : engine.presetIdForSession(sessionId)
+      const presetOff = new Set(presetId === undefined ? [] : (value?.presetDisabledSections?.[presetId] ?? []))
       const overrides = value?.sectionOverrides?.[sessionId] ?? {}
       const weights = value?.sectionWeights?.[sessionId] ?? {}
       const originals = value?.sectionOriginals?.[sessionId] ?? {}
@@ -159,7 +165,12 @@ function stateHandler(wiring: Wiring) {
           name: section.name,
           text: edited ? (overrides[section.name] as string) : section.text,
           kind: ownModules.has(section.name) ? 'config' as const : inferKind(section.name),
-          enabled: !disabled.has(section.name),
+          // Tri-state, naming which level switched it off so the panel can say
+          // so rather than showing a bare "off".
+          enabled: !conversationOff.has(section.name) && !presetOff.has(section.name),
+          ...(presetOff.has(section.name)
+            ? { disabledAt: 'preset' as const }
+            : conversationOff.has(section.name) ? { disabledAt: 'conversation' as const } : {}),
           edited,
           originalChanged,
           // Placement/owner resolved above: observed live, filled from the
@@ -184,6 +195,8 @@ function stateHandler(wiring: Wiring) {
           systemSections,
           /** Where the fallback table was generated from (shown in the panel). */
           knownSectionsSource: KNOWN_SECTIONS_SOURCE,
+          /** The preset this conversation runs on (labels the preset-level state). */
+          ...(presetId === undefined ? {} : { presetId }),
           /**
            * How many sections each source holds for this session. The panel
            * lists one merged view, so when it looks short this names which
@@ -223,13 +236,36 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
   setScope: ({ service, p }) => service.setScope(p.scope as 'conversation' | 'agent'),
   setAutoSyncPreset: ({ service, p }) => service.setAutoSyncPreset(p.enabled === true),
   setPanelWidth: ({ scope, p }) => scope.update({ panelWidth: typeof p.width === 'number' ? p.width : 720 }),
-  setGlobalSectionEnabled: ({ scope, p }) => {
+  /**
+   * Set one section's state at ONE level.
+   *
+   * `level: 'conversation'` affects this conversation only; `level: 'preset'`
+   * affects every conversation running the same preset. Disabling stops the
+   * section's TEXT from being sent — it does not unload the plugin that
+   * registered it.
+   */
+  setSectionLevel: ({ scope, p, sessionId, engine }) => {
     const name = typeof p.name === 'string' ? p.name : ''
-    const enabled = p.enabled === true
-    const current = new Set(scope.get().disabledSections ?? [])
-    if (enabled) current.delete(name)
-    else current.add(name)
-    return scope.update({ disabledSections: [...current] })
+    const level = p.level === 'preset' ? 'preset' : 'conversation'
+    const off = p.off === true
+    const value = scope.get()
+    if (level === 'conversation') {
+      const all = { ...(value.conversationDisabledSections ?? {}) }
+      const mine = new Set(all[sessionId] ?? [])
+      if (off) mine.add(name)
+      else mine.delete(name)
+      all[sessionId] = [...mine]
+      return scope.update({ conversationDisabledSections: all })
+    }
+    const presetId = engine?.presetIdForSession(sessionId)
+    // Without a preset there is nothing to scope a preset-level switch to.
+    if (presetId === undefined) return
+    const all = { ...(value.presetDisabledSections ?? {}) }
+    const mine = new Set(all[presetId] ?? [])
+    if (off) mine.add(name)
+    else mine.delete(name)
+    all[presetId] = [...mine]
+    return scope.update({ presetDisabledSections: all })
   },
   /**
    * Edit one section's text. The first edit also stores a backup of the

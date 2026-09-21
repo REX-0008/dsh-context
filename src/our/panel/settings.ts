@@ -34,7 +34,8 @@ export const DEFAULT_SETTINGS: ContextPanelSettings = {
   modules: { ...SEED_MODULES },
   conversationOverrides: {},
   toolRestrictions: {},
-  disabledSections: [],
+  presetDisabledSections: {},
+  conversationDisabledSections: {},
 }
 
 /** namespace schema（schemastery 原语：z.dict 替代 zod 的 z.record；字段默认可选）。 */
@@ -45,7 +46,8 @@ export const CONTEXT_PANEL_SCHEMA: z<ContextPanelSettings> = z.object({
   modules: z.dict(PatchSchema),
   conversationOverrides: z.dict(z.dict(PatchSchema)),
   toolRestrictions: z.dict(z.object({ allow: z.array(z.string()), deny: z.array(z.string()) })),
-  disabledSections: z.array(z.string()),
+  presetDisabledSections: z.dict(z.array(z.string())),
+  conversationDisabledSections: z.dict(z.array(z.string())),
   sectionOverrides: z.dict(z.dict(z.string())),
   sectionWeights: z.dict(z.dict(z.number())),
   sectionOriginals: z.dict(z.dict(z.string())),

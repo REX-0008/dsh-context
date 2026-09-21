@@ -259,7 +259,7 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
         // list a disabled section (greyed out) and let the user re-enable it,
         // so the pre-filter view is the one worth keeping.
         this.lastSections.set(agent.id, transformed.sections.map(s => ({ name: s.name, text: s.text })))
-        return this.rewriteSections(agent.id, transformed)
+        return this.rewriteSections(agent.id, transformed, this.presetIdFor(agent))
       })
     }
     this.reregister(agent, current)
@@ -338,6 +338,26 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
   /** @inheritdoc */
   getModuleViewForSession(sessionId: string): PromptModule[] {
     return this.agentFor(sessionId) === undefined ? [] : this.mergedModules(sessionId)
+  }
+
+  /**
+   * The agent's preset id, or undefined when it runs without one.
+   * @param agent - the agent to read.
+   * @returns the preset id, when the agentPreset projection carries one.
+   */
+  private presetIdFor(agent: Agent): string | undefined {
+    try {
+      const value = this.projectionReader(agent, 'agentPreset')
+      return typeof value === 'string' && value !== '' ? value : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  /** @inheritdoc */
+  presetIdForSession(sessionId: string): string | undefined {
+    const agent = this.agentFor(sessionId)
+    return agent === undefined ? undefined : this.presetIdFor(agent)
   }
 
   /** @inheritdoc */
@@ -467,11 +487,22 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
    * end up needing an override here.
    * @param agentId - the agent whose config applies.
    * @param assembly - the assembly produced by upstream listeners.
+   * @param presetId - the agent's preset, naming the preset-level disable list.
    * @returns the assembly to send onward.
    */
-  private rewriteSections<T extends { sections: Array<{ name: string; text: string }> }>(agentId: string, assembly: T): T {
+  private rewriteSections<T extends { sections: Array<{ name: string; text: string }> }>(
+    agentId: string,
+    assembly: T,
+    presetId?: string,
+  ): T {
     const config = this.getConfig()
-    const disabled = new Set(config.disabledSections ?? [])
+    // Two disable levels apply here (the deployment level is not ours to
+    // manage): a conversation-level list scoped to this agent, and a
+    // preset-level list shared by every conversation on that preset.
+    const disabled = new Set([
+      ...(config.conversationDisabledSections?.[agentId] ?? []),
+      ...(presetId === undefined ? [] : (config.presetDisabledSections?.[presetId] ?? [])),
+    ])
     const overrides = config.sectionOverrides?.[agentId] ?? {}
     const weights = config.sectionWeights?.[agentId] ?? {}
     if (disabled.size === 0 && Object.keys(overrides).length === 0 && Object.keys(weights).length === 0) return assembly

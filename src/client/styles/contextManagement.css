@@ -43,7 +43,8 @@
 }
 
 /* A disabled section keeps its row (so it can be switched back on) but reads as
-   inactive. */
+   inactive. Both disable levels share this; the button's label distinguishes
+   them (对话禁用 / 预设禁用). */
 .lc-br-sect-off {
   opacity: 0.55;
 }

@@ -41,7 +41,7 @@ import { revealInScrollParent } from '../revealScroll'
 import { makeErrorBoundary } from './errorBoundary'
 import type { ContextBrowserProps } from './browser'
 // OUR INSERT POINT (PATCHES.md #3): the context-management card (see src/our/).
-import { ContextManager } from '../../our/client/ContextManager'
+
 import { ContextManagementPanel } from '../../our/client/ContextManagementPanel'
 
 // The context page scrolls inside the conversation's shared `[data-conversation-scroll]` container, which the chat bottom-anchors — mirror
@@ -578,7 +578,6 @@ export function makeContextView(
               <ContextManagementPanel sessionId={sessionId}
                 browser={hooks => browser({ ...hooks, titleOverride: '上下文管理' })} />
             </div>
-            <div className="lc-col flex-1 min-w-[min(360px,100%)]"><ContextManager sessionId={sessionId} /></div>
           </div>
         ) : null}
 

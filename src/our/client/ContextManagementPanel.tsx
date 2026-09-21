@@ -59,6 +59,7 @@ export interface ContextManagementPanelProps {
       row: BrowserRowBuilder,
       body: (name: string, text: string, extra?: ReactNode) => ReactNode,
       toolbar: (value: string, onChange: (next: string) => void) => ReactNode,
+      pinnedSeq: number | null,
     ) => ReactNode
     systemCount: number
     /** Caption for the delivered-prompt row kept below the split list. */
@@ -100,11 +101,17 @@ export function ContextManagementPanel({ sessionId, browser }: ContextManagement
   const sections: SystemSectionInfo[] = state?.systemSections ?? []
   const stale = sections.some(section => section.staleTable)
 
+
   const systemRows = (
     row: BrowserRowBuilder,
     body: (name: string, text: string, extra?: ReactNode) => ReactNode,
     toolbar: (value: string, onChange: (next: string) => void) => ReactNode,
+    pinnedSeq: number | null,
   ): ReactNode => {
+    // A past step is already sent, so the split list (the editable
+    // configuration) is replaced by a note rather than pretending those rows
+    // can be changed: edits only ever apply to the current conversation.
+    const atPastStep = pinnedSeq !== null
     // The row filter: matches a section's name, its source plugin, and its text,
     // which is what makes a long section list navigable.
     const needle = query.trim().toLowerCase()
@@ -116,24 +123,30 @@ export function ContextManagementPanel({ sessionId, browser }: ContextManagement
         || section.text.toLowerCase().includes(needle))
     return (
     <>
-      {stale ? (
+      {atPastStep ? (
+        <div className="lc-br-note">
+          {'正在查看历史时点：编辑功能只在当前对话有效，无法追溯修改旧对话。切回「当前」即可编辑。'}
+        </div>
+      ) : null}
+      {stale && !atPastStep ? (
         <div className="lc-br-note" title={'实际排序与内置对照表的数值不一致，表需要按当前 dsh 版本重新生成'}>
           {'⚠ 内置对照表与实际排序不一致（对照表生成自 ' + String(state?.knownSectionsSource ?? '未知版本') + '），橙色数值表示该行需要核对。'}
         </div>
       ) : null}
-      {sections.length === 0 ? (
+      {sections.length === 0 && !atPastStep ? (
         <div className="lc-br-note">{'该会话尚未组装过系统提示词：开始一轮对话后这里会列出各分节。'}</div>
       ) : null}
+
       {/* The category's own filter toolbar, mounted even when nothing matches so
           the filter can always be cleared. */}
-      {sections.length === 0 ? null : toolbar(query, setQuery)}
+      {atPastStep || sections.length === 0 ? null : toolbar(query, setQuery)}
       {sections.length > 0 && shown.length === 0 ? (
         <div className="lc-br-note">{'没有匹配的分节。'}</div>
       ) : null}
       {/* Scoped so the token-column alignment below applies to OUR rows only:
           upstream's tool/message rows keep their original figure width. */}
       <div className="lc-our-sections">
-      {shown.map((section) => {
+      {(atPastStep ? [] : shown).map((section) => {
         const open = editing === section.name
         const weightEdited = section.weight !== undefined
         const weightValue = weightEdited ? section.weight : section.order
@@ -247,10 +260,26 @@ export function ContextManagementPanel({ sessionId, browser }: ContextManagement
                 {weightValue === undefined ? '—' : String(weightValue)}
               </button>
             )}
-            <button type="button" className={'lc-br-tag' + (section.enabled ? '' : ' lc-br-sect-off')}
-              title={section.enabled ? '下一轮起不再发出这一段' : '下一轮起重新发出这一段'}
-              onClick={(event) => { event.stopPropagation(); void dispatch('setGlobalSectionEnabled', { name: section.name, enabled: !section.enabled }) }}>
-              {section.enabled ? '已启用' : '已停用'}
+            {/* Three states, because two disable levels exist (the deployment
+                level is not managed here). Clicking cycles 已启用 → 对话禁用 →
+                预设禁用 → 已启用, and the tooltip names the current level. */}
+            <button type="button"
+              className={'lc-br-tag' + (section.disabledAt === undefined ? '' : ' lc-br-sect-off')}
+              title={section.disabledAt === 'preset'
+                ? '预设禁用：只要用这个预设的对话都不再发送这一段（不卸载插件，只停发提示词）。点击改为只在当前对话禁用'
+                : section.disabledAt === 'conversation'
+                  ? '对话禁用：只在当前对话不发送这一段，其他对话不受影响。点击改为预设级禁用'
+                  : '已启用：这一段正常发送。点击改为只在当前对话禁用'}
+              onClick={(event) => {
+                event.stopPropagation()
+                const next = section.disabledAt === undefined
+                  ? { level: 'conversation' as const, off: true }
+                  : section.disabledAt === 'conversation'
+                    ? { level: 'preset' as const, off: true }
+                    : { level: 'conversation' as const, off: false }
+                void dispatch('setSectionLevel', { name: section.name, ...next })
+              }}>
+              {section.disabledAt === 'preset' ? '预设禁用' : section.disabledAt === 'conversation' ? '对话禁用' : '已启用'}
             </button>
           </>
         )

@@ -62,6 +62,13 @@ export interface ContextAssemblerService {
    */
   presetEntriesForSession(sessionId: string): PresetEntryInfo[]
   /**
+   * The preset id this conversation runs on — the key naming the preset-level
+   * disable list, so a section can be switched off for a preset as a whole.
+   * @param sessionId - the agent (= session) id.
+   * @returns the preset id, or undefined when the agent has none.
+   */
+  presetIdForSession(sessionId: string): string | undefined
+  /**
    * 按 agent 组装一次系统提示词，返回逐 section 明细（name/text，按 order 排序）。
    * 来源：assemble({ scope })——精确的「哪个 section + 排序」来源，前端据此标注插件与顺序。
    * @param sessionId - agent 的会话 id。
