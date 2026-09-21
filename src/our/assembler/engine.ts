@@ -403,19 +403,58 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
     // why the agent is resolved on demand rather than tracked from an event.
     const agent = this.agentFor(sessionId)
     if (agent === undefined) return null
-    // The capture is keyed by the agent's own id, which may be spelled
-    // differently from the id the caller holds.
-    for (const candidate of sessionIdVariants(sessionId)) {
-      const captured = this.lastSections.get(candidate)
-      if (captured !== undefined && captured.length > 0) return captured
-    }
+    // Ask the prompt service for THIS agent's own assembly, and use the captured
+    // waterfall list only to fill gaps it cannot cover.
+    //
+    // The registry is asked first on purpose: a captured list belongs to
+    // whichever assembly last ran for that agent, and a narrower assembly (a
+    // sub-agent's, or one built for a single step) returns a shorter list. Those
+    // few rows then stood in for the agent's whole prompt, which is why the
+    // panel showed a fraction of the sections. The capture still matters for
+    // sections this layer currently suppresses (they are absent from the filtered
+    // view), so it is merged in rather than dropped.
+    let assemblySections: Array<{ name: string; text: string }> | undefined
     try {
       const scope = scopeOf(agent.ctx)
       const assembly = await agent.ctx.systemPrompt.assemble(scope === undefined ? {} : { scope })
-      return assembly.sections.map((section) => ({ name: section.name, text: section.text }))
+      assemblySections = assembly.sections.map((section) => ({ name: section.name, text: section.text }))
     } catch {
-      return null
+      assemblySections = undefined
     }
+    let captured: Array<{ name: string; text: string }> | undefined
+    for (const candidate of sessionIdVariants(sessionId)) {
+      const hit = this.lastSections.get(candidate)
+      if (hit !== undefined && hit.length > 0) { captured = hit; break }
+    }
+    // Union every source that knows a section, so the list is as complete as the
+    // running prompt allows:
+    //  1. the live assembly — authoritative membership and text for this agent;
+    //  2. the waterfall capture — sections this layer is currently suppressing,
+    //     which the assembly (post-filter) no longer contains;
+    //  3. the prompt registry — every registration for the scope, including ones
+    //     that render empty right now (their text is absent, so they list with
+    //     an empty body rather than being dropped silently).
+    const byName = new Map<string, { name: string; text: string }>()
+    const registry = this.registrySections(agent)
+    if (registry !== undefined) {
+      for (const name of registry.keys()) byName.set(name, { name, text: '' })
+    }
+    for (const section of captured ?? []) byName.set(section.name, section)
+    for (const section of assemblySections ?? []) byName.set(section.name, section)
+    if (byName.size === 0) return assemblySections ?? captured ?? null
+    // Order by the registry's own placement where known (it applies the scope
+    // chain exactly as assembly does), then by the assembly's order for anything
+    // the registry could not report.
+    const assembled = new Map((assemblySections ?? []).map((section, index) => [section.name, index]))
+    return [...byName.values()].sort((a, b) => {
+      const oa = registry?.get(a.name)
+      const ob = registry?.get(b.name)
+      if (oa !== undefined && ob !== undefined && oa !== ob) return oa - ob
+      if (oa !== undefined && ob === undefined) return -1
+      if (oa === undefined && ob !== undefined) return 1
+      return (assembled.get(a.name) ?? Number.MAX_SAFE_INTEGER)
+        - (assembled.get(b.name) ?? Number.MAX_SAFE_INTEGER)
+    })
   }
 
   /**

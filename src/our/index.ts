@@ -144,10 +144,11 @@ function stateHandler(wiring: Wiring) {
       const ownModules = new Set(
         engine === undefined ? [] : engine.getModuleViewForSession(sessionId).map(m => m.name),
       )
-      const systemSections = sections === null ? null : sections.map((section, index) => {
-        // The registry read (widest) is fetched once per request.
+      // The registry read is the widest source, so it is fetched once per request
+      // rather than per section.
       const registeredOrders = engine === undefined ? {} : engine.registeredOrdersForSession(sessionId)
-      const origin = resolveOrigin(wiring.sections, section.name, index, registeredOrders, wiring.bridge?.toolOwnerOf)
+      const systemSections = sections === null ? null : sections.map((section, index) => {
+        const origin = resolveOrigin(wiring.sections, section.name, index, registeredOrders, wiring.bridge?.toolOwnerOf)
         const edited = overrides[section.name] !== undefined
         const backup = originals[section.name]
         // "Changed" compares the ONE stored backup against the plugin's CURRENT
@@ -183,6 +184,15 @@ function stateHandler(wiring: Wiring) {
           systemSections,
           /** Where the fallback table was generated from (shown in the panel). */
           knownSectionsSource: KNOWN_SECTIONS_SOURCE,
+          /**
+           * How many sections each source holds for this session. The panel
+           * lists one merged view, so when it looks short this names which
+           * source came up short instead of leaving it to guesswork.
+           */
+          sectionSources: {
+            listed: sections === null ? 0 : sections.length,
+            registry: Object.keys(registeredOrders).length,
+          },
         },
       }))
     } catch (error) {
