@@ -111,17 +111,39 @@ export interface ContextBrowserProps {
    */
   titleOverride?: string
   /**
-   * OUR INSERT POINT (PATCHES.md #11): renders per-category actions inside a
-   * message category's head (the row carrying the chevron, label, count and
-   * tokens). A caller uses it for an action that belongs to a whole surface
-   * category — pruning is the one this plugin adds.
+   * OUR INSERT POINT (PATCHES.md #11): renders actions on ONE message row's
+   * trailing slot — the same slot a tool row uses for its chips. The action
+   * belongs to that single row (a prune removes that node), not to the category
+   * that happens to contain it.
    */
-  categoryActions?: (category: string) => ReactNode
+  messageRowActions?: (row: MessageRowRef) => ReactNode
   /**
-   * Categories whose head should read as "acted on": the head is outlined so a
-   * pruned category is recognizable without opening it.
+   * Whether one message row is part of a pruned range. Marked rows turn red on
+   * BOTH the row and its expanded body, because a prune removes every node in
+   * the range: the row the user pressed is only the one they identified it by.
    */
-  categoryMarked?: (category: string) => boolean
+  messageRowMarked?: (row: MessageRowRef) => boolean
+  /**
+   * OUR INSERT POINT (PATCHES.md #12): extra rows at the TOP of one category's
+   * body, drawn with this module's own row builder. A caller uses it to add
+   * controls that belong to that category (runtime contexts and injection
+   * sources in the inject category) without the caller re-implementing a row.
+   */
+  categoryRows?: (category: string, row: BrowserRowBuilder) => ReactNode
+  /**
+   * Whether a category has caller-contributed rows, so it stays openable even
+   * when it holds no surface nodes of its own. A predicate rather than calling
+   * `categoryRows` here: that would render the rows twice per pass.
+   */
+  categoryHasRows?: (category: string) => boolean
+  /**
+   * OUR INSERT POINT (PATCHES.md #13): a tool row's own action slot — the same
+   * trailing slot its plugin and hit chips use. A tool has TWO independent
+   * switches, and only the caller knows which one it is offering: disabling the
+   * tool itself (`ctx.tools.restrict`, which fails calls) or disabling the
+   * guidance section named `tool:<name>` (which only stops that text).
+   */
+  toolRowActions?: (toolName: string) => ReactNode
 }
 
 /**
@@ -329,6 +351,20 @@ function RowToolbar(props: {
 }
 
 
+
+/**
+ * One message row as a caller identifies it: the surface node's seq plus the
+ * facts the row already derives. A caller keys its own state on `seq` and uses
+ * `turn` to mark every row of a round the prune would take with it.
+ */
+export interface MessageRowRef {
+  /** The surface node's sequence — this row's durable identity. */
+  seq: number
+  /** The round this row belongs to, when the fold knows it. */
+  turn?: number
+  /** The row's category (user / inject / skill / assistant / tool). */
+  category: string
+}
 
 /**
  * Full tool-row body: description, parsed parameter table (when the schema carries one), raw JSON behind a per-row toggle — the JSON open
@@ -946,11 +982,11 @@ export function makeContextBrowser(
     const elemRow = (
       key: string, tag: ReactNode | null, preview: string,
       tokens: number, time: number | undefined, body: ReactNode,
-      err = false, trailing: ReactNode = null,
+      err = false, trailing: ReactNode = null, marked = false,
     ) => {
       const open = openElem === key
       return (
-        <div key={key} className={'lc-br-elem' + (open ? ' lc-br-elem-on' : '')}>
+        <div key={key} className={'lc-br-elem' + (open ? ' lc-br-elem-on' : '') + (marked ? ' lc-br-elem-pruned' : '')}>
           <button type="button" className="lc-br-elem-row hover:bg-(--dsw-alias-interactive-bg-hover)" onClick={() => { toggleElem(key) }}>
             <span className={'lc-br-chev' + (open ? ' lc-br-chev-on' : '')} />
             {err ? <span className="lc-br-err-dot" title={t('node.failed')} /> : null}
@@ -1100,6 +1136,7 @@ export function makeContextBrowser(
                     </span>
                     : null}
                   <span className="lc-br-hits" title={t('tool.hitsTip')}>{'×' + fmt(toolHitsOf(tool))}</span>
+                  {props.toolRowActions?.(tool.name)}
                 </>
               )
               return elemRow('tool:' + tool.name, null, tool.name, tool.tokens, undefined,
@@ -1178,13 +1215,31 @@ export function makeContextBrowser(
       // The toolbar stays mounted on an empty match, or the filter could
       // never be cleared from the UI.
       const rowctl = <RowToolbar value={rowQuery} placeholder={t('browser.search.' + c)} onChange={setRowQuery} />
-      if (shown.length === 0) {
+      // The caller's own rows for this category, drawn with this module's row
+      // builder so they carry the same frame, chips and expansion as the message
+      // rows below them.
+      const extra = props.categoryRows === undefined ? null : props.categoryRows(c, elemRow)
+      if (shown.length === 0 && extra === null) {
         return <div>{rowctl}<div className="lc-br-note">{t('browser.rowNoMatch')}</div></div>
       }
       return (
         <div>
           {rowctl}
-          {shown.map(({ n, conv, rowErr, tag, preview }) => elemRow(`n${n.seq}`, tag, preview, n.tokens, n.time,
+          {extra}
+          {shown.map(({ n, conv, rowErr, tag, preview }) => {
+            // The row reference the caller keys its state on. `turn` rides the
+            // fold's per-node facts so a prune of one round can mark every row
+            // that round would take.
+            const rowRef: MessageRowRef = {
+              seq: n.seq,
+              category: n.cat,
+              ...(typeof (n as unknown as { turn?: unknown }).turn === 'number'
+                ? { turn: (n as unknown as { turn: number }).turn }
+                : {}),
+            }
+            const marked = props.messageRowMarked?.(rowRef) === true
+            const actions = props.messageRowActions?.(rowRef) ?? null
+            return elemRow(`n${n.seq}`, tag, preview, n.tokens, n.time,
             <NodeContent
               node={n}
               conv={conv}
@@ -1213,7 +1268,10 @@ export function makeContextBrowser(
               // static hint.
               hint={conv === undefined ? missNote : t('browser.noContent')}
             />,
-            rowErr))}
+              rowErr,
+              actions,
+              marked)
+          })}
         </div>
       )
     }
@@ -1296,7 +1354,11 @@ export function makeContextBrowser(
             const countDelta = prevCount !== null ? count - prevCount : null
             const prevTokens = refReq !== null ? (refReq[c.key] || 0) : null
             const tokenDelta = prevTokens !== null ? v - prevTokens : null
-            const openable = count > 0
+            // A category the caller contributes rows to opens even when it holds
+            // no surface nodes of its own: its rows are the point, and an empty
+            // count would otherwise make them unreachable.
+            const callerRows = props.categoryHasRows?.(c.key) === true
+            const openable = count > 0 || callerRows
               || ((c.key === 'system' || c.key === 'tools') && view.header === null)
             const open = openCat === c.key && openable
             return (
@@ -1306,7 +1368,7 @@ export function makeContextBrowser(
                   className={'lc-br-cat-row hover:bg-(--dsw-alias-interactive-bg-hover)'
                     + (open ? ' lc-br-cat-open' : '')
                     + (linked && props.hoverKey === c.key ? ' lc-br-cat-on' : '')
-                    + (props.categoryMarked?.(c.key) === true ? ' lc-br-cat-pruned' : '')}
+                    }
                   /* v8 ignore start -- the handlers exist only when linked,
                      and linked already requires onHoverKey defined (above). */
                   onMouseEnter={linked ? () => { if (props.onHoverKey !== undefined) props.onHoverKey(c.key) } : undefined}
@@ -1338,12 +1400,7 @@ export function makeContextBrowser(
                   </span>
                   <span className="lc-br-pct">{total > 0 ? `${Math.round(v / total * 100)}%` : ''}</span>
                 </button>
-                {/* The caller's per-category actions ride BESIDE the head button
-                    (not inside it): they are separate controls, and nesting a
-                    button in a button is invalid markup. */}
-                {props.categoryActions === undefined ? null : (
-                  <span className="lc-br-cat-actions">{props.categoryActions(c.key)}</span>
-                )}
+
                 {open ? <div className="lc-br-body">{catBody(c.key)}</div> : null}
               </div>
             )

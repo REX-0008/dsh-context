@@ -17,7 +17,7 @@
  * @module @our/context-panel-write/our/client/ContextManagementPanel
  */
 import { useCallback, useEffect, useState, type ReactElement, type ReactNode } from 'react'
-import type { BrowserRowBuilder } from '../../client/components/browser'
+import type { BrowserRowBuilder, MessageRowRef } from '../../client/components/browser'
 import type { Translate } from '../../client/i18n'
 import { dispatchAction, fetchState, type PanelState, type SectionKind, type SystemSectionInfo } from './panel-api'
 
@@ -67,10 +67,16 @@ export interface ContextManagementPanelProps {
     systemCount: number
     /** Caption for the delivered-prompt row kept below the split list. */
     deliveredLabel: string
-    /** Per-category head actions (the prune control on message categories). */
-    categoryActions: (category: string) => ReactNode
-    /** Whether a category head should read as pruned. */
-    categoryMarked: (category: string) => boolean
+    /** Per-row actions on message rows (the prune control). */
+    messageRowActions: (row: MessageRowRef) => ReactNode
+    /** Whether a message row is part of a pruned range. */
+    messageRowMarked: (row: MessageRowRef) => boolean
+    /** Extra rows at the top of a category body (contexts and injection sources). */
+    categoryRows: (category: string, row: BrowserRowBuilder) => ReactNode
+    /** Whether that category has such rows, so it stays openable when empty. */
+    categoryHasRows: (category: string) => boolean
+    /** A tool row's own switch (the tool itself, not its guidance section). */
+    toolRowActions: (toolName: string) => ReactNode
   }) => ReactNode
 }
 
@@ -84,10 +90,11 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
   const [weightDraft, setWeightDraft] = useState('')
   const [query, setQuery] = useState('')
   const [error, setError] = useState<string | null>(null)
-  // Which message categories have been pruned, with the figures the head banner
-  // reports. Held per session in memory: the durable record of a prune is the
-  // session log itself (a compaction/prune event), not a panel preference.
-  const [pruned, setPruned] = useState<Record<string, { count: number; tokens: number }>>({})
+  // The round a parked prune will take, or null. A prune removes a balanced
+  // RANGE, which is a round's worth of messages and tool results, so the marked
+  // set is identified by round rather than by the single row that was pressed.
+  // Held in memory: the durable record of a prune is the session log itself.
+  const [prunedTurn, setPrunedTurn] = useState<number | null>(null)
 
   const refresh = useCallback(async (): Promise<void> => {
     try {
@@ -116,6 +123,12 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
   /** Injection source kinds offered for suppression, and those already off. */
   const injections = state?.observedInjections ?? []
   const suppressedInjections = new Set(state?.suppressedInjections ?? [])
+  /** Tools this conversation currently denies (the tool switch's off state). */
+  const deniedTools = new Set(
+    Object.entries(state?.settings?.toolRestrictions ?? {})
+      .filter(([, filter]) => (filter.deny ?? []).length > 0)
+      .map(([name]) => name),
+  )
 
 
   const systemRows = (
@@ -321,13 +334,25 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
       })}
       </div>
 
-      {/* Runtime contexts: the declared, dynamic half. Same row idiom as the
-          sections above, because they take the same two decisions. */}
-      {contexts.length > 0 ? (
-        <>
-          <div className="lc-br-divider" />
-          <div className="lc-br-note" title={t('our.contexts.tip')}>{t('our.contexts')}</div>
-          <div className="lc-our-sections">
+    </>
+    )
+  }
+
+  /**
+   * The rows this panel adds to a category body.
+   *
+   * Runtime contexts and injection sources belong to the INJECT category (they
+   * are the dynamic, user-role half of what the model sees), not to the system
+   * prompt, so they are rendered where they belong instead of inside the system
+   * category that carries the sections.
+   */
+  const categoryRows = (category: string, row: BrowserRowBuilder): ReactNode => {
+    if (category !== 'inject') return null
+    return (
+      <>
+        {contexts.length > 0 ? (
+          <>
+            <div className="lc-br-note" title={t('our.contexts.tip')}>{t('our.contexts')}</div>
             {contexts.map(context => {
               const off = context.disabledAt !== undefined
               return row(
@@ -336,56 +361,50 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
                 context.name,
                 sizeOf(context.text),
                 undefined,
-                body(context.name, context.text),
+                <div className="lc-br-note" style={{ whiteSpace: 'pre-wrap' }}>{context.text}</div>,
                 false,
-                <>
-                  {context.edited ? <span className="lc-br-tag lc-br-sect-edited" title={t('our.chip.editedTip')}>{t('our.chip.edited')}</span> : null}
-                  <button type="button"
-                    className={'lc-br-tag' + (off ? ' lc-br-sect-off' : '')}
-                    title={off ? t('our.state.offConversationTip') : t('our.state.onTip')}
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      void dispatch('setContextLevel', { name: context.name, off: !off })
-                    }}>
-                    {off ? t('our.state.offConversation') : t('our.state.on')}
-                  </button>
-                </>,
+                <button type="button"
+                  className={'lc-br-tag' + (off ? ' lc-br-sect-off' : '')}
+                  title={off ? t('our.state.offConversationTip') : t('our.state.onTip')}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    void dispatch('setContextLevel', { name: context.name, off: !off })
+                  }}>
+                  {off ? t('our.state.off') : t('our.state.on')}
+                </button>,
               )
             })}
-          </div>
-        </>
-      ) : null}
+          </>
+        ) : null}
 
-      {/* Injection sources: these append to the step batch rather than registering
-          a prompt contribution, so the only action is suppression. Filtering only
-          — nothing is rewritten. */}
-      {injections.length > 0 ? (
-        <>
-          <div className="lc-br-divider" />
-          <div className="lc-br-note">{t('our.injections')}</div>
-          <div className="lc-our-sections">
+        {injections.length > 0 ? (
+          <>
+            <div className="lc-br-divider" />
+            <div className="lc-br-note">{t('our.injections')}</div>
             {injections.map(kind => {
               const off = suppressedInjections.has(kind)
-              return (
-                <div key={kind} className="lc-br-elem">
-                  <div className="lc-br-elem-row" style={{ cursor: 'default' }}>
-                    <span className="lc-br-kind">{t('our.kind.plugin')}</span>
-                    <span className="lc-br-elem-name">{kind}</span>
-                    <span className="lc-br-tag">{off ? t('our.injections.off') : ''}</span>
-                    <button type="button"
-                      className={'lc-br-tag' + (off ? ' lc-br-sect-off' : '')}
-                      title={t('our.injections.tip')}
-                      onClick={() => { void dispatch('setInjectionSuppressed', { kind, off: !off }) }}>
-                      {off ? t('our.injections.restore') : t('our.injections.suppress')}
-                    </button>
-                  </div>
-                </div>
+              return row(
+                'inj:' + kind,
+                <i className="lc-br-kind">{t('our.kind.plugin')}</i>,
+                kind,
+                0,
+                undefined,
+                <div className="lc-br-note">{t('our.injections.tip')}</div>,
+                false,
+                <button type="button"
+                  className={'lc-br-tag' + (off ? ' lc-br-sect-off' : '')}
+                  title={t('our.injections.tip')}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    void dispatch('setInjectionSuppressed', { kind, off: !off })
+                  }}>
+                  {off ? t('our.state.off') : t('our.state.on')}
+                </button>,
               )
             })}
-          </div>
-        </>
-      ) : null}
-    </>
+          </>
+        ) : null}
+      </>
     )
   }
 
@@ -397,48 +416,80 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
   const pending = state?.prunePending === true
 
   /**
-   * The per-category prune control.
+   * The prune control, on ONE message row.
    *
-   * Pressing it only PARKS the request: the prune runs at the next turn boundary
+   * The button sits on the row the user picked, but the action is not per row:
+   * the harness removes a balanced RANGE, so pressing any row of a round removes
+   * that round's messages and tool results together. Every row the prune would
+   * take is therefore marked as part of the range — marking only the pressed row
+   * would misrepresent what disappears.
+   *
+   * Pressing only PARKS the request: the prune runs at the next turn boundary
    * and stays cancellable until then, so the control switches to a cancel action
-   * while it waits. Once it has run the action is irreversible (the harness has
-   * no un-replace for a surface range), which is why the control warns before
-   * parking and the head keeps a red outline afterwards.
+   * while it waits. Once it has run it cannot be undone (the harness has no
+   * un-replace for a surface range), which is why the control warns first.
    */
-  const categoryActions = (category: string): ReactNode => {
-    if (!PRUNABLE.has(category)) return null
-    const done = pruned[category]
+  const messageRowActions = (row: MessageRowRef): ReactNode => {
+    if (!PRUNABLE.has(row.category)) return null
+    if (pending) {
+      return (
+        <button type="button" className="lc-br-prune-pending"
+          title={t('our.prune.pendingBanner')}
+          onClick={(event) => { event.stopPropagation(); void dispatch('cancelPrune') }}>
+          {t('our.prune.cancel')}
+        </button>
+      )
+    }
     return (
-      <>
-        {done !== undefined ? (
-          <span className="lc-br-prune-mark" title={t('our.prune.mark')}>{t('our.prune.mark')}</span>
-        ) : null}
-        {pending ? (
-          <button type="button" className="lc-br-prune-pending"
-            title={t('our.prune.pendingBanner')}
-            onClick={(event) => { event.stopPropagation(); void dispatch('cancelPrune') }}>
-            {t('our.prune.cancel')}
-          </button>
-        ) : (
-          <button type="button" className="lc-br-prune"
-            title={t('our.prune.tip')}
-            onClick={(event) => {
-              event.stopPropagation()
-              // The warning is the point: the action cannot be undone once the
-              // next boundary passes, so the confirmation names both facts.
-              if (!window.confirm(t('our.prune.confirm'))) return
-              setPruned(current => ({
-                ...current,
-                [category]: { count: 0, tokens: 0 },
-              }))
-              void dispatch('requestPrune')
-            }}>
-            {t('our.prune')}
-          </button>
-        )}
-      </>
+      <button type="button" className="lc-br-prune"
+        title={t('our.prune.tip')}
+        onClick={(event) => {
+          event.stopPropagation()
+          // The warning is the point: the action cannot be undone once the next
+          // boundary passes, so the confirmation names both facts.
+          if (!window.confirm(t('our.prune.confirm'))) return
+          setPrunedTurn(row.turn ?? row.seq)
+          void dispatch('requestPrune')
+        }}>
+        {t('our.prune')}
+      </button>
     )
   }
+
+  /**
+   * The tool enable/disable switch, on the tool's own row.
+   *
+   * This is the TOOL switch (`tools.restrict`): disabling it makes calls fail.
+   * It is deliberately distinct from the `tool:<name>` guidance section switch
+   * in the system prompt, which only stops that text while the tool stays
+   * callable — the two read as one action unless each says what it does.
+   */
+  const toolRowActions = (toolName: string): ReactNode => {
+    const off = deniedTools.has(toolName)
+    return (
+      <button type="button"
+        className={'lc-br-tag' + (off ? ' lc-br-sect-off' : '')}
+        title={off ? t('our.toolOffTip') : t('our.toolOnTip')}
+        onClick={(event) => {
+          event.stopPropagation()
+          void dispatch('setToolRestriction', {
+            name: toolName,
+            filter: off ? {} : { deny: ['*'] },
+          })
+        }}>
+        {off ? t('our.state.off') : t('our.state.on')}
+      </button>
+    )
+  }
+
+  /**
+   * Whether a row belongs to the pruned range.
+   *
+   * A prune takes a whole round, so the range is identified by the round of the
+   * row that was pressed; rows without a round fall back to their own seq.
+   */
+  const messageRowMarked = (row: MessageRowRef): boolean =>
+    prunedTurn !== null && (row.turn ?? row.seq) === prunedTurn
 
   // No card of our own: the panel IS the browser (its system category lists the
   // prompt's sections), so the title is retitled in place rather than framed by
@@ -453,8 +504,12 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
         systemRows,
         systemCount: sections.length,
         deliveredLabel: t('our.delivered'),
-        categoryActions,
-        categoryMarked: (category: string) => pruned[category] !== undefined,
+        messageRowActions,
+        messageRowMarked,
+        categoryRows,
+        categoryHasRows: (category: string) =>
+          category === 'inject' && (contexts.length > 0 || injections.length > 0),
+        toolRowActions,
       })}
     </>
   )

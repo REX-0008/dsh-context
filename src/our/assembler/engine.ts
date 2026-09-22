@@ -246,7 +246,12 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
       for (const candidate of sessionIdVariants(sessionId)) {
         const found = agents?.get(candidate)
         if (found !== undefined) {
-          this.agentBySession.set(sessionId, found)
+          // Register it, do not merely remember it: the listeners (the assemble
+          // waterfall and the pre-step injection pass) are what make this layer
+          // work, and an agent resolved on demand — one created before this
+          // plugin mounted, which is every agent after a restart — would
+          // otherwise be tracked with no listeners at all.
+          this.registerForAgent(found)
           return found
         }
       }

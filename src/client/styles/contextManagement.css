@@ -75,11 +75,17 @@
   background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 14%, transparent);
 }
 
-/* A pruned category keeps a red head outline: the removal is invisible in the
-   counts afterwards, so the marker is what makes it recognizable. */
-.lc-br-cat-pruned > .lc-br-cat-row {
+/* A pruned RANGE: every row the prune would take is outlined red — the row the
+   user pressed is only the one they identified it by, and a prune removes a
+   whole round's nodes. The outline covers the row and its expanded body, because
+   both disappear together. */
+.lc-br-elem-pruned {
   border: 1px solid var(--dsw-alias-state-error-primary);
   border-radius: 6px;
+}
+
+.lc-br-elem-pruned > .lc-br-elem-row {
+  color: var(--dsw-alias-state-error-primary);
 }
 
 .lc-br-prune-mark {

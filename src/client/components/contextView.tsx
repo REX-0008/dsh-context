@@ -518,8 +518,11 @@ export function makeContextView(
       systemCount?: number
       systemDeliveredLabel?: string
       titleOverride?: string
-      categoryActions?: ContextBrowserProps['categoryActions']
-      categoryMarked?: ContextBrowserProps['categoryMarked']
+      messageRowActions?: ContextBrowserProps['messageRowActions']
+      messageRowMarked?: ContextBrowserProps['messageRowMarked']
+      categoryRows?: ContextBrowserProps['categoryRows']
+      categoryHasRows?: ContextBrowserProps['categoryHasRows']
+      toolRowActions?: ContextBrowserProps['toolRowActions']
     }): ReactElement => (
       <ContextBrowser
         data={data}
