@@ -7,6 +7,7 @@
 import type { AgentFace as Agent } from '../agent-face'
 import type { PresetEntryInfo } from './preset-entries'
 import type { PromptModule } from '../types'
+import type { InjectionSeen } from './engine'
 
 /** The engine service contract (injected by panel-service and by future memory/other consumers). */
 export interface ContextAssemblerService {
@@ -143,7 +144,7 @@ export interface ContextAssemblerService {
    * @param sessionId - the agent (= session) id.
    * @returns the observed labels; empty before any turn has run.
    */
-  observedInjectionsForSession(sessionId: string): string[]
+  observedInjectionsForSession(sessionId: string): InjectionSeen[]
   /**
    * The declared runtime contexts for one conversation.
    *

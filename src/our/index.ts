@@ -128,21 +128,21 @@ function resolveOrigin(
 }
 
 /**
- * The injection sources to offer: the known list first, then anything observed
- * that it does not cover.
+ * Who CAN inject: the known list first, then anything observed that it does not
+ * cover.
  *
  * Observed entries are appended rather than filtered, so a producer this build
  * has never heard of is still suppressible once it has injected something.
- * @param observed - labels seen in this conversation's step batches.
+ * @param observed - sources seen in this conversation's step batches.
  * @returns the labels and their notes, the static ones first.
  */
-function injectorList(observed: string[]): Array<{ label: string; note?: string }> {
+function injectorList(observed: Array<{ label: string }>): Array<{ label: string; note?: string }> {
   const list: Array<{ label: string; note?: string }> = KNOWN_INJECTORS.map(entry => ({
     label: entry.label,
     note: entry.note,
   }))
   const covered = new Set(KNOWN_INJECTORS.map(entry => entry.label))
-  for (const label of observed) if (!covered.has(label)) list.push({ label })
+  for (const entry of observed) if (!covered.has(entry.label)) list.push({ label: entry.label })
   return list
 }
 
@@ -178,6 +178,8 @@ function stateHandler(wiring: Wiring) {
       const registeredOrders = engine === undefined ? {} : engine.registeredOrdersForSession(sessionId)
       // The declared runtime contexts: same assembly, same waterfall as sections.
       const contexts = engine === undefined ? null : await engine.contextsForSession(sessionId)
+      // What injected into this conversation's batches, with its content.
+      const observed = engine === undefined ? [] : engine.observedInjectionsForSession(sessionId)
       const systemSections = sections === null ? null : sections.map((section, index) => {
         const origin = resolveOrigin(wiring.sections, section.name, index, registeredOrders, wiring.bridge?.toolOwnerOf)
         // "Edited" means different things per kind, because the write path
@@ -244,12 +246,17 @@ function stateHandler(wiring: Wiring) {
           /** The declared runtime contexts (name/order/text) for this conversation. */
           contexts,
           /**
-           * The injection sources the panel offers. The static list comes first so
-           * the always-present ones (the instruction baseline, the skill catalog)
-           * are there before any turn has run; anything observed in this
-           * conversation that the list does not know is appended.
+           * WHO can inject into this conversation: the switchable producers. The
+           * static list leads so the always-present ones (the instruction
+           * baseline, the skill catalog) appear before any turn has run.
            */
-          injectors: injectorList(engine === undefined ? [] : engine.observedInjectionsForSession(sessionId)),
+          injectors: injectorList(observed),
+          /**
+           * WHAT was actually injected, per producer, from this conversation's own
+           * step batches. Empty until a turn has run — it reports content, not
+           * capability, so it cannot be pre-filled from a list.
+           */
+          injected: observed,
           /** Injection labels the user has suppressed here. */
           suppressedInjections: value?.suppressedInjections?.[sessionId] ?? [],
           /**

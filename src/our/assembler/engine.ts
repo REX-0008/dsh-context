@@ -36,6 +36,32 @@ import { presetEntriesOf, type PresetEntryInfo } from './preset-entries'
 import { presetEntryForSection } from '../preset/section-entries'
 import { injectorLabel } from '../known-injectors'
 
+/** One injection source observed in a step batch, with what it injected. */
+export interface InjectionSeen {
+  /** The label the list and the filter share (see `injectorLabel`). */
+  label: string
+  /** The text this source injected, trimmed for display; empty when it had none. */
+  text: string
+  /** How many messages this source contributed to the batch. */
+  count: number
+}
+
+/**
+ * One message's readable text, for the injection listing.
+ * @param message - a step-batch message of unknown shape.
+ * @returns the concatenated text blocks, or an empty string.
+ */
+function messageTextOf(message: unknown): string {
+  const content = (message as { content?: unknown }).content
+  if (!Array.isArray(content)) return ''
+  const parts: string[] = []
+  for (const block of content) {
+    const text = (block as { text?: unknown })?.text
+    if (typeof text === 'string' && text !== '') parts.push(text)
+  }
+  return parts.join('\n').trim()
+}
+
 /** What happened to a parked prune when its boundary arrived. */
 export interface PruneOutcome {
   ok: boolean
@@ -184,7 +210,7 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
   /** Conversations with a prune requested but not yet applied (see `requestPrune`). */
   private readonly pendingPrunes = new Map<string, Set<number>>()
   /** Injection source kinds observed in each agent's step batches. */
-  private readonly injectionKinds = new Map<string, string[]>()
+  private readonly injectionKinds = new Map<string, InjectionSeen[]>()
 
   /** @inheritdoc */
   setProjectionReader(reader: (agent: Agent, key: string) => unknown): void {
@@ -298,15 +324,26 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
       current.preStepDisposer = agent.ctx.on('agent/pre-step', async (payload, next) => {
         const decision = await next()
         if (decision.kind !== 'enter') return decision
-        // Record what actually injected into this batch, so a producer the static
-        // list does not know still becomes suppressible. Labelled the same way the
-        // list and the filter are (see `injectorLabel`), or the two would not meet.
-        const seen = new Set<string>()
+        // Record what actually injected into this batch, so the panel can show the
+        // CONTENT as well as the producer, and so a producer the static list does
+        // not know still becomes suppressible. Labelled the same way the list and
+        // the filter are (see `injectorLabel`), or the three would not meet.
+        const seen = new Map<string, InjectionSeen>()
         for (const message of decision.messages ?? []) {
           const label = injectorLabel((message as { source?: unknown }).source)
-          if (label !== undefined) seen.add(label)
+          if (label === undefined) continue
+          const existing = seen.get(label)
+          const text = messageTextOf(message)
+          if (existing === undefined) {
+            seen.set(label, { label, text, count: 1 })
+          } else {
+            existing.count += 1
+            // Keep the first non-empty text: a label that injected prose is more
+            // informative than one that injected only a notice.
+            if (existing.text === '' && text !== '') existing.text = text
+          }
         }
-        if (seen.size > 0) this.injectionKinds.set(agent.id, [...seen])
+        if (seen.size > 0) this.injectionKinds.set(agent.id, [...seen.values()])
         const suppressed = this.getConfig().suppressedInjections?.[agent.id]
         if (suppressed === undefined || suppressed.length === 0) return decision
         const blocked = new Set(suppressed)
@@ -740,7 +777,7 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
   }
 
   /** @inheritdoc */
-  observedInjectionsForSession(sessionId: string): string[] {
+  observedInjectionsForSession(sessionId: string): InjectionSeen[] {
     return this.injectionKinds.get(sessionId) ?? []
   }
 

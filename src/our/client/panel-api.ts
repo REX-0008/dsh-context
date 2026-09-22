@@ -84,10 +84,14 @@ export interface PanelState {
   /** The declared runtime contexts (the dynamic, low-authority half of the prompt). */
   contexts?: SystemSectionInfo[] | null
   /**
-   * The injection sources offered for suppression: the always-present ones from
-   * the static list first, then anything observed that it does not cover.
+   * WHO can inject: the switchable producers, the always-present ones first.
    */
   injectors?: Array<{ label: string; note?: string }>
+  /**
+   * WHAT was actually injected into this conversation, per producer. Reports
+   * content rather than capability, so it is empty until a turn has run.
+   */
+  injected?: Array<{ label: string; text: string; count: number }>
   /** Injection labels suppressed in this conversation. */
   suppressedInjections?: string[]
 }
@@ -107,6 +111,7 @@ export async function fetchState(sessionId: string): Promise<PanelState> {
     pruneSeqs: json.value?.pruneSeqs ?? [],
     contexts: json.value?.contexts ?? null,
     injectors: json.value?.injectors ?? [],
+    injected: json.value?.injected ?? [],
     suppressedInjections: json.value?.suppressedInjections ?? [],
   }
 }

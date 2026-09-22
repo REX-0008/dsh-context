@@ -6,21 +6,26 @@
  * than introducing colours of their own.
  */
 
-/* A section row's source-kind tag, riding the left tag slot the surface rows use. */
+/* A section row's source-kind tag, riding the left tag slot the surface rows
+   use. It carries NO frame of its own: `elemRow` already wraps a row's tag in
+   `lc-br-tag`, which has the background and border — adding another drew a
+   second box inside the first. Colour alone distinguishes it. */
 .lc-br-kind {
   font-style: normal;
   font-size: 11px;
-  padding: 0 6px;
-  border-radius: 4px;
-  border: 1px solid var(--dsw-alias-border-l1);
   color: var(--dsw-alias-label-secondary);
-  background: var(--dsw-alias-bg-layer-2);
   white-space: nowrap;
 }
 
 /* An edited section's kind tag and "edited" chip: brand colour, matching the
    plugin chip so "this one was changed" reads the same everywhere. */
-.lc-br-kind-edited,
+/* An edited section's kind tag: colour only, no frame (see `.lc-br-kind`). */
+.lc-br-kind-edited {
+  color: var(--dsw-alias-brand-primary);
+}
+
+/* The trailing chips DO carry their own frame: `elemRow` renders the trailing
+   slot unwrapped, unlike the tag slot. */
 .lc-br-sect-edited {
   color: var(--dsw-alias-brand-primary);
   border-color: color-mix(in srgb, var(--dsw-alias-brand-primary) 45%, transparent);
@@ -104,6 +109,36 @@
   color: var(--dsw-alias-state-error-primary);
   background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent);
   font-size: 12px;
+}
+
+/* A collapsible group head inside a category body. Deliberately frameless and
+   full-width so it reads as a divider between groups rather than as a row. */
+.lc-br-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  text-align: left;
+}
+
+.lc-br-group-head:hover {
+  color: var(--dsw-alias-label-primary);
+}
+
+.lc-br-group-title {
+  font-weight: 600;
+}
+
+.lc-br-group-hint {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
 }
 
 /* Separates the split section list from the delivered-prompt row below it. */

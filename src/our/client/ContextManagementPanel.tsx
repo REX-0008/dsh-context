@@ -116,13 +116,26 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
   const stale = sections.some(section => section.staleTable)
   /** The declared runtime contexts (dynamic, low-authority half of the prompt). */
   const contexts: SystemSectionInfo[] = state?.contexts ?? []
-  /**
-   * The injection sources offered for suppression. The list does not wait for a
-   * turn to run: the always-present producers come from a static list, so the
-   * baseline and the skill catalog are offered in a fresh conversation too.
-   */
+  /** The plugins that can inject (their switches). */
   const injectors = state?.injectors ?? []
+  /** What this conversation actually received, per producer (content, not capability). */
+  const injected = state?.injected ?? []
   const suppressedInjections = new Set(state?.suppressedInjections ?? [])
+  // Collapse state per group. Kept local: it is a viewing preference of this
+  // panel instance, not something the host needs to remember.
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({})
+  const groupHead = (key: string, title: string, tip: string): ReactNode => (
+    <button type="button" className="lc-br-group-head"
+      title={tip}
+      onClick={(event) => {
+        event.stopPropagation()
+        setCollapsedGroups(current => ({ ...current, [key]: current[key] !== true }))
+      }}>
+      <span className={'lc-br-chev' + (collapsedGroups[key] === true ? '' : ' lc-br-chev-on')} />
+      <span className="lc-br-group-title">{title}</span>
+      <span className="lc-br-group-hint">{collapsedGroups[key] === true ? t('our.expand') : t('our.collapse')}</span>
+    </button>
+  )
   /** Tools this conversation currently denies (the tool switch's off state). */
   const deniedTools = new Set(
     Object.entries(state?.settings?.toolRestrictions ?? {})
@@ -339,20 +352,62 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
   }
 
   /**
-   * The rows this panel adds to a category body.
+   * The rows this panel adds to the inject category's body.
    *
-   * Runtime contexts and injection sources belong to the INJECT category (they
-   * are the dynamic, user-role half of what the model sees), not to the system
-   * prompt, so they are rendered where they belong instead of inside the system
-   * category that carries the sections.
+   * TWO groups, because they answer two different questions and mixing them made
+   * the same label appear as both a switch and an entry:
+   *
+   * 1. 会注入内容的插件 — WHICH producers may inject, with their switches. This is
+   *    capability, so it is populated from a static list before any turn runs.
+   * 2. 实际注入内容 — WHAT was actually injected into this conversation: the
+   *    runtime contexts the assembly declares (sandbox policy, approval policy,
+   *    subagent delegation) plus everything observed in this conversation's own
+   *    step batches. This is content, so the observed part is empty until a turn
+   *    has run.
+   *
+   * The runtime contexts live in group 2 rather than a group of their own: they
+   * ARE injected content (user-role snapshots), and a separate heading made them
+   * read as a third category alongside the two the panel actually has.
    */
   const categoryRows = (category: string, row: BrowserRowBuilder): ReactNode => {
     if (category !== 'inject') return null
+    const injectorsOpen = collapsedGroups['injectors'] !== true
+    const injectedOpen = collapsedGroups['injected'] !== true
     return (
       <>
-        {contexts.length > 0 ? (
+        {injectors.length > 0 ? (
           <>
-            <div className="lc-br-note" title={t('our.contexts.tip')}>{t('our.contexts')}</div>
+            {groupHead('injectors', t('our.injectors.title'), t('our.injectors.tip'))}
+            {injectorsOpen ? injectors.map(({ label, note }) => {
+              const off = suppressedInjections.has(label)
+              return row(
+                'inj:' + label,
+                <i className="lc-br-kind">{t('our.kind.plugin')}</i>,
+                label,
+                0,
+                undefined,
+                <div className="lc-br-note">{note ?? t('our.injectors.tip')}</div>,
+                false,
+                <button type="button"
+                  className={'lc-br-tag' + (off ? ' lc-br-sect-off' : '')}
+                  title={t('our.injectors.tip')}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    void dispatch('setInjectionSuppressed', { kind: label, off: !off })
+                  }}>
+                  {off ? t('our.state.off') : t('our.state.on')}
+                </button>,
+              )
+            }) : null}
+          </>
+        ) : null}
+
+        <div className="lc-br-divider" />
+        {groupHead('injected', t('our.injected.title'), t('our.injected.tip'))}
+        {injectedOpen ? (
+          <>
+            {/* Declared runtime contexts first: they are always present, so they
+                anchor the group before any turn has produced anything. */}
             {contexts.map(context => {
               const off = context.disabledAt !== undefined
               return row(
@@ -374,34 +429,18 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
                 </button>,
               )
             })}
-          </>
-        ) : null}
-
-        {injectors.length > 0 ? (
-          <>
-            <div className="lc-br-divider" />
-            <div className="lc-br-note">{t('our.injections')}</div>
-            {injectors.map(({ label, note }) => {
-              const off = suppressedInjections.has(label)
-              return row(
-                'inj:' + label,
-                <i className="lc-br-kind">{t('our.kind.plugin')}</i>,
-                label,
-                0,
-                undefined,
-                <div className="lc-br-note">{note ?? t('our.injections.tip')}</div>,
-                false,
-                <button type="button"
-                  className={'lc-br-tag' + (off ? ' lc-br-sect-off' : '')}
-                  title={t('our.injections.tip')}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    void dispatch('setInjectionSuppressed', { kind: label, off: !off })
-                  }}>
-                  {off ? t('our.state.off') : t('our.state.on')}
-                </button>,
-              )
-            })}
+            {injected.map(entry => row(
+              'got:' + entry.label,
+              <i className="lc-br-kind">{t('our.kind.plugin')}</i>,
+              entry.label + (entry.count > 1 ? ' ×' + String(entry.count) : ''),
+              sizeOf(entry.text),
+              undefined,
+              <div className="lc-br-note" style={{ whiteSpace: 'pre-wrap' }}>{entry.text}</div>,
+              false,
+            ))}
+            {contexts.length === 0 && injected.length === 0 ? (
+              <div className="lc-br-note">{t('our.injected.empty')}</div>
+            ) : null}
           </>
         ) : null}
       </>
