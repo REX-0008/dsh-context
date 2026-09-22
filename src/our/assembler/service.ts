@@ -125,6 +125,13 @@ export interface ContextAssemblerService {
    */
   hasPendingPrune(sessionId: string): boolean
   /**
+   * Injection source kinds observed in this conversation's step batches (the
+   * labels the panel offers for suppression).
+   * @param sessionId - the agent (= session) id.
+   * @returns the observed labels; empty before any turn has run.
+   */
+  observedInjectionsForSession(sessionId: string): string[]
+  /**
    * The declared runtime contexts for one conversation.
    *
    * Contexts are the low-authority, dynamic half of the prompt (sandbox policy,

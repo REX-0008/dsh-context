@@ -340,6 +340,15 @@ export const DICT_ZH: Record<string, string> = {
   'our.prune.cancel': '取消剪枝',
   'our.prune.done': '已剪枝 {n} 条 · {tok} token，剪枝动作将在下一轮生效，操作不可逆',
   'our.prune.mark': '此板块已剪枝',
+  'our.injections': '注入来源',
+  'our.injections.empty': '本对话尚未产生注入；跑过一轮后这里会列出可停用的来源。',
+  'our.injections.suppress': '停用',
+  'our.injections.restore': '恢复',
+  'our.injections.off': '已停用',
+  'our.injections.tip': '在下一轮开始的批次里过滤掉这个来源。只过滤、不改写内容，因此不影响其他插件。',
+  'our.contexts.tip': '运行时上下文：以 user 角色发送的动态背景（沙箱/审批/子代理委派等）。与系统提示词走同一条组装与瀑布。',
+  'our.toolGuidanceHint': '这里是"工具的提示词说明"。停用它只让说明不再发送，工具仍可调用；要禁止调用，请到「工具定义」板块停用该工具本身。',
+
 
 }
 
@@ -676,5 +685,14 @@ export const DICT_EN: Record<string, string> = {
   'our.prune.cancel': 'Cancel prune',
   'our.prune.done': 'Pruned {n} · {tok} token; takes effect next turn and cannot be undone',
   'our.prune.mark': 'This category was pruned',
+  'our.injections': 'Injection sources',
+  'our.injections.empty': 'No injections yet in this conversation; run a turn and the suppressible sources appear here.',
+  'our.injections.suppress': 'Suppress',
+  'our.injections.restore': 'Restore',
+  'our.injections.off': 'Suppressed',
+  'our.injections.tip': 'Filter this source out of the next step batch. Filtering only — content is never rewritten, so other plugins are unaffected.',
+  'our.contexts.tip': 'Runtime contexts: dynamic background sent in the user role (sandbox/approval/subagent delegation). They ride the same assembly and waterfall as the system prompt.',
+  'our.toolGuidanceHint': "This is the tool's prompt GUIDANCE. Disabling it only stops that text; the tool stays callable. To forbid calling the tool, disable the tool itself in the Tool definitions category.",
+
 
 }

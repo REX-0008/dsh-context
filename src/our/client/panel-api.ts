@@ -83,6 +83,10 @@ export interface PanelState {
   prunePending?: boolean
   /** The declared runtime contexts (the dynamic, low-authority half of the prompt). */
   contexts?: SystemSectionInfo[] | null
+  /** Injection source kinds observed in this conversation's step batches. */
+  observedInjections?: string[]
+  /** Injection kinds suppressed in this conversation. */
+  suppressedInjections?: string[]
 }
 
 /** Read the panel state (settings, dirty flag, preset entries, per-section assembly). */
@@ -99,6 +103,8 @@ export async function fetchState(sessionId: string): Promise<PanelState> {
     presetId: json.value?.presetId,
     prunePending: json.value?.prunePending === true,
     contexts: json.value?.contexts ?? null,
+    observedInjections: json.value?.observedInjections ?? [],
+    suppressedInjections: json.value?.suppressedInjections ?? [],
   }
 }
 

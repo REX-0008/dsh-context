@@ -89,6 +89,22 @@ export interface ContextPanelSettings {
    */
   conversationDisabledSections?: Record<string, string[]>
   /**
+   * Injected messages to suppress at the pre-step boundary, keyed by the
+   * message's own `source.kind` (the harness's merge-extensible
+   * `MessageSourceMap`, e.g. `agent-instructions`, `skill-catalog`,
+   * `time-context`).
+   *
+   * These injectors do not use `systemPrompt.context()`; they append to the
+   * step's message batch, so the only place to act on them is the pre-step
+   * waterfall. Suppression FILTERS the batch and never rewrites it, which is
+   * what keeps this safe alongside other plugins: a waterfall chains, so another
+   * plugin adding content is unaffected, and one rewriting content still applies
+   * — only a same-kind contention could conflict, and filtering cannot contend.
+   *
+   * Conversation-scoped: an injection is per-step input, not part of a preset.
+   */
+  suppressedInjections?: Record<string, string[]>
+  /**
    * RUNTIME CONTEXTS carry the same two decisions as sections, under the same
    * two levels. They are kept in their own maps because a context and a section
    * may share a name without being the same contribution.
@@ -132,6 +148,7 @@ export const EMPTY_CONFIG: ContextPanelSettings = {
   conversationDisabledSections: {},
   presetDisabledContexts: {},
   conversationDisabledContexts: {},
+  suppressedInjections: {},
   contextOverrides: {},
   sectionOverrides: {},
   sectionWeights: {},

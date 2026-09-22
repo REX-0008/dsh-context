@@ -42,6 +42,7 @@ export const DEFAULT_SETTINGS: ContextPanelSettings = {
   presetDisabledContexts: {},
   conversationDisabledContexts: {},
   contextOverrides: {},
+  suppressedInjections: {},
 }
 
 /** Namespace schema (schemastery primitives: z.dict replaces zod's z.record; fields are optional by default). */
@@ -57,6 +58,7 @@ export const CONTEXT_PANEL_SCHEMA: z<ContextPanelSettings> = z.object({
   presetDisabledContexts: z.dict(z.array(z.string())),
   conversationDisabledContexts: z.dict(z.array(z.string())),
   contextOverrides: z.dict(z.dict(z.string())),
+  suppressedInjections: z.dict(z.array(z.string())),
   sectionOverrides: z.dict(z.dict(z.string())),
   sectionWeights: z.dict(z.dict(z.number())),
   sectionOriginals: z.dict(z.dict(z.string())),

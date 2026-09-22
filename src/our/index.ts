@@ -224,6 +224,10 @@ function stateHandler(wiring: Wiring) {
           prunePending: engine === undefined ? false : engine.hasPendingPrune(sessionId),
           /** The declared runtime contexts (name/order/text) for this conversation. */
           contexts,
+          /** Injection source kinds seen in this conversation's step batches. */
+          observedInjections: engine === undefined ? [] : engine.observedInjectionsForSession(sessionId),
+          /** Injection kinds the user has suppressed here. */
+          suppressedInjections: value?.suppressedInjections?.[sessionId] ?? [],
           /**
            * How many sections each source holds for this session. The panel
            * lists one merged view, so when it looks short this names which
@@ -267,6 +271,46 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
   requestPrune: ({ engine, sessionId }) => engine?.requestPrune(sessionId),
   /** Drop a parked prune before its boundary arrives. */
   cancelPrune: ({ engine, sessionId }) => { engine?.cancelPrune(sessionId) },
+  /**
+   * Switch one RUNTIME CONTEXT off (or back on) for this conversation.
+   *
+   * Contexts take the same two decisions as sections but are keyed separately,
+   * so they need their own action rather than sharing `setSectionLevel`.
+   */
+  setContextLevel: ({ scope, p, sessionId }) => {
+    const name = String(p.name)
+    const all = { ...(scope.get().conversationDisabledContexts ?? {}) }
+    const mine = new Set(all[sessionId] ?? [])
+    if (p.off === true) mine.add(name)
+    else mine.delete(name)
+    all[sessionId] = [...mine]
+    return scope.update({ conversationDisabledContexts: all })
+  },
+  /** Replace one runtime context's text for this conversation. */
+  setContextText: async ({ scope, p, sessionId }) => {
+    const name = String(p.name)
+    const all = { ...(scope.get().contextOverrides ?? {}) }
+    const mine = { ...(all[sessionId] ?? {}) }
+    mine[name] = String(p.text ?? '')
+    all[sessionId] = mine
+    await scope.update({ contextOverrides: all })
+  },
+  /**
+   * Suppress (or restore) one injection source at the pre-step boundary.
+   *
+   * The list is per conversation and matched on the message's own
+   * `source.kind`/`source.plugin`: an injection is per-step input, so it has no
+   * preset-level form.
+   */
+  setInjectionSuppressed: ({ scope, p, sessionId }) => {
+    const kind = String(p.kind)
+    const all = { ...(scope.get().suppressedInjections ?? {}) }
+    const mine = new Set(all[sessionId] ?? [])
+    if (p.off === true) mine.add(kind)
+    else mine.delete(kind)
+    all[sessionId] = [...mine]
+    return scope.update({ suppressedInjections: all })
+  },
   setToolRestriction: ({ service, p }) => service.setToolRestriction(String(p.name), p.filter as never),
   setScope: ({ service, p }) => service.setScope(p.scope as 'conversation' | 'agent'),
   setAutoSyncPreset: ({ service, p }) => service.setAutoSyncPreset(p.enabled === true),

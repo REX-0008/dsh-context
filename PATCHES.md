@@ -99,6 +99,27 @@ them; the card title reads `titleOverride ?? t('browser.title')`.
 import './styles/contextManagement.css'
 ```
 
+## 6. `src/client/components/browser.tsx` — category-head hooks
+
+**Anchor**: `ContextBrowserProps`, after the `titleOverride` entry added above.
+
+```ts
+  categoryActions?: (category: string) => ReactNode
+  categoryMarked?: (category: string) => boolean
+```
+
+plus, in the category head: the `lc-br-cat-pruned` class on the row and a
+`lc-br-cat-actions` span rendered BESIDE the head button (separate controls —
+nesting a button in a button is invalid markup). Without these props the heads
+render exactly as before.
+
+## 7. `src/client/i18n.ts` — our added keys
+
+**Anchor**: the end of `DICT_ZH` and `DICT_EN`.
+
+Every key this plugin adds is namespaced `our.*` and appended after the last
+upstream entry, so an upstream release that adds keys does not collide with them.
+
 ## Local identity (not an insert point)
 
 For installing this fork beside the published package (and for a trivial

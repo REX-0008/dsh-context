@@ -111,6 +111,11 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
 
   const sections: SystemSectionInfo[] = state?.systemSections ?? []
   const stale = sections.some(section => section.staleTable)
+  /** The declared runtime contexts (dynamic, low-authority half of the prompt). */
+  const contexts: SystemSectionInfo[] = state?.contexts ?? []
+  /** Injection source kinds offered for suppression, and those already off. */
+  const injections = state?.observedInjections ?? []
+  const suppressedInjections = new Set(state?.suppressedInjections ?? [])
 
 
   const systemRows = (
@@ -298,14 +303,88 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
         // The left tag slot states the SOURCE KIND (how a change lands) — the same
         // slot surface rows use for their kind tag; an edited section's tag turns
         // brand-coloured as the reminder.
+        // A tool-guidance section (`tool:<name>`) has a second, distinct switch
+        // elsewhere: the tools category carries the tool itself, whose
+        // restriction makes CALLS fail while this switch only stops the
+        // guidance TEXT from being sent. The tooltip states the difference,
+        // because the two read as the same action otherwise.
+        const isToolGuidance = section.name.startsWith('tool:')
         const kindTag = (
-          <i className={'lc-br-kind' + (section.edited ? ' lc-br-kind-edited' : '')} title={t(KIND_HINT_KEY[section.kind])}>{t(KIND_KEY[section.kind])}</i>
+          <i className={'lc-br-kind' + (section.edited ? ' lc-br-kind-edited' : '')}
+            title={isToolGuidance ? t(KIND_HINT_KEY[section.kind]) + ' — ' + t('our.toolGuidanceHint') : t(KIND_HINT_KEY[section.kind])}>
+            {t(KIND_KEY[section.kind])}
+          </i>
         )
         // The token figure goes in its own column (the row's `tokens` slot, which
         // right-aligns and now pads to a fixed width); the preview stays the name.
         return row('sec:' + section.name, kindTag, section.name, sizeOf(section.text), undefined, bodyNode, false, trailing)
       })}
       </div>
+
+      {/* Runtime contexts: the declared, dynamic half. Same row idiom as the
+          sections above, because they take the same two decisions. */}
+      {contexts.length > 0 ? (
+        <>
+          <div className="lc-br-divider" />
+          <div className="lc-br-note" title={t('our.contexts.tip')}>{t('our.contexts')}</div>
+          <div className="lc-our-sections">
+            {contexts.map(context => {
+              const off = context.disabledAt !== undefined
+              return row(
+                'ctx:' + context.name,
+                <i className={'lc-br-kind' + (context.edited ? ' lc-br-kind-edited' : '')}>{t('our.kind.plugin')}</i>,
+                context.name,
+                sizeOf(context.text),
+                undefined,
+                body(context.name, context.text),
+                false,
+                <>
+                  {context.edited ? <span className="lc-br-tag lc-br-sect-edited" title={t('our.chip.editedTip')}>{t('our.chip.edited')}</span> : null}
+                  <button type="button"
+                    className={'lc-br-tag' + (off ? ' lc-br-sect-off' : '')}
+                    title={off ? t('our.state.offConversationTip') : t('our.state.onTip')}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      void dispatch('setContextLevel', { name: context.name, off: !off })
+                    }}>
+                    {off ? t('our.state.offConversation') : t('our.state.on')}
+                  </button>
+                </>,
+              )
+            })}
+          </div>
+        </>
+      ) : null}
+
+      {/* Injection sources: these append to the step batch rather than registering
+          a prompt contribution, so the only action is suppression. Filtering only
+          — nothing is rewritten. */}
+      {injections.length > 0 ? (
+        <>
+          <div className="lc-br-divider" />
+          <div className="lc-br-note">{t('our.injections')}</div>
+          <div className="lc-our-sections">
+            {injections.map(kind => {
+              const off = suppressedInjections.has(kind)
+              return (
+                <div key={kind} className="lc-br-elem">
+                  <div className="lc-br-elem-row" style={{ cursor: 'default' }}>
+                    <span className="lc-br-kind">{t('our.kind.plugin')}</span>
+                    <span className="lc-br-elem-name">{kind}</span>
+                    <span className="lc-br-tag">{off ? t('our.injections.off') : ''}</span>
+                    <button type="button"
+                      className={'lc-br-tag' + (off ? ' lc-br-sect-off' : '')}
+                      title={t('our.injections.tip')}
+                      onClick={() => { void dispatch('setInjectionSuppressed', { kind, off: !off }) }}>
+                      {off ? t('our.injections.restore') : t('our.injections.suppress')}
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </>
+      ) : null}
     </>
     )
   }

@@ -106,6 +106,8 @@ interface RegisteredAgent {
   toolRestrictionsDisposers: Array<() => void>
   /** The global section-switch waterfall disposer (registered once per agent). */
   waterfallDisposer?: () => void
+  /** The pre-step listener that suppresses requested injections, once installed. */
+  preStepDisposer?: () => void
   /** The registration snapshot digest (the configuration as last registered). */
   snapshotDigest: string
   /** Activation flag: set by a user click / a compaction trigger, consumed at the turn boundary. */
@@ -178,6 +180,8 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
   private readonly lastSections = new Map<string, Array<{ name: string; text: string }>>()
   /** Conversations with a prune requested but not yet applied (see `requestPrune`). */
   private readonly pendingPrunes = new Set<string>()
+  /** Injection source kinds observed in each agent's step batches. */
+  private readonly injectionKinds = new Map<string, string[]>()
 
   /** @inheritdoc */
   setProjectionReader(reader: (agent: Agent, key: string) => unknown): void {
@@ -277,6 +281,37 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
     // sectioned assembly, and the returned value is what the loop renders).
     // Registered once per agent; the config is read live so edits apply without
     // re-registering.
+    // Injection suppression rides the pre-step waterfall. Injectors that append
+    // to the step batch (agent-instructions, skill-catalog, time-context, …) are
+    // not registered in the prompt registry, so this is the only place they can
+    // be acted on. FILTERING only: the batch is passed on otherwise untouched, so
+    // another plugin's additions are unaffected and its rewrites still apply.
+    if (current.preStepDisposer === undefined) {
+      current.preStepDisposer = agent.ctx.on('agent/pre-step', async (payload, next) => {
+        const decision = await next()
+        if (decision.kind !== 'enter') return decision
+        // Record what injected into this batch, so the panel can list the sources
+        // it may suppress instead of offering a fixed guess-list.
+        const seen = new Set<string>()
+        for (const message of decision.messages ?? []) {
+          const source = (message as { source?: { kind?: unknown; plugin?: unknown } }).source
+          const kind = source?.kind
+          if (typeof kind === 'string' && kind !== 'user') {
+            seen.add(typeof source?.plugin === 'string' ? source.plugin + ':' + kind : kind)
+          }
+        }
+        if (seen.size > 0) this.injectionKinds.set(agent.id, [...seen])
+        const suppressed = this.getConfig().suppressedInjections?.[agent.id]
+        if (suppressed === undefined || suppressed.length === 0) return decision
+        const blocked = new Set(suppressed)
+        const admitted = decision.messages ?? []
+        const messages = admitted.filter((message) => {
+          const kind = (message as { source?: { kind?: unknown } }).source?.kind
+          return typeof kind !== 'string' || !blocked.has(kind)
+        })
+        return messages.length === admitted.length ? decision : { ...decision, messages }
+      })
+    }
     if (current.waterfallDisposer === undefined) {
       current.waterfallDisposer = agent.ctx.on('system-prompt/assemble', async (assembly, _context, next) => {
         const transformed = await next()
@@ -587,6 +622,11 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
   }
 
   /** @inheritdoc */
+  observedInjectionsForSession(sessionId: string): string[] {
+    return this.injectionKinds.get(sessionId) ?? []
+  }
+
+  /** @inheritdoc */
   registeredOrdersForSession(sessionId: string): Record<string, number> {
     const agent = this.agentFor(sessionId)
     if (agent === undefined) return {}
@@ -800,6 +840,7 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
       for (const dispose of entry.disposers.values()) { try { dispose() } catch { /* ignore */ } }
       for (const dispose of entry.toolRestrictionsDisposers) { try { dispose() } catch { /* ignore */ } }
       if (entry.waterfallDisposer !== undefined) { try { entry.waterfallDisposer() } catch { /* ignore */ } }
+      if (entry.preStepDisposer !== undefined) { try { entry.preStepDisposer() } catch { /* ignore */ } }
     }
     this.registered.clear()
     this.agentBySession.clear()
