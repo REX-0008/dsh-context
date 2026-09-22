@@ -260,6 +260,12 @@ function stateHandler(wiring: Wiring) {
           /** Injection labels the user has suppressed here. */
           suppressedInjections: value?.suppressedInjections?.[sessionId] ?? [],
           /**
+           * The surface seqs of the runtime-context snapshot nodes. The panel
+           * offers these for pruning, since pruning the snapshot removes the
+           * whole runtime-context block from the next request.
+           */
+          contextSnapshotSeqs: engine === undefined ? [] : engine.runtimeContextNodeSeqs(sessionId),
+          /**
            * How many sections each source holds for this session. The panel
            * lists one merged view, so when it looks short this names which
            * source came up short instead of leaving it to guesswork.
@@ -313,6 +319,17 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
   selectPruneRound: ({ engine, sessionId, p }) => {
     const seqs = Array.isArray(p.seqs) ? (p.seqs as unknown[]).map(Number).filter(Number.isFinite) : []
     engine?.selectPruneSeqs(sessionId, seqs, p.select !== false)
+  },
+  /**
+   * Select the runtime-context snapshot nodes for pruning. The snapshot is one
+   * node carrying every declared context, so this is one action that removes the
+   * whole runtime-context block from the next request.
+   */
+  selectContextPrune: ({ engine, sessionId }) => {
+    if (engine === undefined) return
+    for (const seq of engine.runtimeContextNodeSeqs(sessionId)) {
+      engine.togglePruneSelection(sessionId, seq)
+    }
   },
   /**
    * Switch one RUNTIME CONTEXT off (or back on) for this conversation.

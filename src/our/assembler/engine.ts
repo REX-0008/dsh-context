@@ -686,6 +686,43 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
     else this.pendingPrunes.set(sessionId, current)
   }
 
+  /**
+   * The surface seqs of the runtime-context snapshot nodes for one conversation.
+   *
+   * The snapshot is ONE user-role node stamped with the system-prompt plugin as
+   * its producer (`source.plugin === '@deepseek-ai/dsh-system-prompt'`); the
+   * declared contexts all render into that single node rather than one node each.
+   * Finding it is what lets the panel prune the snapshot the way it prunes a
+   * message row.
+   * @param sessionId - the agent (= session) id.
+   * @returns the snapshot node seqs; empty when none is on the surface.
+   */
+  runtimeContextNodeSeqs(sessionId: string): number[] {
+    const agent = this.agentFor(sessionId)
+    if (agent === undefined) return []
+    try {
+      const session = (agent as unknown as {
+        session?: {
+          surface?: { nodes?: unknown }
+          eventAt?: (seq: number) => { type?: unknown; data?: unknown } | undefined
+        }
+      }).session
+      const nodes = session?.surface?.nodes
+      const eventAt = session?.eventAt
+      if (!Array.isArray(nodes) || typeof eventAt !== 'function') return []
+      const out: number[] = []
+      for (const seq of nodes as number[]) {
+        const event = eventAt.call(session, seq)
+        if (event?.type !== 'user/message') continue
+        const source = (event.data as { message?: { source?: { kind?: unknown; plugin?: unknown } } } | undefined)?.message?.source
+        if (source?.kind === 'plugin' && source?.plugin === '@deepseek-ai/dsh-system-prompt') out.push(seq)
+      }
+      return out
+    } catch {
+      return []
+    }
+  }
+
   /** @inheritdoc */
   pendingPruneSeqs(sessionId: string): number[] {
     return [...(this.pendingPrunes.get(sessionId) ?? [])].sort((a, b) => a - b)

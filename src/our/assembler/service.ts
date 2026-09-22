@@ -121,6 +121,16 @@ export interface ContextAssemblerService {
    */
   selectPruneSeqs(sessionId: string, seqs: number[], select: boolean): void
   /**
+   * The surface seqs of the runtime-context snapshot nodes for one conversation.
+   *
+   * The snapshot is ONE user-role node stamped with the system-prompt plugin as
+   * its producer; the declared contexts all render into that single node rather
+   * than one node each, so pruning it removes them together.
+   * @param sessionId - the agent (= session) id.
+   * @returns the snapshot node seqs; empty when none is on the surface.
+   */
+  runtimeContextNodeSeqs(sessionId: string): number[]
+  /**
    * Drop a parked prune request.
    * @param sessionId - the agent (= session) id.
    * @returns whether a request was waiting.

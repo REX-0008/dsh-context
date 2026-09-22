@@ -94,6 +94,8 @@ export interface PanelState {
   injected?: Array<{ label: string; text: string; count: number }>
   /** Injection labels suppressed in this conversation. */
   suppressedInjections?: string[]
+  /** The surface seqs of the runtime-context snapshot nodes. */
+  contextSnapshotSeqs?: number[]
 }
 
 /** Read the panel state (settings, dirty flag, preset entries, per-section assembly). */
@@ -113,6 +115,7 @@ export async function fetchState(sessionId: string): Promise<PanelState> {
     injectors: json.value?.injectors ?? [],
     injected: json.value?.injected ?? [],
     suppressedInjections: json.value?.suppressedInjections ?? [],
+    contextSnapshotSeqs: json.value?.contextSnapshotSeqs ?? [],
   }
 }
 

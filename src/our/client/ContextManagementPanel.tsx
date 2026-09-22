@@ -121,6 +121,8 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
   /** What this conversation actually received, per producer (content, not capability). */
   const injected = state?.injected ?? []
   const suppressedInjections = new Set(state?.suppressedInjections ?? [])
+  /** The runtime-context snapshot nodes, offered for pruning. */
+  const contextSnapshotSeqs = state?.contextSnapshotSeqs ?? []
   // Collapse state per group. Kept local: it is a viewing preference of this
   // panel instance, not something the host needs to remember.
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({})
@@ -375,6 +377,26 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
     const injectedOpen = collapsedGroups['injected'] !== true
     return (
       <>
+        {/* The runtime-context snapshot has its own prune: it removes the whole
+            block from the next request, and the switch is the same parked
+            request/apply-at-boundary cycle the message rows use. */}
+        {contextSnapshotSeqs.length > 0 ? (
+          <>
+            {groupHead('contexts', t('our.contexts'), t('our.contexts.tip'))}
+            {collapsedGroups['contexts'] !== true ? (
+              <button type="button" className="lc-br-tag lc-br-prune"
+                title={t('our.contexts.prune')}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  if (!window.confirm(t('our.prune.confirm'))) return
+                  void dispatch('selectContextPrune')
+                }}>
+                {t('our.contexts.prune')}
+              </button>
+            ) : null}
+          </>
+        ) : null}
+
         {injectors.length > 0 ? (
           <>
             {groupHead('injectors', t('our.injectors.title'), t('our.injectors.tip'))}
@@ -407,28 +429,18 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
         {injectedOpen ? (
           <>
             {/* Declared runtime contexts first: they are always present, so they
-                anchor the group before any turn has produced anything. */}
-            {contexts.map(context => {
-              const off = context.disabledAt !== undefined
-              return row(
-                'ctx:' + context.name,
-                <i className={'lc-br-kind' + (context.edited ? ' lc-br-kind-edited' : '')}>{t('our.kind.plugin')}</i>,
-                context.name,
-                sizeOf(context.text),
-                undefined,
-                <div className="lc-br-note" style={{ whiteSpace: 'pre-wrap' }}>{context.text}</div>,
-                false,
-                <button type="button"
-                  className={'lc-br-tag' + (off ? ' lc-br-sect-off' : '')}
-                  title={off ? t('our.state.offConversationTip') : t('our.state.onTip')}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    void dispatch('setContextLevel', { name: context.name, off: !off })
-                  }}>
-                  {off ? t('our.state.off') : t('our.state.on')}
-                </button>,
-              )
-            })}
+                anchor the group before any turn has produced anything. Their
+                switches live in the producers group above — this group is the
+                content view, and its one action prunes the whole snapshot. */}
+            {contexts.map(context => row(
+              'ctx:' + context.name,
+              <i className={'lc-br-kind' + (context.edited ? ' lc-br-kind-edited' : '')}>{t('our.kind.plugin')}</i>,
+              context.name,
+              sizeOf(context.text),
+              undefined,
+              <div className="lc-br-note" style={{ whiteSpace: 'pre-wrap' }}>{context.text}</div>,
+              false,
+            ))}
             {injected.map(entry => row(
               'got:' + entry.label,
               <i className="lc-br-kind">{t('our.kind.plugin')}</i>,
