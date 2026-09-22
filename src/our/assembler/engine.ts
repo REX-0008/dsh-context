@@ -23,7 +23,6 @@ import type {} from '@deepseek-ai/dsh-system-prompt'
 // program and collides with the narrow shim upstream declares in
 // host/stepIdentity.ts (upstream never imports it either — verified). The one
 // method used is reached through a structural cast below.
-import { scopeOf } from '@deepseek-ai/dsh-scope'
 import type { ContextPanelSettings, PromptModule, PromptModulePatch } from '../types'
 import { EMPTY_CONFIG } from '../types'
 import { presetEntriesOf, type PresetEntryInfo } from './preset-entries'
@@ -341,6 +340,28 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
   }
 
   /**
+   * The assembly context for one agent: `agent` AND `scope` set together.
+   *
+   * Both are required, and setting only `scope` from the agent's own context is
+   * the mistake this guards against: `scopeOf(agent.ctx)` yields only the
+   * agent's node key, so the assembly resolves the global layer and silently
+   * omits every agent-scoped section (this plugin's own modules, and each tool's
+   * guidance). Passing the agent as the scope is what the harness's own loop
+   * does — see `assembleContextFor` in `@deepseek-ai/dsh-agent`, whose contract
+   * is "agent and scope set together, so agent-scoped prompt and tool
+   * contributions cannot be silently omitted".
+   *
+   * The behavior is mirrored rather than imported: upstream's plugin never
+   * imports that package, because its declarations collide with the narrow
+   * structural types this layer uses.
+   * @param agent - the agent the assembly is for.
+   * @returns the context to pass to `assemble()`.
+   */
+  private assembleContext(agent: Agent): { agent: Agent; scope: Agent } {
+    return { agent, scope: agent }
+  }
+
+  /**
    * The agent's preset id, or undefined when it runs without one.
    * @param agent - the agent to read.
    * @returns the preset id, when the agentPreset projection carries one.
@@ -396,7 +417,10 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
       if (typeof merge !== 'function') return undefined
       const effective = merge.call(
         layers,
-        scopeOf(agent.ctx),
+        // The agent itself is the scope key, matching assembly (see
+        // `assembleContext`); the agent's own context node would resolve the
+        // global layer only and report a fraction of the registered sections.
+        agent,
         (layer: unknown) => (layer as { sections?: unknown })?.sections,
       )
       if (!(effective instanceof Map)) return undefined
@@ -440,8 +464,7 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
     // view), so it is merged in rather than dropped.
     let assemblySections: Array<{ name: string; text: string }> | undefined
     try {
-      const scope = scopeOf(agent.ctx)
-      const assembly = await agent.ctx.systemPrompt.assemble(scope === undefined ? {} : { scope })
+      const assembly = await agent.ctx.systemPrompt.assemble(this.assembleContext(agent))
       assemblySections = assembly.sections.map((section) => ({ name: section.name, text: section.text }))
     } catch {
       assemblySections = undefined

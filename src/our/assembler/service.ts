@@ -81,10 +81,14 @@ export interface ContextAssemblerService {
    */
   presetIdForSession(sessionId: string): string | undefined
   /**
-   * 按 agent 组装一次系统提示词，返回逐 section 明细（name/text，按 order 排序）。
-   * 来源：assemble({ scope })——精确的「哪个 section + 排序」来源，前端据此标注插件与顺序。
-   * @param sessionId - agent 的会话 id。
-   * @returns sections；未知会话/组装失败返回 null。
+   * The union of every section source for one conversation: the live assembly,
+   * the waterfall capture, and the prompt registry.
+   *
+   * The assembly is requested with `{ agent, scope: agent }` — both — because a
+   * scope built from the agent's own context resolves only the global layer and
+   * omits every agent-scoped section.
+   * @param sessionId - the agent (= session) id.
+   * @returns the sections; null when the agent or its assembly is unavailable.
    */
   assembleSectionsForSession(sessionId: string): Promise<Array<{ name: string; text: string }> | null>
   /**
