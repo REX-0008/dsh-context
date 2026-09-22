@@ -113,6 +113,13 @@ export interface ContextAssemblerService {
    */
   togglePruneSelection(sessionId: string, seq: number): void
   /**
+   * Select or deselect every node of one round at once.
+   * @param sessionId - the agent (= session) id.
+   * @param seqs - the round's node seqs.
+   * @param select - true to select them, false to drop them.
+   */
+  selectPruneSeqs(sessionId: string, seqs: number[], select: boolean): void
+  /**
    * Drop a parked prune request.
    * @param sessionId - the agent (= session) id.
    * @returns whether a request was waiting.

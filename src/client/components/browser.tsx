@@ -364,6 +364,13 @@ export interface MessageRowRef {
   turn?: number
   /** The row's category (user / inject / skill / assistant / tool). */
   category: string
+  /**
+   * Every surface node of this row's round, in surface order — what a
+   * whole-round action resolves to. Resolved here because the browser is the
+   * only place that maps nodes to rounds; a caller picking rows by hand would
+   * have to rebuild that mapping.
+   */
+  roundSeqs?: number[]
 }
 
 /**
@@ -1234,10 +1241,18 @@ export function makeContextBrowser(
             // the round is what the caller marks. A node belongs to the first
             // request whose seq is at or after it — the request that consumed it.
             const owner = requests.find(req => req.seq >= n.seq)
+            // The round's nodes, taken from the same request mapping: a node
+            // belongs to the first request at or after it.
+            const roundSeqs = owner?.turn === undefined
+              ? undefined
+              : nodes
+                .filter(candidate => requests.find(req => req.seq >= candidate.seq)?.turn === owner.turn)
+                .map(candidate => candidate.seq)
             const rowRef: MessageRowRef = {
               seq: n.seq,
               category: n.cat,
               ...(owner?.turn === undefined ? {} : { turn: owner.turn }),
+              ...(roundSeqs === undefined ? {} : { roundSeqs }),
             }
             const marked = props.messageRowMarked?.(rowRef) === true
             const actions = props.messageRowActions?.(rowRef) ?? null

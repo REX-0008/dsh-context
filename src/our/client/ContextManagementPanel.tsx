@@ -116,8 +116,12 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
   const stale = sections.some(section => section.staleTable)
   /** The declared runtime contexts (dynamic, low-authority half of the prompt). */
   const contexts: SystemSectionInfo[] = state?.contexts ?? []
-  /** Injection source kinds offered for suppression, and those already off. */
-  const injections = state?.observedInjections ?? []
+  /**
+   * The injection sources offered for suppression. The list does not wait for a
+   * turn to run: the always-present producers come from a static list, so the
+   * baseline and the skill catalog are offered in a fresh conversation too.
+   */
+  const injectors = state?.injectors ?? []
   const suppressedInjections = new Set(state?.suppressedInjections ?? [])
   /** Tools this conversation currently denies (the tool switch's off state). */
   const deniedTools = new Set(
@@ -373,26 +377,26 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
           </>
         ) : null}
 
-        {injections.length > 0 ? (
+        {injectors.length > 0 ? (
           <>
             <div className="lc-br-divider" />
             <div className="lc-br-note">{t('our.injections')}</div>
-            {injections.map(kind => {
-              const off = suppressedInjections.has(kind)
+            {injectors.map(({ label, note }) => {
+              const off = suppressedInjections.has(label)
               return row(
-                'inj:' + kind,
+                'inj:' + label,
                 <i className="lc-br-kind">{t('our.kind.plugin')}</i>,
-                kind,
+                label,
                 0,
                 undefined,
-                <div className="lc-br-note">{t('our.injections.tip')}</div>,
+                <div className="lc-br-note">{note ?? t('our.injections.tip')}</div>,
                 false,
                 <button type="button"
                   className={'lc-br-tag' + (off ? ' lc-br-sect-off' : '')}
                   title={t('our.injections.tip')}
                   onClick={(event) => {
                     event.stopPropagation()
-                    void dispatch('setInjectionSuppressed', { kind, off: !off })
+                    void dispatch('setInjectionSuppressed', { kind: label, off: !off })
                   }}>
                   {off ? t('our.state.off') : t('our.state.on')}
                 </button>,
@@ -430,25 +434,35 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
   const messageRowActions = (row: MessageRowRef): ReactNode => {
     if (!PRUNABLE.has(row.category)) return null
     const selected = pruneSeqs.includes(row.seq)
-    const span = pruneSeqs.length === 0
-      ? ''
-      : String(pruneSeqs[0]) + '–' + String(pruneSeqs[pruneSeqs.length - 1])
     return (
-      <button type="button"
-        className={'lc-br-tag' + (selected ? ' lc-br-prune-on' : '')}
-        title={selected
-          ? t('our.prune.removeTip')
-          : t('our.prune.tip')}
-        onClick={(event) => {
-          event.stopPropagation()
-          // Only the FIRST selection needs the warning: it is the moment the
-          // irreversible action is decided, and repeating it per row would train
-          // the user to dismiss it.
-          if (!selected && pruneSeqs.length === 0 && !window.confirm(t('our.prune.confirm'))) return
-          void dispatch('togglePrune', { seq: row.seq })
-        }}>
-        {selected ? t('our.prune.selected', { span }) : t('our.prune')}
-      </button>
+      <>
+        <button type="button"
+          className={'lc-br-tag' + (selected ? ' lc-br-prune-on' : '')}
+          title={selected ? t('our.prune.removeTip') : t('our.prune.tip')}
+          onClick={(event) => {
+            event.stopPropagation()
+            // Only the FIRST selection needs the warning: that is the moment the
+            // irreversible action is decided, and repeating it per row would
+            // train the user to dismiss it unread.
+            if (!selected && pruneSeqs.length === 0 && !window.confirm(t('our.prune.confirm'))) return
+            void dispatch('togglePrune', { seq: row.seq })
+          }}>
+          {selected ? t('our.prune.selectedOne') : t('our.prune.item')}
+        </button>
+        {/* Whole-round selection: one action for the round, resolved to the same
+            per-node calls as picking the rows by hand. */}
+        <button type="button" className="lc-br-tag"
+          title={t('our.prune.roundTip')}
+          onClick={(event) => {
+            event.stopPropagation()
+            if (!window.confirm(t('our.prune.confirm'))) return
+            if (row.roundSeqs !== undefined) {
+              void dispatch('selectPruneRound', { seqs: row.roundSeqs, select: true })
+            }
+          }}>
+          {t('our.prune.round')}
+        </button>
+      </>
     )
   }
 
@@ -509,7 +523,7 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
         messageRowMarked,
         categoryRows,
         categoryHasRows: (category: string) =>
-          category === 'inject' && (contexts.length > 0 || injections.length > 0),
+          category === 'inject' && (contexts.length > 0 || injectors.length > 0),
         toolRowActions,
       })}
     </>

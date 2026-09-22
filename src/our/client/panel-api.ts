@@ -83,9 +83,12 @@ export interface PanelState {
   pruneSeqs?: number[]
   /** The declared runtime contexts (the dynamic, low-authority half of the prompt). */
   contexts?: SystemSectionInfo[] | null
-  /** Injection source kinds observed in this conversation's step batches. */
-  observedInjections?: string[]
-  /** Injection kinds suppressed in this conversation. */
+  /**
+   * The injection sources offered for suppression: the always-present ones from
+   * the static list first, then anything observed that it does not cover.
+   */
+  injectors?: Array<{ label: string; note?: string }>
+  /** Injection labels suppressed in this conversation. */
   suppressedInjections?: string[]
 }
 
@@ -103,7 +106,7 @@ export async function fetchState(sessionId: string): Promise<PanelState> {
     presetId: json.value?.presetId,
     pruneSeqs: json.value?.pruneSeqs ?? [],
     contexts: json.value?.contexts ?? null,
-    observedInjections: json.value?.observedInjections ?? [],
+    injectors: json.value?.injectors ?? [],
     suppressedInjections: json.value?.suppressedInjections ?? [],
   }
 }

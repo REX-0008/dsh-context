@@ -32,6 +32,7 @@ import type { ContextAssemblerService } from './assembler/service'
 import { ContextAssemblerEngine } from './assembler/engine'
 import { createSectionRegistry, type SectionRegistry } from './section-registry'
 import { KNOWN_SECTIONS_SOURCE, knownSectionOf } from './known-sections'
+import { KNOWN_INJECTORS } from './known-injectors'
 import { presetEntryForSection } from './preset/section-entries'
 import { SEED_MODULES } from './preset/seeds'
 import type { ContextPanelSettings } from './types'
@@ -126,6 +127,25 @@ function resolveOrigin(
   return { from: 'none', staleTable: false, order: undefined, ...(index >= 0 ? {} : {}) }
 }
 
+/**
+ * The injection sources to offer: the known list first, then anything observed
+ * that it does not cover.
+ *
+ * Observed entries are appended rather than filtered, so a producer this build
+ * has never heard of is still suppressible once it has injected something.
+ * @param observed - labels seen in this conversation's step batches.
+ * @returns the labels and their notes, the static ones first.
+ */
+function injectorList(observed: string[]): Array<{ label: string; note?: string }> {
+  const list: Array<{ label: string; note?: string }> = KNOWN_INJECTORS.map(entry => ({
+    label: entry.label,
+    note: entry.note,
+  }))
+  const covered = new Set(KNOWN_INJECTORS.map(entry => entry.label))
+  for (const label of observed) if (!covered.has(label)) list.push({ label })
+  return list
+}
+
 function stateHandler(wiring: Wiring) {
   return async (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse): Promise<void> => {
     try {
@@ -218,15 +238,19 @@ function stateHandler(wiring: Wiring) {
           /** The preset this conversation runs on (labels the preset-level state). */
           ...(presetId === undefined ? {} : { presetId }),
           /**
-           * The surface seqs currently selected for pruning (ascending). The panel
-           * marks those rows and derives the range it will send from their ends.
+           * The surface seqs currently selected for pruning (ascending).
            */
           pruneSeqs: engine === undefined ? [] : engine.pendingPruneSeqs(sessionId),
           /** The declared runtime contexts (name/order/text) for this conversation. */
           contexts,
-          /** Injection source kinds seen in this conversation's step batches. */
-          observedInjections: engine === undefined ? [] : engine.observedInjectionsForSession(sessionId),
-          /** Injection kinds the user has suppressed here. */
+          /**
+           * The injection sources the panel offers. The static list comes first so
+           * the always-present ones (the instruction baseline, the skill catalog)
+           * are there before any turn has run; anything observed in this
+           * conversation that the list does not know is appended.
+           */
+          injectors: injectorList(engine === undefined ? [] : engine.observedInjectionsForSession(sessionId)),
+          /** Injection labels the user has suppressed here. */
           suppressedInjections: value?.suppressedInjections?.[sessionId] ?? [],
           /**
            * How many sections each source holds for this session. The panel
@@ -277,6 +301,11 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
   /** Drop one selected row, or the whole selection when no seq is given. */
   cancelPrune: ({ engine, sessionId, p }) => {
     engine?.cancelPrune(sessionId, p.seq === undefined ? undefined : Number(p.seq))
+  },
+  /** Select or deselect a whole round's nodes in one action. */
+  selectPruneRound: ({ engine, sessionId, p }) => {
+    const seqs = Array.isArray(p.seqs) ? (p.seqs as unknown[]).map(Number).filter(Number.isFinite) : []
+    engine?.selectPruneSeqs(sessionId, seqs, p.select !== false)
   },
   /**
    * Switch one RUNTIME CONTEXT off (or back on) for this conversation.

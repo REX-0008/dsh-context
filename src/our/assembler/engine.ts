@@ -34,6 +34,7 @@ import type { ContextPanelSettings, PromptModule, PromptModulePatch } from '../t
 import { EMPTY_CONFIG } from '../types'
 import { presetEntriesOf, type PresetEntryInfo } from './preset-entries'
 import { presetEntryForSection } from '../preset/section-entries'
+import { injectorLabel } from '../known-injectors'
 
 /** What happened to a parked prune when its boundary arrived. */
 export interface PruneOutcome {
@@ -43,10 +44,8 @@ export interface PruneOutcome {
    * stays parked for the next quiet boundary), or the attempt failed.
    */
   reason?: 'unavailable' | 'busy' | 'failed'
-  /** The first surface seq the pruned range covered, when it ran. */
-  start?: number
-  /** The last surface seq the pruned range covered, when it ran. */
-  end?: number
+  /** The surface seqs actually pruned, when it ran. */
+  pruned?: number[]
   /** The failure text, for the log and the panel. */
   detail?: string
 }
@@ -299,15 +298,13 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
       current.preStepDisposer = agent.ctx.on('agent/pre-step', async (payload, next) => {
         const decision = await next()
         if (decision.kind !== 'enter') return decision
-        // Record what injected into this batch, so the panel can list the sources
-        // it may suppress instead of offering a fixed guess-list.
+        // Record what actually injected into this batch, so a producer the static
+        // list does not know still becomes suppressible. Labelled the same way the
+        // list and the filter are (see `injectorLabel`), or the two would not meet.
         const seen = new Set<string>()
         for (const message of decision.messages ?? []) {
-          const source = (message as { source?: { kind?: unknown; plugin?: unknown } }).source
-          const kind = source?.kind
-          if (typeof kind === 'string' && kind !== 'user') {
-            seen.add(typeof source?.plugin === 'string' ? source.plugin + ':' + kind : kind)
-          }
+          const label = injectorLabel((message as { source?: unknown }).source)
+          if (label !== undefined) seen.add(label)
         }
         if (seen.size > 0) this.injectionKinds.set(agent.id, [...seen])
         const suppressed = this.getConfig().suppressedInjections?.[agent.id]
@@ -315,8 +312,8 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
         const blocked = new Set(suppressed)
         const admitted = decision.messages ?? []
         const messages = admitted.filter((message) => {
-          const kind = (message as { source?: { kind?: unknown } }).source?.kind
-          return typeof kind !== 'string' || !blocked.has(kind)
+          const label = injectorLabel((message as { source?: unknown }).source)
+          return label === undefined || !blocked.has(label)
         })
         return messages.length === admitted.length ? decision : { ...decision, messages }
       })
@@ -566,6 +563,27 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
     return true
   }
 
+  /**
+   * Select every node of one round, or clear that round's selection.
+   *
+   * The panel resolves a round to its node seqs (it already maps rows to rounds)
+   * and hands them here in one call, so "prune this round" is one action for the
+   * user while remaining per-node underneath — the same calls an individually
+   * picked selection produces.
+   * @param sessionId - the agent (= session) id.
+   * @param seqs - the round's node seqs.
+   * @param select - true to select them all, false to drop them.
+   */
+  selectPruneSeqs(sessionId: string, seqs: number[], select: boolean): void {
+    const current = this.pendingPrunes.get(sessionId) ?? new Set<number>()
+    for (const seq of seqs) {
+      if (select) current.add(seq)
+      else current.delete(seq)
+    }
+    if (current.size === 0) this.pendingPrunes.delete(sessionId)
+    else this.pendingPrunes.set(sessionId, current)
+  }
+
   /** @inheritdoc */
   pendingPruneSeqs(sessionId: string): number[] {
     return [...(this.pendingPrunes.get(sessionId) ?? [])].sort((a, b) => a - b)
@@ -600,22 +618,25 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
       this.pendingPrunes.delete(agent.id)
       return { ok: false, reason: 'unavailable' }
     }
-    // The closed range the selected rows span: the harness prunes one balanced
-    // span per call, so the selection defines that span's ends.
+    // One call per selected node, in surface order. The harness prunes one
+    // balanced span per call, so pruning the selected nodes individually is what
+    // keeps "I selected three rows" meaning exactly three removals — deriving one
+    // span from their ends would silently take everything between them.
     const seqs = [...selection].sort((a, b) => a - b)
-    const start = seqs[0] as number
-    const end = seqs[seqs.length - 1] as number
     try {
       // Claim the idle phase BEFORE clearing the selection: `runMaintenance`
       // throws synchronously when a turn (or another maintenance task) already
       // owns the agent, and in that case the selection must stay parked for the
       // next quiet boundary rather than being silently consumed.
       const run = agent.runMaintenance(async (signal) => {
-        await compaction.compactRegion(start, end, agent, signal)
+        for (const seq of seqs) {
+          if (signal.aborted) break
+          await compaction.compactRegion(seq, seq, agent, signal)
+        }
       })
       this.pendingPrunes.delete(agent.id)
       await run
-      return { ok: true, start, end }
+      return { ok: true, pruned: seqs }
     } catch (error) {
       // Busy keeps the selection; a genuine failure does not (retrying a broken
       // range every boundary would never succeed).
