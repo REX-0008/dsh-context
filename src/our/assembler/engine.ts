@@ -564,6 +564,71 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
   }
 
   /**
+   * The smallest balanced span that contains one node.
+   *
+   * A node is not always prunable on its own: the harness refuses a cut that
+   * would separate a tool call from its result, so a `tool/result` needs the
+   * assistant message that called it, and a message carrying tool calls needs
+   * those results. The span returned here is that node's minimal legal unit —
+   * for a plain message it is the node itself.
+   *
+   * Balance is derived from the surface directly (a call adds to the in-progress
+   * count, a result removes one) rather than by importing the harness helper,
+   * which this layer deliberately does not depend on.
+   * @param agent - the agent whose surface is read.
+   * @param seq - the selected node.
+   * @returns the span's first and last seqs, or undefined when the surface is unreadable.
+   */
+  private balancedSpanFor(agent: Agent, seq: number): { start: number; end: number } | undefined {
+    try {
+      const session = (agent as unknown as {
+        session?: {
+          surface?: { nodes?: unknown }
+          eventAt?: (seq: number) => { type?: unknown; data?: unknown } | undefined
+        }
+      }).session
+      const nodes = session?.surface?.nodes
+      const eventAt = session?.eventAt
+      if (!Array.isArray(nodes) || typeof eventAt !== 'function') return undefined
+      const index = (nodes as number[]).indexOf(seq)
+      if (index === -1) return undefined
+      const delta = (at: number): number => {
+        const event = eventAt.call(session, (nodes as number[])[at])
+        if (event?.type === 'assistant/message') {
+          const content = (event.data as { message?: { content?: unknown } } | undefined)?.message?.content
+          return Array.isArray(content)
+            ? content.filter((block: { type?: unknown }) => block?.type === 'tool-call').length
+            : 0
+        }
+        return event?.type === 'tool/result' ? -1 : 0
+      }
+      // A cut before index i is balanced when no call is open there.
+      const balancedBefore = (i: number): boolean => {
+        let open = 0
+        for (let k = 0; k < i; k += 1) open += delta(k)
+        return open === 0
+      }
+      // Expanding outward to the nearest balanced boundaries is what makes the
+      // span legal; a node that is already balanced yields itself.
+      let start = index
+      while (start > 0 && !balancedBefore(start)) start -= 1
+      let end = index
+      // The closing cut must also be balanced: walk right until no call is open
+      // after the span's last node.
+      let open = 0
+      for (let k = 0; k <= end; k += 1) open += delta(k)
+      while (open !== 0 && end + 1 < (nodes as number[]).length) {
+        end += 1
+        open += delta(end)
+      }
+      if (open !== 0 || !balancedBefore(start)) return undefined
+      return { start: (nodes as number[])[start] as number, end: (nodes as number[])[end] as number }
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
    * Select every node of one round, or clear that round's selection.
    *
    * The panel resolves a round to its node seqs (it already maps rows to rounds)
@@ -631,7 +696,12 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
       const run = agent.runMaintenance(async (signal) => {
         for (const seq of seqs) {
           if (signal.aborted) break
-          await compaction.compactRegion(seq, seq, agent, signal)
+          // Each selected node is pruned as its own minimal legal unit: a tool
+          // result pulls in the call that produced it, because the harness
+          // refuses a cut that separates the pair. The user selects items; the
+          // harness needs balanced ends.
+          const span = this.balancedSpanFor(agent, seq) ?? { start: seq, end: seq }
+          await compaction.compactRegion(span.start, span.end, agent, signal)
         }
       })
       this.pendingPrunes.delete(agent.id)
