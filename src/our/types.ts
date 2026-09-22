@@ -1,66 +1,73 @@
 /**
- * @our/context-panel 共享类型（单插件内部所有模块共用；client 半也经此对齐）。
+ * @our/context-panel shared types (shared by every module inside this plugin; the client half aligns through them too).
  * @module @our/context-panel/types
  */
 
-/** 模块注册通道：权威×动态判据决定前缀缓存命运（section 期望稳定，context 变则 supersede）。 */
+/**
+ * Module registration channel: the authority×dynamism criterion decides the prefix
+ * cache's fate (section is expected to stay stable; a changed context supersedes).
+ */
 export type PromptChannel = 'section' | 'context'
 
-/** 模块覆盖的父来源（父=原插件注入的 section；子=我们的模块，同名自动 shadow 父）。 */
+/**
+ * The parent source a module overrides (parent = the section the original plugin
+ * injected; child = our module, which shadows the parent automatically when the
+ * names match).
+ */
 export interface ModuleSource {
-  /** 父来源种类：preset（预设条目注入）/ global（profile 全局）/ none（纯新增，无父）。 */
+  /** Parent source kind: preset (injected by a preset entry) / global (profile-wide) / none (purely new, no parent). */
   kind: 'preset' | 'global' | 'none'
-  /** 预设条目 id（preset 时：如 'persona'）。 */
+  /** The preset entry id (when preset: e.g. 'persona'). */
   entryId?: string
-  /** 被覆盖的父 section 名（= 本模块的 name，同名才 shadow）。 */
+  /** The overridden parent section name (= this module's name; only a matching name shadows). */
   sectionName?: string
-  /** 父原文（从预设条目 config 读到；preset 找不到时不填）。 */
+  /** The parent's original text (read from the preset entry's config; left unset when the preset cannot be found). */
   parentText?: string
 }
 
-/** 模块补丁（前端经 settings 通道只发 patch；settings 是模块定义单一数据源）。 */
+/** A module patch (the client sends only patches through the settings channel; settings is the single source of module definitions). */
 export interface PromptModulePatch {
-  /** 注入文本。 */
+  /** The injected text. */
   text?: string
-  /** 通道：稳定高权威 → section；动态低权威 → context。 */
+  /** Channel: stable high authority → section; dynamic low authority → context. */
   channel?: PromptChannel
-  /** 组装顺序（section 与 context 各自独立排序）。 */
+  /** Assembly order (section and context are each ordered independently). */
   order?: number
-  /** 开关。 */
+  /** On/off switch. */
   enabled?: boolean
-  /** 覆盖的父来源（dsh 不读，我们写我们读，供显示/对比/写回追溯）。 */
+  /** The overridden parent source (dsh does not read it; we write it and read it back for display/comparison and to trace a write-back). */
   source?: ModuleSource
 }
 
-/** 一个已解析的模块（合并 agent 级 + 会话级覆盖后的最终形态）。 */
+/** A resolved module (its final form after the agent-level and conversation-level overrides are merged). */
 export interface PromptModule {
-  /** 注册名，如 'our:soul' / 'our:workspace'；覆盖父时 = 父 section 名。 */
+  /** Registration name, such as 'our:soul' / 'our:workspace'; when overriding a parent it equals the parent section name. */
   name: string
-  /** 通道。 */
+  /** Channel. */
   channel: PromptChannel
-  /** 组装顺序。 */
+  /** Assembly order. */
   order: number
-  /** 是否注入。 */
+  /** Whether it is injected. */
   enabled: boolean
-  /** 注入文本（静态文本，注册时从配置渲染一次）。 */
+  /** The injected text (static text, rendered once from the configuration at registration time). */
   text: string
-  /** 覆盖的父来源（新增模块无）。 */
+  /** The overridden parent source (absent for a newly added module). */
   source?: ModuleSource
 }
 
-/** context-panel settings namespace 的值（磁盘持久化；引擎/面板/预设共用）。 */
+/** The context-panel settings namespace's value (persisted to disk; shared by the engine / panel / preset). */
 export interface ContextPanelSettings {
-  /** 当前编辑作用域。 */
+  /** The current edit scope. */
   scope: 'conversation' | 'agent'
-  /** 同步至预设开关。 */
+  /** The sync-to-preset switch. */
   autoSyncPreset: boolean
-  /** 面板默认宽度（% of window，软件级 UI 偏好）。 */
+  /** The panel's default width (% of window, a software-level UI preference). */
   panelWidth: number
-  /** agent 级模块配置（权威源）。 */
+  /** Agent-level module configuration (the source of truth). */
   modules: Record<string, PromptModulePatch>
-  /** 会话级临时覆盖（每会话一份）。 */
+  /** Conversation-level temporary overrides (one set per conversation). */
   conversationOverrides: Record<string, Record<string, PromptModulePatch>>
-  /** agent 级工具限制（按工具名 → filter）。 */
+  /** Agent-level tool restrictions (by tool name → filter). */
   toolRestrictions: Record<string, { allow?: string[]; deny?: string[] }>
   /**
    * Sections disabled for every conversation under the same PRESET (the
@@ -100,7 +107,7 @@ export interface ContextPanelSettings {
   sectionOriginals?: Record<string, Record<string, string>>
 }
 
-/** 空配置（settings 未就绪时的兜底）。 */
+/** Empty configuration (the fallback while settings is not ready). */
 export const EMPTY_CONFIG: ContextPanelSettings = {
   scope: 'agent',
   autoSyncPreset: false,

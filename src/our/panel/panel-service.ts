@@ -6,8 +6,10 @@
  * directly (a same-package import) and is one of the two in-process readers and
  * writers of the settings namespace that is the single source of configuration.
  *
- * editSkillDirs / editBaselineConfig：委托引擎**原位修改** agent 预设装配清单
- * （.agent-presets/<agent>/agent.cordis.yml 对应插件行 config），新会话（换代）生效。
+ * editSkillDirs / editBaselineConfig: delegate to the engine to **modify in place**
+ * the agent's preset assembly manifest (the matching plugin row's config in
+ * .agent-presets/<agent>/agent.cordis.yml), effective for new sessions (a new
+ * generation).
  * @module @our/context-panel/panel-service
  */
 import type { Context } from '@deepseek-ai/cordis'
@@ -16,12 +18,13 @@ import type { ContextAssemblerService } from '../assembler/service'
 import type { ContextPanelSettings, PromptModulePatch } from '../types'
 import { mergePatch } from './settings'
 
-/** ctx.contextPanel 对外契约。 */
+/** The ctx.contextPanel public contract. */
 export interface ContextPanelService {
   /**
-   * 当前会话的模块视图 + 作用域/同步状态 + dirty。
-   * @param sessionId - 目标会话 id。
-   * @returns 合并后的模块列表（含未启用）与面板元信息。
+   * The current session's module view plus the scope / sync state and dirty flag.
+   * @param sessionId - the target session id.
+   * @returns the merged module list (including disabled ones) and the panel's
+   * metadata.
    */
   getSnapshot(sessionId: string): {
     modules: Array<{ name: string; channel: 'section' | 'context'; order: number; enabled: boolean; text: string }>
@@ -30,58 +33,66 @@ export interface ContextPanelService {
     dirty: boolean
   }
   /**
-   * 按作用域写模块补丁（conversation → 会话覆盖；agent → 权威源）。
-   * @param target - 写入层级。
-   * @param name - 模块名。
-   * @param patch - 补丁。
-   * @param sessionId - 会话 id。
+   * Write a module patch at the given scope (conversation → the conversation
+   * override; agent → the source of truth).
+   * @param target - the level to write to.
+   * @param name - the module name.
+   * @param patch - the patch.
+   * @param sessionId - the session id.
    */
   updateModule(target: 'conversation' | 'agent', name: string, patch: PromptModulePatch, sessionId: string): Promise<void>
   /**
-   * 会话级覆盖全量覆盖到 agent 级并清空本会话覆盖（前端确认弹窗后调）。
-   * @param sessionId - 会话 id。
+   * Copy the conversation-level overrides over the agent level in full and clear
+   * this conversation's overrides (called after the client's confirmation dialog).
+   * @param sessionId - the session id.
    */
   syncConversationToAgent(sessionId: string): Promise<void>
   /**
-   * 设置某工具的限制（禁用 → { deny:[name] }；启用 → {} 删除）。
-   * @param name - 工具名。
-   * @param filter - 限制；空 filter 表示清除该工具限制。
+   * Set one tool's restriction (disabled → { deny:[name] }; enabled → delete it).
+   * @param name - the tool name.
+   * @param filter - the restriction; an empty filter clears that tool's restriction.
    */
   setToolRestriction(name: string, filter: { allow?: string[]; deny?: string[] }): Promise<void>
   /**
-   * 当前会话是否有未应用修改（配置 digest ≠ 注册快照 digest）。
-   * @param sessionId - 会话 id。
+   * Whether the current session has unapplied changes (config digest ≠ registration
+   * snapshot digest).
+   * @param sessionId - the session id.
    */
   getDirty(sessionId: string): boolean
   /**
-   * 激活更新（pending=true，下个 turn 边界执行重注册）。
-   * @param sessionId - 会话 id。
+   * Activate an update (pending = true; the re-registration runs at the next turn
+   * boundary).
+   * @param sessionId - the session id.
    */
   applyChanges(sessionId: string): void
-  /** 切换编辑作用域（conversation → agent 会丢弃会话覆盖，前端先确认）。 */
+  /** Switch the edit scope (conversation → agent discards the conversation overrides; the client confirms first). */
   setScope(scope: 'conversation' | 'agent'): Promise<void>
-  /** 切换自动同步预设开关。 */
+  /** Toggle the auto-sync-to-preset switch. */
   setAutoSyncPreset(b: boolean): Promise<void>
   /**
-   * 记录技能目录设置（原位修改 agent 预设 skill-filesystem 行 config，换代生效）。
-   * @param dirs - customSkillDirs。
-   * @param sessionId - 会话 id。
+   * Record the skill directory settings (modify in place the skill-filesystem row's
+   * config in the agent's preset; effective for a new generation).
+   * @param dirs - customSkillDirs.
+   * @param sessionId - the session id.
    */
   editSkillDirs(dirs: string[], sessionId: string): void
   /**
-   * 记录基线设置（原位修改 agent 预设 agent-instructions 行 config，换代生效）。
-   * @param patch - agent-instructions config 键值。
-   * @param sessionId - 会话 id。
+   * Record the baseline settings (modify in place the agent-instructions row's
+   * config in the agent's preset; effective for a new generation).
+   * @param patch - the agent-instructions config key/values.
+   * @param sessionId - the session id.
    */
   editBaselineConfig(patch: Record<string, unknown>, sessionId: string): void
 }
 
 /**
- * 构造 ctx.contextPanel 服务（同包内直接持引擎实例）。
- * @param ctx - 插件根 context。
- * @param getScope - 返回 settings namespace scope（读/写配置）。
- * @param engine - 引擎实例。
- * @returns 服务实现。
+ * Build the ctx.contextPanel service (it holds the engine instance directly, a
+ * same-package import).
+ * @param ctx - the plugin root context.
+ * @param getScope - returns the settings namespace scope (reads/writes the
+ * configuration).
+ * @param engine - the engine instance.
+ * @returns the service implementation.
  */
 export function createPanelService(
   ctx: Context,
@@ -151,11 +162,12 @@ export function createPanelService(
       await getScope().update({ autoSyncPreset: b })
     },
     editSkillDirs(dirs, sessionId) {
-      // 原位修改 agent 预设 skill-filesystem 行 config（引擎实现，换代生效）
+      // modify in place the skill-filesystem row's config in the agent's preset (implemented by the engine; effective for a new generation)
       engine.editSkillDirs(dirs, sessionId)
     },
     editBaselineConfig(patch, sessionId) {
-      // 原位修改 agent 预设 agent-instructions 行 config（引擎实现，换代生效）
+      // modify in place the agent-instructions row's config in the agent's preset
+      // (implemented by the engine; effective for a new generation)
       engine.editBaselineConfig(patch, sessionId)
     },
   }

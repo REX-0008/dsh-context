@@ -575,8 +575,8 @@ export function makeContextView(
               step pickers and two of every category on the page. */}
           <div className="lc-col lc-col-browser flex-1 min-w-[min(360px,100%)]">
             {typeof sessionId === 'string' ? (
-              <ContextManagementPanel sessionId={sessionId}
-                browser={hooks => browser({ ...hooks, titleOverride: '上下文管理' })} />
+              <ContextManagementPanel sessionId={sessionId} t={kit.t}
+                browser={hooks => browser({ ...hooks, titleOverride: t('our.title') })} />
             ) : browserCard}
           </div>
         </div>

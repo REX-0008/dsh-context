@@ -1,13 +1,16 @@
 /**
- * 种子模块（业务身份内容，单一数据源）。
+ * Seed modules (business-identity content, the single source of truth).
  *
- * 与 settings.ts（机制代码）分离：改文案只需动本文件，不必碰 schema/默认值逻辑。
- * 区间约定：section 避开 harness(-100)/persona(0)/工具指引(100-199)；context 独立区间。
- * 记忆（our:memory）为占位壳，记忆引擎（compaction 并行总结）后续接入后启用。
+ * Kept separate from settings.ts (mechanism code): changing the wording only
+ * touches this file, not the schema/defaults logic.
+ * Range convention: section avoids harness(-100)/persona(0)/tool guidance(100-199);
+ * context has its own range.
+ * Memory (our:memory) is a placeholder shell, enabled later once the memory engine
+ * (compaction parallel summarization) is wired in.
  */
 import type { PromptModulePatch } from '../types'
 
-/** 默认种子模块（key = 模块名）。 */
+/** Default seed modules (key = module name). */
 export const SEED_MODULES: Record<string, PromptModulePatch> = {
   'our:soul': {
     channel: 'section',

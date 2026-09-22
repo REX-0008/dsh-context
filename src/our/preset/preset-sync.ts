@@ -1,15 +1,23 @@
 /**
- * 预设快照同步（档案）：把当前生效的模块装配说明写进用户级预设文件。
+ * Preset snapshot sync (archive): write the currently effective module assembly
+ * description into the user-level preset file.
  *
- * 对齐 plans/2026-08-19-上下文工程后端部分.md §4（syncToPreset）与 §1.6（原位修改）：
- * - 运行时权威源 = settings（agent scope 注入，不经预设）；写预设不影响运行时；
- * - 目标：`$DSH_HOME/.agent-presets/<agentId>/agent.cordis.yml`（装配清单）；
- * - 写入方式：原位修改 —— 读取原文 → 找到对应插件行 → 改该行 config → 写回原位置
- *   （不补丁式追加、不整体重写），其余行/注释/结构字节原样保留；
- * - 差异才写（diff 写文件）；写文件不产代、不触发 skill watcher（§3.2 已实证）。
+ * Follows plans/2026-08-19-上下文工程后端部分.md §4 (syncToPreset) and §1.6
+ * (in-place modification):
+ * - the runtime source of truth is settings (injected in the agent scope, not via
+ *   the preset); writing the preset does not affect the runtime;
+ * - target: `$DSH_HOME/.agent-presets/<agentId>/agent.cordis.yml` (the assembly
+ *   manifest);
+ * - write mode: in-place modification — read the original text → find the matching
+ *   plugin row → change that row's config → write back at the same position (no
+ *   patch-style appending, no whole-file rewrite), leaving the other rows /
+ *   comments / structure byte-identical;
+ * - write only on a difference (diff the file); writing the file produces no
+ *   generation and triggers no skill watcher (proven in §3.2).
  *
- * 备案：除原位写入外，同时保留 sidecar 档案 `context-modules.json`（早期实现），
- * 作为纯 JSON 快照冗余，供审计/对比，与 agent.cordis.yml 无冲突。
+ * Record: alongside the in-place write, the sidecar archive `context-modules.json`
+ * (the earlier implementation) is kept as a redundant plain-JSON snapshot for
+ * auditing/comparison, and it does not conflict with agent.cordis.yml.
  * @module @our/context-panel/preset-sync
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -18,22 +26,25 @@ import { join } from 'node:path'
 import { appendPluginRow, renderPluginRow, updatePluginRowConfig } from './preset-edit'
 import type { PromptModule } from '../types'
 
-/** 数据根（DSH_HOME 由 dsh 进程设置；兜底用户主目录）。 */
+/** Data root (DSH_HOME is set by the dsh process; falls back to the user's home directory). */
 const HOME_ROOT = process.env.DSH_HOME ?? homedir()
 
-/** 本插件在装配清单里的行标识（行名随插件包名；旧 @our/context-assembler 已并入本插件）。 */
+/**
+ * This plugin's row identifiers in the assembly manifest (the row name follows the
+ * plugin package name; the old @our/context-assembler is merged into this plugin).
+ */
 export const CONTEXT_PLUGIN_ID = 'context-panel'
 export const CONTEXT_PLUGIN_NAME = '@our/context-panel'
 
-/** skill-filesystem 行标识。 */
+/** skill-filesystem row identifiers. */
 export const SKILL_FS_ID = 'skill-filesystem'
 export const SKILL_FS_NAME = '@deepseek-ai/dsh-skill-filesystem'
 
-/** agent-instructions 行标识。 */
+/** agent-instructions row identifiers. */
 export const AGENT_INSTRUCTIONS_ID = 'agent-instructions'
 export const AGENT_INSTRUCTIONS_NAME = '@deepseek-ai/dsh-agent-instructions'
 
-/** 读取文件内容，不存在返回 null。 */
+/** Read a file's content; null when it does not exist. */
 function readFileSafe(path: string): string | null {
   try {
     return readFileSync(path, 'utf8')
@@ -42,17 +53,17 @@ function readFileSafe(path: string): string | null {
   }
 }
 
-/** agent 预设文件路径（装配清单）。 */
+/** The agent's preset file path (the assembly manifest). */
 function presetFilePath(agentId: string): string {
   return join(HOME_ROOT, '.agent-presets', agentId, 'agent.cordis.yml')
 }
 
-/** 备案 sidecar 路径（纯 JSON 快照）。 */
+/** The sidecar archive path (a plain-JSON snapshot). */
 function snapshotFilePath(agentId: string): string {
   return join(HOME_ROOT, '.agent-presets', agentId, 'context-modules.json')
 }
 
-/** 模块合并视图 → 装配用 modules 映射（name → patch，含 text/channel/order/enabled）。 */
+/** The merged module view → the assembly's modules map (name → patch, with text/channel/order/enabled). */
 function modulesToConfig(modules: PromptModule[]): Record<string, { channel: 'section' | 'context'; order: number; enabled: boolean; text: string }> {
   const out: Record<string, { channel: 'section' | 'context'; order: number; enabled: boolean; text: string }> = {}
   for (const m of modules) {
@@ -62,9 +73,10 @@ function modulesToConfig(modules: PromptModule[]): Record<string, { channel: 'se
 }
 
 /**
- * 写 sidecar 备案（context-modules.json，早期实现的纯 JSON 档案，保留作冗余审计）。
- * @param agentId - agent id。
- * @param modules - 合并后的模块列表。
+ * Write the sidecar archive (context-modules.json, the earlier implementation's
+ * plain-JSON record, kept for redundant auditing).
+ * @param agentId - the agent id.
+ * @param modules - the merged module list.
  */
 export function writePresetSnapshot(agentId: string, modules: PromptModule[]): void {
   const target = snapshotFilePath(agentId)
@@ -78,10 +90,12 @@ export function writePresetSnapshot(agentId: string, modules: PromptModule[]): v
 }
 
 /**
- * 把模块装配说明原位写入 agent 预设装配清单（本插件行 config.modules）。
- * 目标行存在 → 原位改该行；不存在 → 文件末尾追加该行；文件不存在 → 新建。
- * @param agentId - agent id。
- * @param modules - 合并后的模块列表。
+ * Write the module assembly description in place into the agent's preset assembly
+ * manifest (this plugin's row config.modules).
+ * Target row exists → modify it in place; does not exist → append the row at the
+ * end of the file; file does not exist → create it.
+ * @param agentId - the agent id.
+ * @param modules - the merged module list.
  */
 export function syncToPresetFile(agentId: string, modules: PromptModule[]): void {
   const config = { modules: modulesToConfig(modules) }
@@ -101,13 +115,16 @@ export function syncToPresetFile(agentId: string, modules: PromptModule[]): void
 }
 
 /**
- * 原位修改 agent 预设装配清单里指定插件行的 config（设置项，如 skill 目录 / 基线配置）。
- * 目标行存在 → 原位改该行；不存在 → 文件末尾追加；文件不存在 → 新建（含头部注释）。
- * @param agentId - agent id。
- * @param pluginId - 插件 id。
- * @param pluginName - 插件包名。
- * @param configPatch - 要写入 config 的键值（仅这些键被 set/更新）。
- * @param headerComment - 新建文件时的头部注释行。
+ * Modify in place the config of a given plugin row in the agent's preset assembly
+ * manifest (settings such as the skill directories / baseline configuration).
+ * Target row exists → modify it in place; does not exist → append at the end of the
+ * file; file does not exist → create it (with the header comment).
+ * @param agentId - the agent id.
+ * @param pluginId - the plugin id.
+ * @param pluginName - the plugin package name.
+ * @param configPatch - the key/values to write into config (only these keys are
+ * set/updated).
+ * @param headerComment - the header comment lines used when creating the file.
  */
 export function updatePresetPluginConfig(
   agentId: string,

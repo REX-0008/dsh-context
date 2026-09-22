@@ -18,6 +18,7 @@
  */
 import { useCallback, useEffect, useState, type ReactElement, type ReactNode } from 'react'
 import type { BrowserRowBuilder } from '../../client/components/browser'
+import type { Translate } from '../../client/i18n'
 import { dispatchAction, fetchState, type PanelState, type SectionKind, type SystemSectionInfo } from './panel-api'
 
 /**
@@ -28,17 +29,17 @@ import { dispatchAction, fetchState, type PanelState, type SectionKind, type Sys
  * - `plugin`: a plugin's (or the harness's) text — its file is not ours to change,
  *   so the original is backed up and compared instead.
  */
-const KIND_LABEL: Record<SectionKind, string> = {
-  config: '配置',
-  preset: '预设',
-  plugin: '插件',
+const KIND_KEY: Record<SectionKind, string> = {
+  config: 'our.kind.config',
+  preset: 'our.kind.preset',
+  plugin: 'our.kind.plugin',
 }
 
 /** Why the source kind matters: it decides where a change finally lands. */
-const KIND_HINT: Record<SectionKind, string> = {
-  config: '本插件注入：本地持久化就是它的源，改完下一轮即生效',
-  preset: '预设注入：先落本地持久化；要回到预设本身，点「写回预设」（新会话生效）',
-  plugin: '插件注入（dsh 原生同样是插件）：源文件不归我们改，只改发出内容；原提示词已备份，供对比',
+const KIND_HINT_KEY: Record<SectionKind, string> = {
+  config: 'our.kindHint.config',
+  preset: 'our.kindHint.preset',
+  plugin: 'our.kindHint.plugin',
 }
 
 /** Estimated size, matching the host's fixed-density heuristic. */
@@ -49,6 +50,8 @@ function sizeOf(text: string): number {
 /** Props: the session, plus a builder that decorates upstream's browser. */
 export interface ContextManagementPanelProps {
   sessionId: string
+  /** The locale translator; every product string in this panel goes through it. */
+  t: Translate
   /**
    * Builds upstream's browser card, handing back the hooks this panel fills in.
    * `body` is upstream's own expansion chrome (head, line count, raw/Markdown
@@ -68,7 +71,7 @@ export interface ContextManagementPanelProps {
 }
 
 /** The panel: upstream's browser with our section rows in its system category. */
-export function ContextManagementPanel({ sessionId, browser }: ContextManagementPanelProps): ReactElement {
+export function ContextManagementPanel({ sessionId, browser, t }: ContextManagementPanelProps): ReactElement {
   const [state, setState] = useState<PanelState | null>(null)
   const [editing, setEditing] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
@@ -125,23 +128,23 @@ export function ContextManagementPanel({ sessionId, browser }: ContextManagement
     <>
       {atPastStep ? (
         <div className="lc-br-note">
-          {'正在查看历史时点：编辑功能只在当前对话有效，无法追溯修改旧对话。切回「当前」即可编辑。'}
+          {t('our.pastStep')}
         </div>
       ) : null}
       {stale && !atPastStep ? (
-        <div className="lc-br-note" title={'实际排序与内置对照表的数值不一致，表需要按当前 dsh 版本重新生成'}>
-          {'⚠ 内置对照表与实际排序不一致（对照表生成自 ' + String(state?.knownSectionsSource ?? '未知版本') + '），橙色数值表示该行需要核对。'}
+        <div className="lc-br-note" title={t('our.staleTableTip')}>
+          {'⚠ ' + t('our.staleTable', { src: String(state?.knownSectionsSource ?? '—') })}
         </div>
       ) : null}
       {sections.length === 0 && !atPastStep ? (
-        <div className="lc-br-note">{'该会话尚未组装过系统提示词：开始一轮对话后这里会列出各分节。'}</div>
+        <div className="lc-br-note">{t('our.empty')}</div>
       ) : null}
 
       {/* The category's own filter toolbar, mounted even when nothing matches so
           the filter can always be cleared. */}
       {atPastStep || sections.length === 0 ? null : toolbar(query, setQuery)}
       {sections.length > 0 && shown.length === 0 ? (
-        <div className="lc-br-note">{'没有匹配的分节。'}</div>
+        <div className="lc-br-note">{t('our.noMatch')}</div>
       ) : null}
       {/* Scoped so the token-column alignment below applies to OUR rows only:
           upstream's tool/message rows keep their original figure width. */}
@@ -151,32 +154,32 @@ export function ContextManagementPanel({ sessionId, browser }: ContextManagement
         const weightEdited = section.weight !== undefined
         const weightValue = weightEdited ? section.weight : section.order
 
-        // The expanded body: upstream's own chrome (head + line count + 原文 /
-        // Markdown switch + copy) with our actions in the same head group, in
-        // the order 原文 · Markdown · 编辑 · (写回预设 / 还原).
+        // The expanded body: upstream's own chrome (head + line count + raw /
+        // Markdown switch + copy) with our actions in the same head group,
+        // ordered raw · Markdown · edit · (write-back / restore).
         const extra = (
           <>
             {section.kind === 'preset' ? (
               <button type="button" className="lc-rich-seg-btn"
-                title={'把当前文本写回预设文件；新会话生效'}
+                title={t('our.action.writeBackTip')}
                 onClick={(event) => { event.stopPropagation(); void dispatch('writeBackPreset', { name: section.name }) }}>
-                {'写回预设'}
+                {t('our.action.writeBack')}
               </button>
             ) : null}
             {section.edited ? (
-              <button type="button" className="lc-rich-seg-btn" title={'放弃修改，恢复插件原文'}
+              <button type="button" className="lc-rich-seg-btn" title={t('our.action.restoreTip')}
                 onClick={(event) => { event.stopPropagation(); void dispatch('clearSectionText', { name: section.name }) }}>
-                {'还原'}
+                {t('our.action.restore')}
               </button>
             ) : null}
             <button type="button" className={'lc-rich-seg-btn' + (open ? ' lc-rich-seg-on' : '')}
-              title={'直接修改这一段文本'}
+              title={t('our.action.editTip')}
               onClick={(event) => {
                 event.stopPropagation()
                 if (open) setEditing(null)
                 else { setDraft(section.text); setEditing(section.name); setComparing(null) }
               }}>
-              {'编辑'}
+              {t('our.action.edit')}
             </button>
           </>
         )
@@ -188,26 +191,26 @@ export function ContextManagementPanel({ sessionId, browser }: ContextManagement
             <div>
               <button type="button" className="lc-gran-btn"
                 onClick={() => { void dispatch('setSectionText', { name: section.name, text: draft, original: section.text }).then(() => setEditing(null)) }}>
-                {'保存'}
+                {t('our.action.save')}
               </button>
-              <button type="button" className="lc-gran-btn" onClick={() => setEditing(null)}>{'取消'}</button>
+              <button type="button" className="lc-gran-btn" onClick={() => setEditing(null)}>{t('our.action.cancel')}</button>
             </div>
           </>
         ) : comparing === section.name ? (
           <>
             <div className="lc-cols">
               <div className="lc-col">
-                <div className="lc-empty" style={{ textAlign: 'left' }}>{'你的版本（正在发出）'}</div>
+                <div className="lc-empty" style={{ textAlign: 'left' }}>{t('our.compare.mine')}</div>
                 <pre className="lc-br-preview" style={{ whiteSpace: 'pre-wrap' }}>{section.text}</pre>
               </div>
               <div className="lc-col">
-                <div className="lc-empty" style={{ textAlign: 'left' }}>{'插件现在的原文'}</div>
+                <div className="lc-empty" style={{ textAlign: 'left' }}>{t('our.compare.original')}</div>
                 <pre className="lc-br-preview" style={{ whiteSpace: 'pre-wrap' }}>{section.originalText ?? ''}</pre>
               </div>
             </div>
             <button type="button" className="lc-gran-btn"
               onClick={() => { void dispatch('refreshSectionBaseline', { name: section.name, original: section.originalText }).then(() => setComparing(null)) }}>
-              {'以新原文为基准（保留我的修改）'}
+              {t('our.action.refreshBaseline')}
             </button>
           </>
         ) : body(section.name, section.text, extra)
@@ -219,25 +222,25 @@ export function ContextManagementPanel({ sessionId, browser }: ContextManagement
             {/* The registering plugin, in the same chip the tool rows use for
                 theirs — required on the COLLAPSED row, not only when expanded. */}
             {section.plugin !== undefined ? (
-              <span className="lc-br-tag lc-br-tool-plugin" title={'来源插件'}>{section.plugin}</span>
+              <span className="lc-br-tag lc-br-tool-plugin" title={t('our.chip.pluginTip')}>{section.plugin}</span>
             ) : (
-              <span className="lc-br-tag lc-br-sect-unknown" title={'未观测到注册来源（该分节在本插件挂载前注册，且不在内置对照表中）'}>
-                {'来源未知'}
+              <span className="lc-br-tag lc-br-sect-unknown" title={t('our.chip.unknownSourceTip')}>
+                {t('our.chip.unknownSource')}
               </span>
             )}
-            {section.edited ? <span className="lc-br-tag lc-br-sect-edited" title={'已修改：发出的是你的版本'}>{'已改'}</span> : null}
+            {section.edited ? <span className="lc-br-tag lc-br-sect-edited" title={t('our.chip.editedTip')}>{t('our.chip.edited')}</span> : null}
             {section.originalChanged ? (
-              <button type="button" className="lc-br-tag lc-br-sect-edited" title={'插件的原文已变化，点击查看对比'}
+              <button type="button" className="lc-br-tag lc-br-sect-edited" title={t('our.chip.originalChangedTip')}
                 onClick={(event) => { event.stopPropagation(); setComparing(comparing === section.name ? null : section.name) }}>
-                {'原文已变'}
+                {t('our.chip.originalChanged')}
               </button>
             ) : null}
             {weightOpen === section.name ? (
               <input className="lc-br-tag" style={{ width: '4.5em', textAlign: 'center' }}
                 autoFocus value={weightDraft}
                 title={weightEdited && section.order !== undefined
-                  ? '原本权重 ' + String(section.order) + '（半透明显示在输入框内）'
-                  : '排序权重'}
+                  ? t('our.weightTip.original', { orig: String(section.order) })
+                  : t('our.weightTip')}
                 placeholder={weightEdited && section.order !== undefined ? String(section.order) : ''}
                 onClick={(event) => event.stopPropagation()}
                 onChange={(event) => setWeightDraft(event.target.value)}
@@ -252,24 +255,24 @@ export function ContextManagementPanel({ sessionId, browser }: ContextManagement
                 className={'lc-br-tag' + (weightEdited ? ' lc-br-sect-edited' : '') + (section.staleTable ? ' lc-br-sect-stale' : '')}
                 style={{ width: '4.5em', textAlign: 'center' }}
                 title={section.staleTable
-                  ? '内置对照表与实际排序不一致，此数值需核对'
+                  ? t('our.weightTip.stale')
                   : weightEdited
-                    ? '已改权重（原本 ' + String(section.order ?? '—') + '），点击修改'
-                    : section.order === undefined ? '权重未知，点击设置' : '排序权重，点击修改'}
+                    ? t('our.weightTip.edited', { orig: String(section.order ?? '—') })
+                    : section.order === undefined ? t('our.weightTip.unknown') : t('our.weightTip')}
                 onClick={(event) => { event.stopPropagation(); setWeightDraft(weightValue === undefined ? '' : String(weightValue)); setWeightOpen(section.name) }}>
                 {weightValue === undefined ? '—' : String(weightValue)}
               </button>
             )}
             {/* Three states, because two disable levels exist (the deployment
-                level is not managed here). Clicking cycles 已启用 → 对话禁用 →
-                预设禁用 → 已启用, and the tooltip names the current level. */}
+                level is not managed here). Clicking cycles enabled → off-here →
+                off-for-preset → enabled, and the tooltip names the current level. */}
             <button type="button"
               className={'lc-br-tag' + (section.disabledAt === undefined ? '' : ' lc-br-sect-off')}
               title={section.disabledAt === 'preset'
-                ? '预设禁用：只要用这个预设的对话都不再发送这一段（不卸载插件，只停发提示词）。点击改为只在当前对话禁用'
+                ? t('our.state.offPresetTip')
                 : section.disabledAt === 'conversation'
-                  ? '对话禁用：只在当前对话不发送这一段，其他对话不受影响。点击改为预设级禁用'
-                  : '已启用：这一段正常发送。点击改为只在当前对话禁用'}
+                  ? t('our.state.offConversationTip')
+                  : t('our.state.onTip')}
               onClick={(event) => {
                 event.stopPropagation()
                 const next = section.disabledAt === undefined
@@ -279,7 +282,7 @@ export function ContextManagementPanel({ sessionId, browser }: ContextManagement
                     : { level: 'conversation' as const, off: false }
                 void dispatch('setSectionLevel', { name: section.name, ...next })
               }}>
-              {section.disabledAt === 'preset' ? '预设禁用' : section.disabledAt === 'conversation' ? '对话禁用' : '已启用'}
+              {section.disabledAt === 'preset' ? t('our.state.offPreset') : section.disabledAt === 'conversation' ? t('our.state.offConversation') : t('our.state.on')}
             </button>
           </>
         )
@@ -288,7 +291,7 @@ export function ContextManagementPanel({ sessionId, browser }: ContextManagement
         // slot surface rows use for their kind tag; an edited section's tag turns
         // brand-coloured as the reminder.
         const kindTag = (
-          <i className={'lc-br-kind' + (section.edited ? ' lc-br-kind-edited' : '')}>{KIND_LABEL[section.kind]}</i>
+          <i className={'lc-br-kind' + (section.edited ? ' lc-br-kind-edited' : '')} title={t(KIND_HINT_KEY[section.kind])}>{t(KIND_KEY[section.kind])}</i>
         )
         // The token figure goes in its own column (the row's `tokens` slot, which
         // right-aligns and now pads to a fixed width); the preview stays the name.
@@ -308,7 +311,7 @@ export function ContextManagementPanel({ sessionId, browser }: ContextManagement
       {browser({
         systemRows,
         systemCount: sections.length,
-        deliveredLabel: '当前实际发送系统提示词（所有修改落实后才会更新）',
+        deliveredLabel: t('our.delivered'),
       })}
     </>
   )

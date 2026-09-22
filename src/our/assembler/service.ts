@@ -1,18 +1,22 @@
 /**
- * @our/context-panel 的引擎服务契约（ctx.contextAssembler，同包内 panel-service
- * 直接持引擎实例；暴露服务供未来 memory 等内部/外部模块消费）。
+ * The engine service contract for @our/context-panel (ctx.contextAssembler;
+ * inside this package panel-service holds the engine instance directly, and the
+ * service is exposed for future internal/external consumers such as memory).
  * @module @our/context-panel/assembler/service
  */
 import type { AgentFace as Agent } from '../agent-face'
 import type { PresetEntryInfo } from './preset-entries'
 import type { PromptModule } from '../types'
 
-/** 引擎服务契约（panel-service 与未来记忆/其他消费者注入使用）。 */
+/** The engine service contract (injected by panel-service and by future memory/other consumers). */
 export interface ContextAssemblerService {
   /**
-   * 注入配置读取器：context-panel 注册完 settings 后调用，返回当前配置快照。
-   * 设置后已存在的 agent 会按新配置重注册（面板晚于引擎装载时兜底）。
-   * @param reader - 返回 context-panel settings namespace 当前值。
+   * Inject the configuration reader: context-panel calls this once it has
+   * registered settings, and it returns a snapshot of the current configuration.
+   * After it is set, existing agents are re-registered under the new configuration
+   * (the fallback for the panel loading after the engine).
+   * @param reader - returns the current value of the context-panel settings
+   * namespace.
    */
   setConfigReader(reader: () => import('../types').ContextPanelSettings): void
   /**
@@ -22,43 +26,53 @@ export interface ContextAssemblerService {
    */
   setHostContext(ctx: unknown): void
   /**
-   * 新会话创建（agent/created）：按当前配置注册该 agent 的模块与工具限制，存注册快照。
-   * @param agent - 新 agent。
+   * A new session was created (agent/created): register that agent's modules and
+   * tool restrictions from the current configuration and store the registration
+   * snapshot.
+   * @param agent - the new agent.
    */
   registerForAgent(agent: Agent): void
   /**
-   * turn 边界应用（agent/inbox/inserted）：有激活标记才重注册模块 + 重应用工具限制 + 更新快照。
-   * @param agent - 目标 agent。
-   * @returns 是否真的应用了更新。
+   * Apply at the turn boundary (agent/inbox/inserted): only when the activation
+   * flag is set does it re-register the modules, re-apply the tool restrictions,
+   * and update the snapshot.
+   * @param agent - the target agent.
+   * @returns whether the update was actually applied.
    */
   applyPending(agent: Agent): boolean
   /**
-   * 激活该 agent 的更新（用户点击更新上下文 / 压缩总结自动触发）。
-   * @param sessionId - agent 的会话 id（= agent.id）。
+   * Activate this agent's update (the user clicking update-context, or a
+   * compaction summary triggering it automatically).
+   * @param sessionId - the agent's session id (= agent.id).
    */
   markPending(sessionId: string): void
   /**
-   * 配置是否与注册快照有差异（有未应用修改）。
-   * @param sessionId - agent 的会话 id。
-   * @returns 有差异为 true。
+   * Whether the configuration differs from the registration snapshot (there are
+   * unapplied changes).
+   * @param sessionId - the agent's session id.
+   * @returns true when they differ.
    */
   isDirty(sessionId: string): boolean
   /**
-   * 当前会话合并后的模块视图（agent 级 + 会话级覆盖）。
-   * @param agent - 目标 agent。
-   * @returns 排序后的模块列表（含未启用项）。
+   * The current session's merged module view (agent level + conversation-level
+   * overrides).
+   * @param agent - the target agent.
+   * @returns the ordered module list (including disabled entries).
    */
   getModuleView(agent: Agent): PromptModule[]
   /**
-   * 按会话 id 读合并后的模块视图（panel-service 的 getSnapshot 用；未知会话返回空）。
-   * @param sessionId - agent 的会话 id。
-   * @returns 排序后的模块列表（含未启用项）。
+   * Read the merged module view by session id (used by panel-service's
+   * getSnapshot; an unknown session returns empty).
+   * @param sessionId - the agent's session id.
+   * @returns the ordered module list (including disabled entries).
    */
   getModuleViewForSession(sessionId: string): PromptModule[]
   /**
-   * 当前 agent 预设的条目列表（id/name/config），供系统提示词板块来源判定（预设可关联/可覆盖）。
-   * @param sessionId - agent 的会话 id。
-   * @returns 预设条目；无预设/未知会话返回空。
+   * The current agent preset's entry list (id/name/config), used by the system
+   * prompt section to decide a source (a preset can be associated/overridden).
+   * @param sessionId - the agent's session id.
+   * @returns the preset entries; empty when there is no preset or the session is
+   * unknown.
    */
   presetEntriesForSession(sessionId: string): PresetEntryInfo[]
   /**
@@ -100,23 +114,27 @@ export interface ContextAssemblerService {
    */
   registeredOrdersForSession(sessionId: string): Record<string, number>
   /**
-   * 把当前生效模块装配说明原位写入用户级预设装配清单（agent.cordis.yml 的
-   * context-assembler 行 config.modules），并保留 sidecar 备案（不影响运行时）。
-   * @param agentId - agent id。
+   * Write the currently effective module assembly description in place into the
+   * user-level preset assembly manifest (the context-assembler row's
+   * config.modules in agent.cordis.yml), keeping the sidecar archive (it does not
+   * affect the runtime).
+   * @param agentId - the agent id.
    */
   syncToPreset(agentId: string): void
   /**
-   * 原位修改 agent 预设装配清单的 skill-filesystem 行 config（customSkillDirs），
-   * 新会话（换代）生效；不触碰运行时。
-   * @param dirs - customSkillDirs。
-   * @param agentId - agent id。
+   * Modify in place the skill-filesystem row's config in the agent's preset
+   * assembly manifest (customSkillDirs), effective for new sessions (a new
+   * generation); the runtime is not touched.
+   * @param dirs - customSkillDirs.
+   * @param agentId - the agent id.
    */
   editSkillDirs(dirs: string[], agentId: string): void
   /**
-   * 原位修改 agent 预设装配清单的 agent-instructions 行 config（maxBytes /
-   * instructionFileCandidates / projectRootMarkers 等），新会话（换代）生效。
-   * @param patch - agent-instructions config 键值。
-   * @param agentId - agent id。
+   * Modify in place the agent-instructions row's config in the agent's preset
+   * assembly manifest (maxBytes / instructionFileCandidates / projectRootMarkers
+   * and the like), effective for new sessions (a new generation).
+   * @param patch - the agent-instructions config key/values.
+   * @param agentId - the agent id.
    */
   editBaselineConfig(patch: Record<string, unknown>, agentId: string): void
   /**
@@ -131,6 +149,6 @@ export interface ContextAssemblerService {
    * @param agentId - the agent whose preset is written.
    */
   writeSectionBackToPreset(name: string, text: string, agentId: string): void
-  /** 卸载：注销全部已注册模块与工具限制。 */
+  /** Dispose: deregister every registered module and tool restriction. */
   dispose(): void
 }

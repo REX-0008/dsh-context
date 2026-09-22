@@ -1,18 +1,25 @@
 /**
- * 引擎本体：模块注册表 + 注入 + 「激活 → turn 边界应用」更新模型。
+ * The engine itself: the module registry + injection + the "activate → apply at
+ * the turn boundary" update model.
  *
- * 职责（对齐 plans/2026-08-19-上下文工程后端部分.md §1.4/§6）：
- * - 注册快照：每个 agent 上次注册的模块/工具限制 digest；getDirty 用它对比当前配置；
- * - 激活标记（pending）：applyChanges()（用户点击）或压缩总结（compaction/summary
- *   会话事件）置位；只在 turn 边界（agent/inbox/inserted）执行重注册；
- * - 变化不自动提交：配置落盘只让 getDirty 变 true，不触发任何重注册。
+ * Responsibilities (following plans/2026-08-19-上下文工程后端部分.md §1.4/§6):
+ * - registration snapshot: the digest of each agent's last registered modules/tool
+ *   restrictions, which getDirty compares against the current configuration;
+ * - activation flag (pending): set by applyChanges() (a user click) or by a
+ *   compaction summary (the compaction/summary session event); the re-registration
+ *   runs only at a turn boundary (agent/inbox/inserted);
+ * - a change does not commit itself: persisting the configuration only makes
+ *   getDirty true and triggers no re-registration.
  *
- * 与源码实证的差异（相对方案文档）：
- * - compaction/summary 是 durable 会话事件而非 live 事件，改经 ctx.on('session/event')
- *   在投影层判断事件类型触发激活（docs/会话持久化系统调研.md §2.4）；
- * - 预设快照写用户级 .agent-presets/<agent>/context-modules.json（档案旁路文件），
- *   不覆写 agent.cordis.yml —— 方案原样把我们的配置写进 agent.cordis.yml 会破坏
- *   该预设的真实装配（persona/工具行丢失）。
+ * Differences from the design document, established against the source:
+ * - compaction/summary is a durable session event rather than a live one, so
+ *   activation is decided in the projection layer through
+ *   ctx.on('session/event') by event type (docs/会话持久化系统调研.md §2.4);
+ * - the preset snapshot is written to the user-level
+ *   .agent-presets/<agent>/context-modules.json (a sidecar archive file) and does
+ *   not overwrite agent.cordis.yml — writing our configuration into
+ *   agent.cordis.yml as the design document had it would destroy that preset's
+ *   real assembly (the persona/tool rows would be lost).
  * @module @our/context-panel/assembler/engine
  */
 import type { AgentFace as Agent } from '../agent-face'
@@ -56,47 +63,52 @@ import {
 } from '../preset/preset-sync'
 import type { ContextAssemblerService } from './service'
 
-/** 一个模块在引擎侧的最小定义（兜底值；真实定义在 settings，单一数据源）。 */
+/** A module's minimal definition engine-side (fallback values; the real definition lives in settings, the single source of truth). */
 export interface ModuleDefinition {
-  /** 注册名。 */
+  /** Registration name. */
   name: string
-  /** 通道：稳定高权威→section；动态低权威→context（决定前缀缓存命运）。 */
+  /** Channel: stable high authority → section; dynamic low authority → context (it decides the prefix cache's fate). */
   channel: 'section' | 'context'
-  /** 默认组装顺序。 */
+  /** Default assembly order. */
   order: number
-  /** 默认开关。 */
+  /** Default on/off switch. */
   enabled: boolean
-  /** 默认注入文本。 */
+  /** Default injected text. */
   text: string
 }
 
 /**
- * 模块通道/顺序的兜底默认值。模块定义（文本/通道/顺序/开关）的单一数据源是
- * context-panel 的 settings 命名空间（DEFAULT_SETTINGS.modules，前端可编辑），
- * 引擎只在此处为「settings 中未出现的名字」提供最小兜底（settings 为空时不注入）。
+ * The fallback defaults for a module's channel/order. The single source of truth
+ * for module definitions (text/channel/order/switch) is context-panel's settings
+ * namespace (DEFAULT_SETTINGS.modules, editable by the client); the engine only
+ * supplies a minimal fallback here for names absent from settings (it injects
+ * nothing while settings is empty).
  */
 export const FALLBACK_CHANNEL: 'section' | 'context' = 'section'
 
-/** 一个 agent 的注册态。 */
+/** One agent's registration state. */
 interface RegisteredAgent {
-  /** 模块名 → 注册 disposer。 */
+  /** Module name → registration disposer. */
   disposers: Map<string, () => void>
-  /** 工具限制 disposer（restrict 返回）。 */
+  /** Tool restriction disposers (returned by restrict). */
   toolRestrictionsDisposers: Array<() => void>
-  /** 全局 section 开关 waterfall disposer（每个 agent 注册一次）。 */
+  /** The global section-switch waterfall disposer (registered once per agent). */
   waterfallDisposer?: () => void
-  /** 注册快照 digest（上次注册的配置）。 */
+  /** The registration snapshot digest (the configuration as last registered). */
   snapshotDigest: string
-  /** 激活标记：用户点击 / 压缩触发后置位，turn 边界消费。 */
+  /** Activation flag: set by a user click / a compaction trigger, consumed at the turn boundary. */
   pending: boolean
 }
 
-/** 配置 → 确定性 digest（注册快照对比用）。 */
+/** Configuration → a deterministic digest (used to compare registration snapshots). */
 function digestOf(value: unknown): string {
   return JSON.stringify(value)
 }
 
-/** 按序叠加补丁：后置补丁覆盖前置（agent 级 → 会话级）。source 透传（覆盖的父来源）。 */
+/**
+ * Stack patches in order: a later patch overrides an earlier one (agent level →
+ * conversation level). source is passed through (the overridden parent source).
+ */
 function applyPatches(def: ModuleDefinition, ...patches: Array<PromptModulePatch | undefined>): PromptModule {
   let channel = def.channel
   let order = def.order
@@ -114,7 +126,7 @@ function applyPatches(def: ModuleDefinition, ...patches: Array<PromptModulePatch
   return { name: def.name, channel, order, enabled, text, ...(source === undefined ? {} : { source }) }
 }
 
-/** 把面板工具限制表（按工具名）编译成 tools.restrict 接受的单个 filter。 */
+/** Compile the panel's tool restriction table (by tool name) into the single filter tools.restrict accepts. */
 function compileRestrictions(restrictions: Record<string, { allow?: string[]; deny?: string[] }>): { allow?: string[]; deny?: string[] } {
   const allow = new Set<string>()
   const deny = new Set<string>()
@@ -125,7 +137,7 @@ function compileRestrictions(restrictions: Record<string, { allow?: string[]; de
     } else if (filter.allow?.length !== undefined && filter.allow.length > 0) {
       for (const name of filter.allow) allow.add(name)
     } else if (filter.deny === undefined && filter.allow === undefined) {
-      // 空 filter 无意义（tools.restrict 会抛），按「保留该工具」处理 → 不产生限制
+      // an empty filter is meaningless (tools.restrict throws); treat it as "keep this tool" → it produces no restriction
       continue
     }
   }
@@ -135,7 +147,7 @@ function compileRestrictions(restrictions: Record<string, { allow?: string[]; de
   }
 }
 
-/** 引擎实现。 */
+/** The engine implementation. */
 export class ContextAssemblerEngine implements ContextAssemblerService {
   private configReader: () => ContextPanelSettings = () => EMPTY_CONFIG
   private readonly registered = new Map<string, RegisteredAgent>()
@@ -161,11 +173,11 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
   /** @inheritdoc */
   setConfigReader(reader: () => ContextPanelSettings): void {
     this.configReader = reader
-    // 面板晚于引擎装载：已注册的 agent 按新配置重注册
+    // the panel loads after the engine: already-registered agents are re-registered under the new configuration
     for (const agent of this.agentBySession.values()) this.registerForAgent(agent)
   }
 
-  /** 读取当前配置（面板未装载时兜底空配置）。 */
+  /** Read the current configuration (falling back to the empty configuration while the panel is not loaded). */
   private getConfig(): ContextPanelSettings {
     try {
       return this.configReader()
@@ -174,7 +186,7 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
     }
   }
 
-  /** 合并 agent 级 + 会话级覆盖，按 order 排序（settings 是模块定义单一数据源）。 */
+  /** Merge the agent-level and conversation-level overrides and sort by order (settings is the single source of module definitions). */
   private mergedModules(sessionId: string): PromptModule[] {
     const config = this.getConfig()
     const overrides = config.conversationOverrides[sessionId] ?? {}
@@ -264,14 +276,17 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
     this.reregister(agent, current)
   }
 
-  /** 注销旧注册，按当前配置重注册模块与工具限制，更新快照。 */
+  /**
+ * Deregister the old registrations, re-register the modules and tool restrictions
+ * from the current configuration, and update the snapshot.
+ */
   private reregister(agent: Agent, entry: RegisteredAgent): void {
     for (const dispose of entry.disposers.values()) {
-      try { dispose() } catch { /* 注销失败不阻断重注册 */ }
+      try { dispose() } catch { /* a failed deregistration does not block the re-registration */ }
     }
     entry.disposers.clear()
     for (const dispose of entry.toolRestrictionsDisposers) {
-      try { dispose() } catch { /* 同上 */ }
+      try { dispose() } catch { /* as above */ }
     }
     entry.toolRestrictionsDisposers = []
 
@@ -293,7 +308,7 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
         tools: { restrict(filter: { allow?: readonly string[]; deny?: readonly string[] }): () => void }
       }).tools
       entry.toolRestrictionsDisposers = [tools.restrict(compiled)]
-      } catch { /* 非法限制（空 filter / 未知工具）由 tools 抛错，静默保留原状 */ }
+      } catch { /* an invalid restriction (an empty filter / an unknown tool) makes tools throw, and the prior state is kept silently */ }
     }
 
     entry.snapshotDigest = digestOf({
@@ -591,11 +606,11 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
   syncToPreset(agentId: string): void {
     try {
       const modules = this.mergedModules(agentId)
-      // 原位写入装配清单（本插件行 config.modules）
+      // write in place into the assembly manifest (this plugin's row config.modules)
       syncToPresetFile(agentId, modules)
-      // 备案：sidecar 纯 JSON 快照（早期实现的冗余档案）
+      // record: the sidecar plain-JSON snapshot (the earlier implementation's redundant archive)
       writePresetSnapshot(agentId, modules)
-    } catch { /* 预设写失败不影响运行时 */ }
+    } catch { /* a failed preset write does not affect the runtime */ }
   }
 
   /** @inheritdoc */
@@ -608,7 +623,7 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
         { customSkillDirs: dirs, includeDefaultRoots: true },
         ['skill-filesystem 设置（由上下文面板写入；新会话生效）'],
       )
-    } catch { /* 预设写失败不影响运行时 */ }
+    } catch { /* a failed preset write does not affect the runtime */ }
   }
 
   /** @inheritdoc */
@@ -621,7 +636,7 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
         patch,
         ['agent-instructions 设置（由上下文面板写入；新会话生效）'],
       )
-    } catch { /* 预设写失败不影响运行时 */ }
+    } catch { /* a failed preset write does not affect the runtime */ }
   }
 
   /** @inheritdoc */

@@ -1,35 +1,39 @@
 /**
- * 预设文件行级原位编辑（agent.cordis.yml）。
+ * Line-level in-place editing of the preset file (agent.cordis.yml).
  *
- * 对齐 plans/2026-08-19-上下文工程后端部分.md §1.6 的「原位修改」写原则：
- * 读取原文 → 找到对应插件行 → 改该行 config → 写回原位置；不补丁式追加、
- * 不整体重写（除非改动过大）。只动目标插件行的 config 子树，其余字节原样保留
- * （注释、结构、其他行全部不动）。
+ * Follows the "in-place modification" write principle of
+ * plans/2026-08-19-上下文工程后端部分.md §1.6: read the original text → find the
+ * matching plugin row → change that row's config → write back at the same
+ * position; no patch-style appending and no whole-file rewrite (unless the change
+ * is too large). Only the target plugin row's config subtree is touched; every
+ * other byte stays as it was (comments, structure, and all other rows are left
+ * alone).
  *
- * 结构约定：顶层装配列表 `- id: <id>`（缩进 0），子键缩进 +2（name/config…），
- * config 子键缩进 +4。本编辑器只支持顶层插件行（skill-filesystem /
- * agent-instructions / context-panel 均为顶层行）。
+ * Structural convention: the top-level assembly list uses `- id: <id>` (indent
+ * 0), child keys are indented +2 (name/config…), and config child keys +4. This
+ * editor supports top-level plugin rows only (skill-filesystem /
+ * agent-instructions / context-panel are all top-level rows).
  * @module @our/context-panel/preset-edit
  */
 
-/** 一行 YAML 的缩进（前导空格数）。 */
+/** A YAML line's indent (its leading space count). */
 function indentOf(line: string): number {
   let n = 0
   while (n < line.length && line[n] === ' ') n++
   return n
 }
 
-/** 判断一行是否为顶层列表项（列 0 的 `- `）。 */
+/** Whether a line is a top-level list item (`- ` at column 0). */
 function isTopLevelRow(line: string): boolean {
   return /^-\s/.test(line)
 }
 
-/** 判断一行是否为注释或空白。 */
+/** Whether a line is a comment or blank. */
 function isBlankOrComment(line: string): boolean {
   return line.trim().length === 0 || line.trimStart().startsWith('#')
 }
 
-/** 切行（保留换行符风格与末尾换行）。 */
+/** Split lines (preserving the EOL style and a trailing newline). */
 function splitLines(text: string): { lines: string[]; eol: string; trailing: boolean } {
   const eol = text.includes('\r\n') ? '\r\n' : '\n'
   const raw = text.split(/\r?\n/)
@@ -44,13 +48,16 @@ function joinLines(lines: string[], eol: string, trailing: boolean): string {
 }
 
 /**
- * 把 JSON 值序列化为 YAML 键块（key 行 + 值行，缩进 keyIndent）。
- * 字符串：多行 → 块标量 `|-`；单行含 YAML 特殊字符 → JSON 双引号；否则裸值。
- * 空数组/空对象显式写 `[]`/`{}`（避免歧义成 null）。
- * @param key - 键名。
- * @param value - JSON 兼容值。
- * @param keyIndent - 键的缩进。
- * @returns 键块行数组。
+ * Serialize a JSON value into a YAML key block (a key line plus value lines,
+ * indented by keyIndent).
+ * String: multi-line → the block scalar `|-`; a single line with YAML special
+ * characters → a JSON double-quoted value; otherwise a bare value.
+ * An empty array/object is written explicitly as `[]`/`{}` (so it cannot be read
+ * as an ambiguous null).
+ * @param key - the key name.
+ * @param value - a JSON-compatible value.
+ * @param keyIndent - the key's indent.
+ * @returns the key block's lines.
  */
 export function serializeKeyBlock(key: string, value: unknown, keyIndent: number): string[] {
   const pad = ' '.repeat(keyIndent)
@@ -89,27 +96,28 @@ export function serializeKeyBlock(key: string, value: unknown, keyIndent: number
   return [pad + key + ': ' + String(value)]
 }
 
-/** 插件行解析结果。 */
+/** A resolved plugin row. */
 interface RowLocation {
-  /** 行起点（0 基）。 */
+  /** Row start (0-based). */
   start: number
-  /** 行缩进（`- id:` 的前导空格数）。 */
+  /** Row indent (the leading spaces before `- id:`). */
   indent: number
-  /** 行终点（不含；下一个顶层行或 EOF）。 */
+  /** Row end (exclusive; the next top-level row or EOF). */
   end: number
 }
 
 /**
- * 查找顶层插件行：先按 id（`- id: <id>`），未命中按包名（`- name: <name>`）。
- * @param lines - 文本行。
- * @param pluginId - 插件 id。
- * @param pluginName - 插件包名。
- * @returns 行定位或 null。
+ * Find a top-level plugin row: by id first (`- id: <id>`), then by package name
+ * (`- name: <name>`) when the id does not match.
+ * @param lines - the text lines.
+ * @param pluginId - the plugin id.
+ * @param pluginName - the plugin package name.
+ * @returns the row location, or null.
  */
 export function findPluginRow(lines: string[], pluginId: string, pluginName: string): RowLocation | null {
   for (let i = 0; i < lines.length; i++) {
     const m = lines[i].match(/^(\s*)-\s+(id|name)\s*:\s*(['"])?([^'"]*)\3\s*$/)
-    if (m === null || m[1].length !== 0) continue // 只处理顶层行（缩进 0）
+    if (m === null || m[1].length !== 0) continue // top-level rows only (indent 0)
     const kind = m[2]
     const value = m[4]
     if (kind === 'id' && value === pluginId) {
@@ -124,7 +132,7 @@ export function findPluginRow(lines: string[], pluginId: string, pluginName: str
   return null
 }
 
-/** 下一个顶层行下标（不含）；无则 lines.length。 */
+/** The next top-level row's index (exclusive); lines.length when there is none. */
 function nextTopLevelRow(lines: string[], from: number): number {
   for (let i = from + 1; i < lines.length; i++) {
     if (isTopLevelRow(lines[i])) return i
@@ -133,10 +141,10 @@ function nextTopLevelRow(lines: string[], from: number): number {
 }
 
 /**
- * 在目标行内查找 `config:` 子键。
- * @param lines - 文本行。
- * @param row - 行定位。
- * @returns config 键下标与缩进；无则 null。
+ * Find the `config:` child key inside the target row.
+ * @param lines - the text lines.
+ * @param row - the row location.
+ * @returns the config key's index and indent; null when there is none.
  */
 function findConfigKey(lines: string[], row: RowLocation): { index: number; indent: number } | null {
   for (let i = row.start + 1; i < row.end; i++) {
@@ -151,8 +159,10 @@ function findConfigKey(lines: string[], row: RowLocation): { index: number; inde
 }
 
 /**
- * 块结束位：从 from 起，第一个「非空/非注释且缩进 <= boundaryIndent」的行下标。
- * 用于定位整个 config 块的结束（插入缺失键的位置）。
+ * Block end: from `from`, the index of the first line that is neither blank nor a
+ * comment and is indented <= boundaryIndent.
+ * Used to locate the end of the whole config block (where a missing key is
+ * inserted).
  */
 function blockEnd(lines: string[], from: number, boundaryIndent: number): number {
   for (let i = from; i < lines.length; i++) {
@@ -163,23 +173,25 @@ function blockEnd(lines: string[], from: number, boundaryIndent: number): number
 }
 
 /**
- * 键值子树结束位：从 from 起，第一个「空行、同级或更浅的注释、或缩进 <= keyIndent」的行。
- * 用于定位单个键的值范围（替换该键时只动它自己的值，不吞后面的空行/注释/其他键）。
+ * Value-subtree end: from `from`, the first blank line, comment at the same or a
+ * shallower indent, or line indented <= keyIndent.
+ * Used to locate one key's value range, so replacing that key touches only its own
+ * value and does not swallow the blank lines / comments / other keys after it.
  */
 function valueBlockEnd(lines: string[], from: number, keyIndent: number): number {
   for (let i = from; i < lines.length; i++) {
     const line = lines[i]
-    if (line.trim().length === 0) return i // 空行结束键值
+    if (line.trim().length === 0) return i // a blank line ends the value
     if (line.trimStart().startsWith('#')) {
-      if (indentOf(line) <= keyIndent) return i // 键级注释结束键值（保留）
-      continue // 更深缩进的注释属于键值内部
+      if (indentOf(line) <= keyIndent) return i // a key-level comment ends the value (and is kept)
+      continue // a deeper-indented comment belongs to the value's body
     }
-    if (indentOf(line) <= keyIndent) return i // 兄弟键 / 下一行结束键值
+    if (indentOf(line) <= keyIndent) return i // a sibling key / the next row ends the value
   }
   return lines.length
 }
 
-/** 在 config 块内查找指定键（缩进 == configIndent）。返回键行下标。 */
+/** Find a key inside the config block (indent == configIndent). Returns the key line's index. */
 function findConfigKeyLine(lines: string[], from: number, to: number, key: string, configIndent: number): number {
   for (let i = from; i < to; i++) {
     const line = lines[i]
@@ -193,12 +205,14 @@ function findConfigKeyLine(lines: string[], from: number, to: number, key: strin
 }
 
 /**
- * 对顶层插件行的 config 做原位修改：set/更新 configPatch 中的键，其余不动。
- * @param fileText - 原文。
- * @param pluginId - 插件 id。
- * @param pluginName - 插件包名（id 未命中时按 name 找）。
- * @param configPatch - 要写入 config 的键值。
- * @returns 新文本；目标行不存在时返回 null（调用方决定追加）。
+ * Modify a top-level plugin row's config in place: set/update the keys in
+ * configPatch and leave the rest untouched.
+ * @param fileText - the original text.
+ * @param pluginId - the plugin id.
+ * @param pluginName - the plugin package name (used when the id does not match).
+ * @param configPatch - the key/values to write into config.
+ * @returns the new text; null when the target row does not exist (the caller
+ * decides whether to append).
  */
 export function updatePluginRowConfig(
   fileText: string,
@@ -217,9 +231,10 @@ export function updatePluginRowConfig(
   const config = findConfigKey(next, row)
 
   if (config !== null) {
-    // config 子键缩进 = config.indent + 2（config 在缩进 2，其键在缩进 4）。
+    // config child keys are indented config.indent + 2 (config sits at indent 2, its keys at indent 4).
     const keyIndent = config.indent + 2
-    // 每个键：命中则替换该键子树，未命中则插到 config 块末尾（行级边界 = config.indent）。
+    // Per key: replace that key's subtree when found, otherwise insert at the end of
+    // the config block (line-level boundary = config.indent).
     for (const [key, value] of keys) {
       const keyLine = findConfigKeyLine(next, config.index + 1, row.end, key, keyIndent)
       if (keyLine >= 0) {
@@ -235,7 +250,7 @@ export function updatePluginRowConfig(
     return joinLines(next, eol, trailing)
   }
 
-  // 无 config 子键 → 在行末尾插入 config 块。
+  // No config child key → insert a config block at the end of the row.
   const insert: string[] = []
   if (row.start + 1 < row.end && !isBlankOrComment(next[row.end - 1])) insert.push('')
   insert.push(' '.repeat(row.indent + 2) + 'config:')
@@ -245,12 +260,13 @@ export function updatePluginRowConfig(
 }
 
 /**
- * 生成一个仅含单个插件行的装配片段（文件不存在时创建用）。
- * @param pluginId - 插件 id。
- * @param pluginName - 插件包名。
- * @param configPatch - config 键值。
- * @param headerComment - 可选头部注释行（每行一个元素）。
- * @returns 完整文本。
+ * Render an assembly fragment containing a single plugin row (used when the file
+ * does not exist and has to be created).
+ * @param pluginId - the plugin id.
+ * @param pluginName - the plugin package name.
+ * @param configPatch - the config key/values.
+ * @param headerComment - optional header comment lines (one element per line).
+ * @returns the complete text.
  */
 export function renderPluginRow(
   pluginId: string,
@@ -272,12 +288,13 @@ export function renderPluginRow(
 }
 
 /**
- * 在文件末尾追加一个插件行（目标行不存在时用）。
- * @param fileText - 原文。
- * @param pluginId - 插件 id。
- * @param pluginName - 插件包名。
- * @param configPatch - config 键值。
- * @returns 新文本。
+ * Append a plugin row at the end of the file (used when the target row does not
+ * exist).
+ * @param fileText - the original text.
+ * @param pluginId - the plugin id.
+ * @param pluginName - the plugin package name.
+ * @param configPatch - the config key/values.
+ * @returns the new text.
  */
 export function appendPluginRow(
   fileText: string,
@@ -286,7 +303,7 @@ export function appendPluginRow(
   configPatch: Record<string, unknown>,
 ): string {
   const { lines, eol, trailing } = splitLines(fileText)
-  // 保证与上一行之间有空白行
+  // keep a blank line between this row and the previous one
   let insert: string[] = []
   const last = lines.length - 1
   if (last >= 0 && !isBlankOrComment(lines[last])) insert.push('')

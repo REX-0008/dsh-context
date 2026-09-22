@@ -1,10 +1,11 @@
 /**
- * context-panel settings namespace：schema + 默认值 + 注册。
+ * The context-panel settings namespace: schema + defaults + registration.
  *
- * 与方案文档的差异：直接用 settings.register（而非 installSettingsSection）——
- * installSettingsSection 只暴露读（setSource/onChange），本插件需要 scope.update()
- * 写路径（updateModule/syncConversationToAgent），register 返回的
- * scope 同时提供 get/watch/update。
+ * Difference from the design document: this uses settings.register directly
+ * (rather than installSettingsSection) — installSettingsSection exposes reads
+ * only (setSource/onChange), while this plugin needs scope.update() for its
+ * write paths (updateModule/syncConversationToAgent), and the scope that register
+ * returns provides get/watch/update together.
  * @module @our/context-panel/settings
  */
 import z from '@deepseek-ai/schemastery'
@@ -14,7 +15,7 @@ import { SEED_MODULES } from '../preset/seeds'
 /** Our own namespace, distinct from upstream dsh-context's. */
 export const CONTEXT_PANEL_NS = 'context-panel-write'
 
-/** 模块补丁 schema（全部字段可选；source 为宽松对象保留扩展）。 */
+/** Module patch schema (every field optional; source stays a loose object so it can be extended). */
 const PatchSchema = z.object({
   text: z.string(),
   channel: z.union([z.const('section'), z.const('context')]),
@@ -24,8 +25,10 @@ const PatchSchema = z.object({
 })
 
 /**
- * 默认配置（模块定义单一数据源来自 preset/seeds.ts；前端可在面板编辑）。
- * 区间：section 避开 harness(-100)/persona(0)/工具指引(100-199)；context 独立区间。
+ * Default configuration (the single source of module definitions is
+ * preset/seeds.ts; the client can edit it in the panel).
+ * Ranges: section avoids harness(-100)/persona(0)/tool guidance(100-199); context
+ * has its own range.
  */
 export const DEFAULT_SETTINGS: ContextPanelSettings = {
   scope: 'agent',
@@ -38,7 +41,7 @@ export const DEFAULT_SETTINGS: ContextPanelSettings = {
   conversationDisabledSections: {},
 }
 
-/** namespace schema（schemastery 原语：z.dict 替代 zod 的 z.record；字段默认可选）。 */
+/** Namespace schema (schemastery primitives: z.dict replaces zod's z.record; fields are optional by default). */
 export const CONTEXT_PANEL_SCHEMA: z<ContextPanelSettings> = z.object({
   scope: z.union([z.const('conversation'), z.const('agent')]),
   autoSyncPreset: z.boolean(),
@@ -53,7 +56,7 @@ export const CONTEXT_PANEL_SCHEMA: z<ContextPanelSettings> = z.object({
   sectionOriginals: z.dict(z.dict(z.string())),
 })
 
-/** 合并两段补丁（后者覆盖前者，undefined 字段忽略）。 */
+/** Merge two patches (the latter overrides the former; undefined fields are ignored). */
 export function mergePatch(...patches: Array<PromptModulePatch | undefined>): PromptModulePatch {
   const out: PromptModulePatch = {}
   for (const p of patches) {
