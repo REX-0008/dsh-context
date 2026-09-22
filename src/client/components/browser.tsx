@@ -1227,15 +1227,17 @@ export function makeContextBrowser(
           {rowctl}
           {extra}
           {shown.map(({ n, conv, rowErr, tag, preview }) => {
-            // The row reference the caller keys its state on. `turn` rides the
-            // fold's per-node facts so a prune of one round can mark every row
-            // that round would take.
+            // The row reference the caller keys its state on.
+            //
+            // `turn` comes from the request records, not from the node: a surface
+            // node carries no turn of its own, and a prune takes a whole round, so
+            // the round is what the caller marks. A node belongs to the first
+            // request whose seq is at or after it — the request that consumed it.
+            const owner = requests.find(req => req.seq >= n.seq)
             const rowRef: MessageRowRef = {
               seq: n.seq,
               category: n.cat,
-              ...(typeof (n as unknown as { turn?: unknown }).turn === 'number'
-                ? { turn: (n as unknown as { turn: number }).turn }
-                : {}),
+              ...(owner?.turn === undefined ? {} : { turn: owner.turn }),
             }
             const marked = props.messageRowMarked?.(rowRef) === true
             const actions = props.messageRowActions?.(rowRef) ?? null
