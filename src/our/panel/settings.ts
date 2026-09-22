@@ -39,6 +39,9 @@ export const DEFAULT_SETTINGS: ContextPanelSettings = {
   toolRestrictions: {},
   presetDisabledSections: {},
   conversationDisabledSections: {},
+  presetDisabledContexts: {},
+  conversationDisabledContexts: {},
+  contextOverrides: {},
 }
 
 /** Namespace schema (schemastery primitives: z.dict replaces zod's z.record; fields are optional by default). */
@@ -51,6 +54,9 @@ export const CONTEXT_PANEL_SCHEMA: z<ContextPanelSettings> = z.object({
   toolRestrictions: z.dict(z.object({ allow: z.array(z.string()), deny: z.array(z.string()) })),
   presetDisabledSections: z.dict(z.array(z.string())),
   conversationDisabledSections: z.dict(z.array(z.string())),
+  presetDisabledContexts: z.dict(z.array(z.string())),
+  conversationDisabledContexts: z.dict(z.array(z.string())),
+  contextOverrides: z.dict(z.dict(z.string())),
   sectionOverrides: z.dict(z.dict(z.string())),
   sectionWeights: z.dict(z.dict(z.number())),
   sectionOriginals: z.dict(z.dict(z.string())),

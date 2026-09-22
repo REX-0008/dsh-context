@@ -330,6 +330,17 @@ export const DICT_ZH: Record<string, string> = {
   'our.weightTip.stale': '内置对照表与实际排序不一致，此数值需核对',
   'our.weightTip.original': '原本权重 {orig}（半透明显示在输入框内）',
   'our.delivered': '当前实际发送系统提示词（所有修改落实后才会更新）',
+  'our.contexts': '运行时上下文',
+  'our.contexts.empty': '当前没有声明式运行时上下文。',
+  'our.prune': '剪枝',
+  'our.prune.tip': '从模型视野中移除最该剪的一段历史。下一轮开始前生效；生效前可取消；生效后不可逆。',
+  'our.prune.confirm': '确认剪枝？该动作下一轮开始前生效，生效后不可逆。',
+  'our.prune.pending': '已剪枝，将在下一轮开始前生效，操作不可逆',
+  'our.prune.pendingBanner': '剪枝已排入队列：将在下一轮开始前生效。生效前可随时取消。',
+  'our.prune.cancel': '取消剪枝',
+  'our.prune.done': '已剪枝 {n} 条 · {tok} token，剪枝动作将在下一轮生效，操作不可逆',
+  'our.prune.mark': '此板块已剪枝',
+
 }
 
 export const DICT_EN: Record<string, string> = {
@@ -655,4 +666,15 @@ export const DICT_EN: Record<string, string> = {
   'our.weightTip.stale': 'The built-in table disagrees with the live order; check this figure',
   'our.weightTip.original': 'Original weight {orig} (shown faintly in the input)',
   'our.delivered': 'System prompt actually sent right now (updates only after every change takes effect)',
+  'our.contexts': 'Runtime contexts',
+  'our.contexts.empty': 'No declared runtime contexts right now.',
+  'our.prune': 'Prune',
+  'our.prune.tip': 'Remove the range most worth removing from what the model sees. Takes effect before the next turn; cancellable until then; irreversible afterwards.',
+  'our.prune.confirm': 'Prune? This takes effect before the next turn and cannot be undone once it runs.',
+  'our.prune.pending': 'Pruned; takes effect before the next turn and cannot be undone',
+  'our.prune.pendingBanner': 'Prune queued: it takes effect before the next turn. You can cancel any time until then.',
+  'our.prune.cancel': 'Cancel prune',
+  'our.prune.done': 'Pruned {n} · {tok} token; takes effect next turn and cannot be undone',
+  'our.prune.mark': 'This category was pruned',
+
 }

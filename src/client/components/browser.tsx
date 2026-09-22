@@ -110,6 +110,18 @@ export interface ContextBrowserProps {
    * second card frames it.
    */
   titleOverride?: string
+  /**
+   * OUR INSERT POINT (PATCHES.md #11): renders per-category actions inside a
+   * message category's head (the row carrying the chevron, label, count and
+   * tokens). A caller uses it for an action that belongs to a whole surface
+   * category — pruning is the one this plugin adds.
+   */
+  categoryActions?: (category: string) => ReactNode
+  /**
+   * Categories whose head should read as "acted on": the head is outlined so a
+   * pruned category is recognizable without opening it.
+   */
+  categoryMarked?: (category: string) => boolean
 }
 
 /**
@@ -1293,7 +1305,8 @@ export function makeContextBrowser(
                   type="button"
                   className={'lc-br-cat-row hover:bg-(--dsw-alias-interactive-bg-hover)'
                     + (open ? ' lc-br-cat-open' : '')
-                    + (linked && props.hoverKey === c.key ? ' lc-br-cat-on' : '')}
+                    + (linked && props.hoverKey === c.key ? ' lc-br-cat-on' : '')
+                    + (props.categoryMarked?.(c.key) === true ? ' lc-br-cat-pruned' : '')}
                   /* v8 ignore start -- the handlers exist only when linked,
                      and linked already requires onHoverKey defined (above). */
                   onMouseEnter={linked ? () => { if (props.onHoverKey !== undefined) props.onHoverKey(c.key) } : undefined}
@@ -1325,6 +1338,12 @@ export function makeContextBrowser(
                   </span>
                   <span className="lc-br-pct">{total > 0 ? `${Math.round(v / total * 100)}%` : ''}</span>
                 </button>
+                {/* The caller's per-category actions ride BESIDE the head button
+                    (not inside it): they are separate controls, and nesting a
+                    button in a button is invalid markup. */}
+                {props.categoryActions === undefined ? null : (
+                  <span className="lc-br-cat-actions">{props.categoryActions(c.key)}</span>
+                )}
                 {open ? <div className="lc-br-body">{catBody(c.key)}</div> : null}
               </div>
             )

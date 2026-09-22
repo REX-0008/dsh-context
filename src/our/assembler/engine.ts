@@ -35,6 +35,18 @@ import { EMPTY_CONFIG } from '../types'
 import { presetEntriesOf, type PresetEntryInfo } from './preset-entries'
 import { presetEntryForSection } from '../preset/section-entries'
 
+/** What happened to a parked prune when its boundary arrived. */
+export interface PruneOutcome {
+  ok: boolean
+  /**
+   * Why it did not run: no compaction engine, the agent was busy (the request
+   * stays parked for the next quiet boundary), or the attempt failed.
+   */
+  reason?: 'unavailable' | 'busy' | 'failed'
+  /** The failure text, for the log and the panel. */
+  detail?: string
+}
+
 /**
  * The id spellings one session may be addressed by.
  *
@@ -164,6 +176,8 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
    * switched back on; the delivered assembly alone cannot show what was removed.
    */
   private readonly lastSections = new Map<string, Array<{ name: string; text: string }>>()
+  /** Conversations with a prune requested but not yet applied (see `requestPrune`). */
+  private readonly pendingPrunes = new Set<string>()
 
   /** @inheritdoc */
   setProjectionReader(reader: (agent: Agent, key: string) => unknown): void {
@@ -419,7 +433,7 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
    * @param agent - the agent whose scope is read.
    * @returns section name to placement order, or undefined when unreadable.
    */
-  private registrySections(agent: Agent): Map<string, number> | undefined {
+  private registrySections(agent: Agent, table: 'sections' | 'contexts' = 'sections'): Map<string, number> | undefined {
     try {
       const prompt = (agent.ctx as unknown as { systemPrompt?: { layers?: unknown } }).systemPrompt
       // `layers.merge(scope, pick)` is the registry's own effective-view read:
@@ -436,7 +450,7 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
         // `assembleContext`); the agent's own context node would resolve the
         // global layer only and report a fraction of the registered sections.
         agent,
-        (layer: unknown) => (layer as { sections?: unknown })?.sections,
+        (layer: unknown) => (layer as Record<string, unknown>)?.[table],
       )
       if (!(effective instanceof Map)) return undefined
       const out = new Map<string, number>()
@@ -445,6 +459,128 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
         if (typeof name === 'string' && typeof order === 'number') out.set(name, order)
       }
       return out.size > 0 ? out : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  /** @inheritdoc */
+  async contextsForSession(sessionId: string): Promise<Array<{ name: string; order: number; text: string }> | null> {
+    const agent = this.agentFor(sessionId)
+    if (agent === undefined) return null
+    // Contexts are the declared half of the runtime context: they ride the same
+    // assembly as sections (PromptAssembly.contexts) and the same waterfall, so
+    // they are read from the assembly rather than from a second registry walk.
+    try {
+      const assembly = await agent.ctx.systemPrompt.assemble(this.assembleContext(agent))
+      const orders = this.registrySections(agent, 'contexts')
+      return assembly.contexts.map(entry => ({
+        name: entry.name,
+        order: orders?.get(entry.name) ?? 0,
+        text: entry.text,
+      }))
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Request a prune: it is RECORDED now and RUN at the next turn boundary.
+   *
+   * The timing is the whole point. Pruning mutates the session surface, so
+   * running it the moment the button is pressed would rewrite history under a
+   * turn that is mid-flight; running it after the next turn had already claimed
+   * its messages would be too late. The official seam for exactly this is
+   * `agent.runMaintenance`: it claims the true idle phase, keeps later waking
+   * input in the inbox until the task settles, and leaves public status idle.
+   * So the request is parked here, and the applied pass (see `applyPrunes`)
+   * runs it through that seam at the next boundary.
+   *
+   * While parked it stays cancellable (`cancelPrune`), because nothing has
+   * happened yet.
+   * @param sessionId - the agent (= session) id.
+   */
+  requestPrune(sessionId: string): void {
+    this.pendingPrunes.add(sessionId)
+  }
+
+  /**
+   * Drop a parked prune request.
+   * @param sessionId - the agent (= session) id.
+   * @returns whether a request was waiting.
+   */
+  cancelPrune(sessionId: string): boolean {
+    return this.pendingPrunes.delete(sessionId)
+  }
+
+  /**
+   * Whether this conversation has a prune waiting to take effect.
+   * @param sessionId - the agent (= session) id.
+   * @returns true while the request is parked.
+   */
+  hasPendingPrune(sessionId: string): boolean {
+    return this.pendingPrunes.has(sessionId)
+  }
+
+  /**
+   * Run any parked prune through the agent's idle-maintenance seam.
+   *
+   * Called at the turn boundary. The window between the button and this pass is
+   * what makes the action cancellable; once it runs, the surface replacement is
+   * durable and cannot be undone (there is no un-replace in the harness), which
+   * is why the panel warns before the request is made.
+   * @param agent - the agent whose parked request should run.
+   * @returns the outcome, or null when nothing was requested or it could not run.
+   */
+  async applyPrunes(agent: Agent): Promise<PruneOutcome | null> {
+    if (!this.pendingPrunes.has(agent.id)) return null
+    const compaction = this.compactionService()
+    if (compaction === undefined) {
+      // Without a compaction engine the request cannot be honoured; drop it so
+      // the panel stops reporting a pending prune that will never run.
+      this.pendingPrunes.delete(agent.id)
+      return { ok: false, reason: 'unavailable' }
+    }
+    try {
+      // Claim the idle phase BEFORE clearing the request: `runMaintenance`
+      // throws synchronously when a turn (or another maintenance task) already
+      // owns the agent, and in that case the request must stay parked for the
+      // next quiet boundary rather than being silently consumed.
+      const run = agent.runMaintenance(async (signal) => {
+        await compaction.compactIfNeeded(agent, 'pressure', signal)
+      })
+      this.pendingPrunes.delete(agent.id)
+      await run
+      return { ok: true }
+    } catch (error) {
+      // Busy keeps the request; a genuine failure does not (retrying a broken
+      // compaction every boundary would never succeed).
+      const busy = String(error).includes('maintenance') || String(error).includes('turn')
+      if (!busy) this.pendingPrunes.delete(agent.id)
+      return { ok: false, reason: busy ? 'busy' : 'failed', detail: String(error) }
+    }
+  }
+
+  /**
+   * The compaction engine, when this deployment composes one.
+   *
+   * Reached through `ctx.get` rather than a property: `compaction` is not in
+   * this plugin's declared injections, and an undeclared service is invisible to
+   * the property proxy.
+   * @returns the engine, or undefined when no compaction capability exists.
+   */
+  private compactionService(): {
+    compactIfNeeded(agent: Agent, trigger: 'pressure' | 'context-overflow', signal: AbortSignal): Promise<unknown>
+  } | undefined {
+    try {
+      const host = this.hostCtx as { get?: (name: string, strict?: boolean) => unknown } | undefined
+      const service = host?.get?.('compaction', false) as {
+        compactIfNeeded?: unknown
+      } | undefined
+      if (service === undefined || typeof service.compactIfNeeded !== 'function') return undefined
+      return service as {
+        compactIfNeeded(agent: Agent, trigger: 'pressure' | 'context-overflow', signal: AbortSignal): Promise<unknown>
+      }
     } catch {
       return undefined
     }
@@ -533,7 +669,10 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
    * @param presetId - the agent's preset, naming the preset-level disable list.
    * @returns the assembly to send onward.
    */
-  private rewriteSections<T extends { sections: Array<{ name: string; text: string }> }>(
+  private rewriteSections<T extends {
+    sections: Array<{ name: string; text: string }>
+    contexts?: Array<{ name: string; text: string }>
+  }>(
     agentId: string,
     assembly: T,
     presetId?: string,
@@ -548,7 +687,13 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
     ])
     const overrides = config.sectionOverrides?.[agentId] ?? {}
     const weights = config.sectionWeights?.[agentId] ?? {}
-    if (disabled.size === 0 && Object.keys(overrides).length === 0 && Object.keys(weights).length === 0) return assembly
+    const contextsDisabled = new Set([
+      ...(config.conversationDisabledContexts?.[agentId] ?? []),
+      ...(presetId === undefined ? [] : (config.presetDisabledContexts?.[presetId] ?? [])),
+    ])
+    const contextOverrides = config.contextOverrides?.[agentId] ?? {}
+    if (disabled.size === 0 && Object.keys(overrides).length === 0 && Object.keys(weights).length === 0
+      && contextsDisabled.size === 0 && Object.keys(contextOverrides).length === 0) return assembly
     const sections = assembly.sections
       .filter(section => !disabled.has(section.name))
       .map(section => {
@@ -569,7 +714,17 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
         next += 1
       }
     }
-    return { ...assembly, sections }
+    // Contexts follow the same two decisions (drop, or substitute the text);
+    // they carry no weight of their own, so no re-ordering applies.
+    const contexts = assembly.contexts === undefined
+      ? undefined
+      : assembly.contexts
+        .filter(context => !contextsDisabled.has(context.name))
+        .map(context => {
+          const override = contextOverrides[context.name]
+          return override === undefined ? context : { ...context, text: override }
+        })
+    return { ...assembly, sections, ...(contexts === undefined ? {} : { contexts }) }
   }
 
   /**

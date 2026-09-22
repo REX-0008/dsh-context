@@ -156,6 +156,8 @@ function stateHandler(wiring: Wiring) {
       // The registry read is the widest source, so it is fetched once per request
       // rather than per section.
       const registeredOrders = engine === undefined ? {} : engine.registeredOrdersForSession(sessionId)
+      // The declared runtime contexts: same assembly, same waterfall as sections.
+      const contexts = engine === undefined ? null : await engine.contextsForSession(sessionId)
       const systemSections = sections === null ? null : sections.map((section, index) => {
         const origin = resolveOrigin(wiring.sections, section.name, index, registeredOrders, wiring.bridge?.toolOwnerOf)
         // "Edited" means different things per kind, because the write path
@@ -216,6 +218,13 @@ function stateHandler(wiring: Wiring) {
           /** The preset this conversation runs on (labels the preset-level state). */
           ...(presetId === undefined ? {} : { presetId }),
           /**
+           * Whether a prune is parked for the next turn boundary. The panel uses
+           * it to show the pending banner and to offer cancellation.
+           */
+          prunePending: engine === undefined ? false : engine.hasPendingPrune(sessionId),
+          /** The declared runtime contexts (name/order/text) for this conversation. */
+          contexts,
+          /**
            * How many sections each source holds for this session. The panel
            * lists one merged view, so when it looks short this names which
            * source came up short instead of leaving it to guesswork.
@@ -250,6 +259,14 @@ type ActionHandler = (ac: ActionContext) => void | Promise<void>
 const ACTION_HANDLERS: Record<string, ActionHandler> = {
   updateModule: ({ service, p, sessionId }) => service.updateModule(p.target as 'conversation' | 'agent', String(p.name), p.patch as never, sessionId),
   sync: ({ service, sessionId }) => service.syncConversationToAgent(sessionId),
+  /**
+   * Park a prune for the next turn boundary. Nothing is pruned here — the
+   * panel's warning ("takes effect next turn, irreversible") describes exactly
+   * this window, and the request stays cancellable until it runs.
+   */
+  requestPrune: ({ engine, sessionId }) => engine?.requestPrune(sessionId),
+  /** Drop a parked prune before its boundary arrives. */
+  cancelPrune: ({ engine, sessionId }) => { engine?.cancelPrune(sessionId) },
   setToolRestriction: ({ service, p }) => service.setToolRestriction(String(p.name), p.filter as never),
   setScope: ({ service, p }) => service.setScope(p.scope as 'conversation' | 'agent'),
   setAutoSyncPreset: ({ service, p }) => service.setAutoSyncPreset(p.enabled === true),
@@ -482,7 +499,16 @@ export function applyOur(ctx: Context, bridge?: OurHostBridge): void {
       // registration rides the calling fiber), so only the explicit disposers
       // returned below need collecting here.
       ctx.on('agent/created', ({ agent }) => { engine.registerForAgent(agent) })
-      ctx.on('agent/inbox/inserted', ({ agent }) => { engine.applyPending(agent) })
+      ctx.on('agent/inbox/inserted', ({ agent }) => {
+        engine.applyPending(agent)
+        // A prune request takes effect at the NEXT turn boundary, never at the
+        // moment it was made: it mutates the session surface, so running it
+        // under an in-flight turn would rewrite history mid-step, and running it
+        // after the turn had claimed its messages would be too late. Claiming the
+        // idle phase here (before this turn's first step) is what puts it in the
+        // window the user was promised; a busy agent keeps the request parked.
+        void engine.applyPrunes(agent)
+      })
       ctx.on('session/event', (session, event) => {
         // Compared by string: the compaction capability is optional, so its
         // event type may not be part of SessionEventMap in this build.

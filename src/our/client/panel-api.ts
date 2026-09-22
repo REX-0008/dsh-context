@@ -76,6 +76,13 @@ export interface PanelState {
   knownSectionsSource?: string
   /** The preset this conversation runs on (labels the preset-level state). */
   presetId?: string
+  /**
+   * Whether a prune is parked for the next turn boundary. While true the panel
+   * shows the pending banner and offers cancellation.
+   */
+  prunePending?: boolean
+  /** The declared runtime contexts (the dynamic, low-authority half of the prompt). */
+  contexts?: SystemSectionInfo[] | null
 }
 
 /** Read the panel state (settings, dirty flag, preset entries, per-section assembly). */
@@ -90,6 +97,8 @@ export async function fetchState(sessionId: string): Promise<PanelState> {
     systemSections: json.value?.systemSections ?? null,
     knownSectionsSource: json.value?.knownSectionsSource,
     presetId: json.value?.presetId,
+    prunePending: json.value?.prunePending === true,
+    contexts: json.value?.contexts ?? null,
   }
 }
 

@@ -518,6 +518,8 @@ export function makeContextView(
       systemCount?: number
       systemDeliveredLabel?: string
       titleOverride?: string
+      categoryActions?: ContextBrowserProps['categoryActions']
+      categoryMarked?: ContextBrowserProps['categoryMarked']
     }): ReactElement => (
       <ContextBrowser
         data={data}

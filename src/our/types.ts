@@ -89,6 +89,19 @@ export interface ContextPanelSettings {
    */
   conversationDisabledSections?: Record<string, string[]>
   /**
+   * RUNTIME CONTEXTS carry the same two decisions as sections, under the same
+   * two levels. They are kept in their own maps because a context and a section
+   * may share a name without being the same contribution.
+   *
+   * Contexts are the dynamic, low-authority half of the prompt (sandbox policy,
+   * approval policy, subagent delegation), delivered as user-role snapshots.
+   */
+  presetDisabledContexts?: Record<string, string[]>
+  /** Contexts disabled for one conversation only; see {@link conversationDisabledSections}. */
+  conversationDisabledContexts?: Record<string, string[]>
+  /** Per-agent context text overrides; see {@link sectionOverrides}. */
+  contextOverrides?: Record<string, Record<string, string>>
+  /**
    * Per-agent section text overrides, keyed by section name: the "plugin"
    * source kind is adjusted here instead of in its own file, so a third-party
    * plugin's prompt can be rewritten without touching that plugin.
@@ -117,6 +130,9 @@ export const EMPTY_CONFIG: ContextPanelSettings = {
   toolRestrictions: {},
   presetDisabledSections: {},
   conversationDisabledSections: {},
+  presetDisabledContexts: {},
+  conversationDisabledContexts: {},
+  contextOverrides: {},
   sectionOverrides: {},
   sectionWeights: {},
   sectionOriginals: {},

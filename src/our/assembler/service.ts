@@ -106,6 +106,37 @@ export interface ContextAssemblerService {
    */
   assembleSectionsForSession(sessionId: string): Promise<Array<{ name: string; text: string }> | null>
   /**
+   * Park a prune request for the next turn boundary (see the engine's
+   * `requestPrune`): nothing happens until then, so the request stays
+   * cancellable in the meantime.
+   * @param sessionId - the agent (= session) id.
+   */
+  requestPrune(sessionId: string): void
+  /**
+   * Drop a parked prune request.
+   * @param sessionId - the agent (= session) id.
+   * @returns whether a request was waiting.
+   */
+  cancelPrune(sessionId: string): boolean
+  /**
+   * Whether a prune is waiting to take effect for this conversation.
+   * @param sessionId - the agent (= session) id.
+   * @returns true while the request is parked.
+   */
+  hasPendingPrune(sessionId: string): boolean
+  /**
+   * The declared runtime contexts for one conversation.
+   *
+   * Contexts are the low-authority, dynamic half of the prompt (sandbox policy,
+   * approval policy, subagent delegation): they reach the model as user-role
+   * snapshots rather than system text, and they ride the SAME assembly and
+   * waterfall as sections.
+   * @param sessionId - the agent (= session) id.
+   * @returns each context's name, placement order and text; null when the agent
+   * or its assembly is unavailable.
+   */
+  contextsForSession(sessionId: string): Promise<Array<{ name: string; order: number; text: string }> | null>
+  /**
    * Section name to its real placement order, read from the prompt registry —
    * includes sections registered before this plugin mounted, which the live
    * observation and the assembled value both miss.

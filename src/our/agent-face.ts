@@ -13,10 +13,23 @@
 import type { Context } from '@deepseek-ai/cordis'
 
 /**
- * The minimal agent face used here: an id (also the session id) and its scoped
- * cordis context (which carries `systemPrompt` and `tools`).
+ * The minimal agent face used here: an id (also the session id), its scoped
+ * cordis context (which carries `systemPrompt` and `tools`), and the idle
+ * maintenance seam.
+ *
+ * `runMaintenance` is declared because pruning must NOT run while a turn is in
+ * flight: it mutates the session surface. That seam runs one task from the true
+ * idle phase, keeps later waking input in the inbox until the task settles, and
+ * throws synchronously when a turn or another maintenance task already owns the
+ * agent.
  */
 export interface AgentFace {
   readonly id: string
   readonly ctx: Context
+  /**
+   * Run one non-turn maintenance task from the idle phase.
+   * @param task - the operation, given a signal aborted by agent cancellation.
+   * @returns the task's own result.
+   */
+  runMaintenance<T>(task: (signal: AbortSignal) => Promise<T>): Promise<T>
 }

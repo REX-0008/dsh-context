@@ -67,6 +67,10 @@ export interface ContextManagementPanelProps {
     systemCount: number
     /** Caption for the delivered-prompt row kept below the split list. */
     deliveredLabel: string
+    /** Per-category head actions (the prune control on message categories). */
+    categoryActions: (category: string) => ReactNode
+    /** Whether a category head should read as pruned. */
+    categoryMarked: (category: string) => boolean
   }) => ReactNode
 }
 
@@ -80,6 +84,10 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
   const [weightDraft, setWeightDraft] = useState('')
   const [query, setQuery] = useState('')
   const [error, setError] = useState<string | null>(null)
+  // Which message categories have been pruned, with the figures the head banner
+  // reports. Held per session in memory: the durable record of a prune is the
+  // session log itself (a compaction/prune event), not a panel preference.
+  const [pruned, setPruned] = useState<Record<string, { count: number; tokens: number }>>({})
 
   const refresh = useCallback(async (): Promise<void> => {
     try {
@@ -302,16 +310,72 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
     )
   }
 
+  /**
+   * The message categories a prune may act on. The prompt-side categories
+   * (`system`, `tools`) are governed by the section controls, not by pruning.
+   */
+  const PRUNABLE = new Set(['user', 'inject', 'skill', 'assistant', 'tool'])
+  const pending = state?.prunePending === true
+
+  /**
+   * The per-category prune control.
+   *
+   * Pressing it only PARKS the request: the prune runs at the next turn boundary
+   * and stays cancellable until then, so the control switches to a cancel action
+   * while it waits. Once it has run the action is irreversible (the harness has
+   * no un-replace for a surface range), which is why the control warns before
+   * parking and the head keeps a red outline afterwards.
+   */
+  const categoryActions = (category: string): ReactNode => {
+    if (!PRUNABLE.has(category)) return null
+    const done = pruned[category]
+    return (
+      <>
+        {done !== undefined ? (
+          <span className="lc-br-prune-mark" title={t('our.prune.mark')}>{t('our.prune.mark')}</span>
+        ) : null}
+        {pending ? (
+          <button type="button" className="lc-br-prune-pending"
+            title={t('our.prune.pendingBanner')}
+            onClick={(event) => { event.stopPropagation(); void dispatch('cancelPrune') }}>
+            {t('our.prune.cancel')}
+          </button>
+        ) : (
+          <button type="button" className="lc-br-prune"
+            title={t('our.prune.tip')}
+            onClick={(event) => {
+              event.stopPropagation()
+              // The warning is the point: the action cannot be undone once the
+              // next boundary passes, so the confirmation names both facts.
+              if (!window.confirm(t('our.prune.confirm'))) return
+              setPruned(current => ({
+                ...current,
+                [category]: { count: 0, tokens: 0 },
+              }))
+              void dispatch('requestPrune')
+            }}>
+            {t('our.prune')}
+          </button>
+        )}
+      </>
+    )
+  }
+
   // No card of our own: the panel IS the browser (its system category lists the
   // prompt's sections), so the title is retitled in place rather than framed by
   // a second card.
   return (
     <>
       {error !== null ? <div className="lc-error">{error}</div> : null}
+      {pending ? (
+        <div className="lc-br-prune-banner">{t('our.prune.pendingBanner')}</div>
+      ) : null}
       {browser({
         systemRows,
         systemCount: sections.length,
         deliveredLabel: t('our.delivered'),
+        categoryActions,
+        categoryMarked: (category: string) => pruned[category] !== undefined,
       })}
     </>
   )

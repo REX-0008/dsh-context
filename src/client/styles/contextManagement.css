@@ -49,6 +49,57 @@
   opacity: 0.55;
 }
 
+/* ---- prune (irreversible, so the chrome says so plainly) ---- */
+
+/* The prune control rides a message category's head. */
+.lc-br-cat-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.lc-br-prune,
+.lc-br-prune-pending {
+  font-size: 11px;
+  padding: 0 8px;
+  border-radius: 4px;
+  border: 1px solid var(--dsw-alias-state-error-primary);
+  color: var(--dsw-alias-state-error-primary);
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.lc-br-prune-pending {
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 14%, transparent);
+}
+
+/* A pruned category keeps a red head outline: the removal is invisible in the
+   counts afterwards, so the marker is what makes it recognizable. */
+.lc-br-cat-pruned > .lc-br-cat-row {
+  border: 1px solid var(--dsw-alias-state-error-primary);
+  border-radius: 6px;
+}
+
+.lc-br-prune-mark {
+  font-size: 11px;
+  color: var(--dsw-alias-state-error-primary);
+  white-space: nowrap;
+}
+
+/* The pending banner: the one place that states the action has not happened yet,
+   so it can still be cancelled. */
+.lc-br-prune-banner {
+  margin: 6px 0;
+  padding: 6px 10px;
+  border: 1px solid var(--dsw-alias-state-error-primary);
+  border-radius: 6px;
+  color: var(--dsw-alias-state-error-primary);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 10%, transparent);
+  font-size: 12px;
+}
+
 /* Separates the split section list from the delivered-prompt row below it. */
 .lc-br-divider {
   height: 1px;
