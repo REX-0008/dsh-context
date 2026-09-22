@@ -77,10 +77,10 @@ export interface PanelState {
   /** The preset this conversation runs on (labels the preset-level state). */
   presetId?: string
   /**
-   * Whether a prune is parked for the next turn boundary. While true the panel
-   * shows the pending banner and offers cancellation.
+   * The surface seqs currently selected for pruning (ascending). The panel marks
+   * those rows; the range it will send is their closed span.
    */
-  prunePending?: boolean
+  pruneSeqs?: number[]
   /** The declared runtime contexts (the dynamic, low-authority half of the prompt). */
   contexts?: SystemSectionInfo[] | null
   /** Injection source kinds observed in this conversation's step batches. */
@@ -101,7 +101,7 @@ export async function fetchState(sessionId: string): Promise<PanelState> {
     systemSections: json.value?.systemSections ?? null,
     knownSectionsSource: json.value?.knownSectionsSource,
     presetId: json.value?.presetId,
-    prunePending: json.value?.prunePending === true,
+    pruneSeqs: json.value?.pruneSeqs ?? [],
     contexts: json.value?.contexts ?? null,
     observedInjections: json.value?.observedInjections ?? [],
     suppressedInjections: json.value?.suppressedInjections ?? [],

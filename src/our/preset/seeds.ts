@@ -30,10 +30,13 @@ export const SEED_MODULES: Record<string, PromptModulePatch> = {
     enabled: false,
     text: '（系统记忆占位：记忆引擎接入后在此注入跨会话事实快照。）',
   },
+  // Disabled by default: this is an empty placeholder, and the workspace already
+  // carries its own injected prompt. Enable it only when this plugin is to own
+  // that summary; the same applies to `our:memory` below.
   'our:workspace': {
     channel: 'context',
     order: 150,
-    enabled: true,
+    enabled: false,
     text: '（工作区摘要占位：可由面板编辑或后续接入工作区扫描。）',
   },
 }

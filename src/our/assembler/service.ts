@@ -111,13 +111,19 @@ export interface ContextAssemblerService {
    * cancellable in the meantime.
    * @param sessionId - the agent (= session) id.
    */
-  requestPrune(sessionId: string): void
+  togglePruneSelection(sessionId: string, seq: number): void
   /**
    * Drop a parked prune request.
    * @param sessionId - the agent (= session) id.
    * @returns whether a request was waiting.
    */
-  cancelPrune(sessionId: string): boolean
+  cancelPrune(sessionId: string, seq?: number): boolean
+  /**
+   * The surface seqs currently selected for pruning, ascending.
+   * @param sessionId - the agent (= session) id.
+   * @returns the selected seqs; empty when nothing is selected.
+   */
+  pendingPruneSeqs(sessionId: string): number[]
   /**
    * Whether a prune is waiting to take effect for this conversation.
    * @param sessionId - the agent (= session) id.

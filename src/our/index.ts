@@ -218,10 +218,10 @@ function stateHandler(wiring: Wiring) {
           /** The preset this conversation runs on (labels the preset-level state). */
           ...(presetId === undefined ? {} : { presetId }),
           /**
-           * Whether a prune is parked for the next turn boundary. The panel uses
-           * it to show the pending banner and to offer cancellation.
+           * The surface seqs currently selected for pruning (ascending). The panel
+           * marks those rows and derives the range it will send from their ends.
            */
-          prunePending: engine === undefined ? false : engine.hasPendingPrune(sessionId),
+          pruneSeqs: engine === undefined ? [] : engine.pendingPruneSeqs(sessionId),
           /** The declared runtime contexts (name/order/text) for this conversation. */
           contexts,
           /** Injection source kinds seen in this conversation's step batches. */
@@ -264,13 +264,20 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
   updateModule: ({ service, p, sessionId }) => service.updateModule(p.target as 'conversation' | 'agent', String(p.name), p.patch as never, sessionId),
   sync: ({ service, sessionId }) => service.syncConversationToAgent(sessionId),
   /**
-   * Park a prune for the next turn boundary. Nothing is pruned here — the
-   * panel's warning ("takes effect next turn, irreversible") describes exactly
-   * this window, and the request stays cancellable until it runs.
+   * Select one row for pruning, or deselect it.
+   *
+   * Nothing is pruned here. The selection is parked and run at the next turn
+   * boundary, and until then each row can be dropped on its own — that window is
+   * exactly what the panel's "takes effect next turn, irreversible" warning
+   * describes.
    */
-  requestPrune: ({ engine, sessionId }) => engine?.requestPrune(sessionId),
-  /** Drop a parked prune before its boundary arrives. */
-  cancelPrune: ({ engine, sessionId }) => { engine?.cancelPrune(sessionId) },
+  togglePrune: ({ engine, sessionId, p }) => {
+    engine?.togglePruneSelection(sessionId, Number(p.seq))
+  },
+  /** Drop one selected row, or the whole selection when no seq is given. */
+  cancelPrune: ({ engine, sessionId, p }) => {
+    engine?.cancelPrune(sessionId, p.seq === undefined ? undefined : Number(p.seq))
+  },
   /**
    * Switch one RUNTIME CONTEXT off (or back on) for this conversation.
    *

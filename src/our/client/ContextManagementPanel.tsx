@@ -90,11 +90,7 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
   const [weightDraft, setWeightDraft] = useState('')
   const [query, setQuery] = useState('')
   const [error, setError] = useState<string | null>(null)
-  // The round a parked prune will take, or null. A prune removes a balanced
-  // RANGE, which is a round's worth of messages and tool results, so the marked
-  // set is identified by round rather than by the single row that was pressed.
-  // Held in memory: the durable record of a prune is the session log itself.
-  const [prunedTurn, setPrunedTurn] = useState<number | null>(null)
+
 
   const refresh = useCallback(async (): Promise<void> => {
     try {
@@ -413,45 +409,45 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
    * (`system`, `tools`) are governed by the section controls, not by pruning.
    */
   const PRUNABLE = new Set(['user', 'inject', 'skill', 'assistant', 'tool'])
-  const pending = state?.prunePending === true
+  /** The rows the user has selected for pruning, ascending (host-owned). */
+  const pruneSeqs = state?.pruneSeqs ?? []
+  const pending = pruneSeqs.length > 0
 
   /**
    * The prune control, on ONE message row.
    *
-   * The button sits on the row the user picked, but the action is not per row:
-   * the harness removes a balanced RANGE, so pressing any row of a round removes
-   * that round's messages and tool results together. Every row the prune would
-   * take is therefore marked as part of the range — marking only the pressed row
-   * would misrepresent what disappears.
+   * Each row toggles ITSELF in or out of the selection, so several rows can be
+   * chosen — and dropped — independently. The prune that eventually runs takes
+   * the closed span those rows cover (picking 3, 4 and 5 prunes 3–5), because
+   * the harness prunes one balanced range per call; the confirmation states the
+   * span it will actually send so the selection is never misread as separate
+   * deletions.
    *
-   * Pressing only PARKS the request: the prune runs at the next turn boundary
-   * and stays cancellable until then, so the control switches to a cancel action
-   * while it waits. Once it has run it cannot be undone (the harness has no
-   * un-replace for a surface range), which is why the control warns first.
+   * Selecting only PARKS the choice: it runs at the next turn boundary, and
+   * until then every row can still be deselected. Once it has run it cannot be
+   * undone (the harness has no un-replace for a surface range).
    */
   const messageRowActions = (row: MessageRowRef): ReactNode => {
     if (!PRUNABLE.has(row.category)) return null
-    if (pending) {
-      return (
-        <button type="button" className="lc-br-prune-pending"
-          title={t('our.prune.pendingBanner')}
-          onClick={(event) => { event.stopPropagation(); void dispatch('cancelPrune') }}>
-          {t('our.prune.cancel')}
-        </button>
-      )
-    }
+    const selected = pruneSeqs.includes(row.seq)
+    const span = pruneSeqs.length === 0
+      ? ''
+      : String(pruneSeqs[0]) + '–' + String(pruneSeqs[pruneSeqs.length - 1])
     return (
-      <button type="button" className="lc-br-prune"
-        title={t('our.prune.tip')}
+      <button type="button"
+        className={'lc-br-tag' + (selected ? ' lc-br-prune-on' : '')}
+        title={selected
+          ? t('our.prune.removeTip')
+          : t('our.prune.tip')}
         onClick={(event) => {
           event.stopPropagation()
-          // The warning is the point: the action cannot be undone once the next
-          // boundary passes, so the confirmation names both facts.
-          if (!window.confirm(t('our.prune.confirm'))) return
-          setPrunedTurn(row.turn ?? row.seq)
-          void dispatch('requestPrune')
+          // Only the FIRST selection needs the warning: it is the moment the
+          // irreversible action is decided, and repeating it per row would train
+          // the user to dismiss it.
+          if (!selected && pruneSeqs.length === 0 && !window.confirm(t('our.prune.confirm'))) return
+          void dispatch('togglePrune', { seq: row.seq })
         }}>
-        {t('our.prune')}
+        {selected ? t('our.prune.selected', { span }) : t('our.prune')}
       </button>
     )
   }
@@ -483,13 +479,18 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
   }
 
   /**
-   * Whether a row belongs to the pruned range.
+   * Whether a row is inside the selected span.
    *
-   * A prune takes a whole round, so the range is identified by the round of the
-   * row that was pressed; rows without a round fall back to their own seq.
+   * Driven by the SELECTION the host reports, not by local state: the highlight
+   * therefore follows a deselection immediately and cannot outlive it, which is
+   * what made the earlier version leave a stale red border behind.
    */
-  const messageRowMarked = (row: MessageRowRef): boolean =>
-    prunedTurn !== null && (row.turn ?? row.seq) === prunedTurn
+  const messageRowMarked = (row: MessageRowRef): boolean => {
+    if (pruneSeqs.length === 0) return false
+    const start = pruneSeqs[0] as number
+    const end = pruneSeqs[pruneSeqs.length - 1] as number
+    return row.seq >= start && row.seq <= end
+  }
 
   // No card of our own: the panel IS the browser (its system category lists the
   // prompt's sections), so the title is retitled in place rather than framed by

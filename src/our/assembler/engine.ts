@@ -39,10 +39,14 @@ import { presetEntryForSection } from '../preset/section-entries'
 export interface PruneOutcome {
   ok: boolean
   /**
-   * Why it did not run: no compaction engine, the agent was busy (the request
+   * Why it did not run: no compaction engine, the agent was busy (the selection
    * stays parked for the next quiet boundary), or the attempt failed.
    */
   reason?: 'unavailable' | 'busy' | 'failed'
+  /** The first surface seq the pruned range covered, when it ran. */
+  start?: number
+  /** The last surface seq the pruned range covered, when it ran. */
+  end?: number
   /** The failure text, for the log and the panel. */
   detail?: string
 }
@@ -179,7 +183,7 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
    */
   private readonly lastSections = new Map<string, Array<{ name: string; text: string }>>()
   /** Conversations with a prune requested but not yet applied (see `requestPrune`). */
-  private readonly pendingPrunes = new Set<string>()
+  private readonly pendingPrunes = new Map<string, Set<number>>()
   /** Injection source kinds observed in each agent's step batches. */
   private readonly injectionKinds = new Map<string, string[]>()
 
@@ -525,38 +529,52 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
   }
 
   /**
-   * Request a prune: it is RECORDED now and RUN at the next turn boundary.
+   * Select one row for pruning, or drop it from the selection.
    *
-   * The timing is the whole point. Pruning mutates the session surface, so
-   * running it the moment the button is pressed would rewrite history under a
-   * turn that is mid-flight; running it after the next turn had already claimed
-   * its messages would be too late. The official seam for exactly this is
-   * `agent.runMaintenance`: it claims the true idle phase, keeps later waking
-   * input in the inbox until the task settles, and leaves public status idle.
-   * So the request is parked here, and the applied pass (see `applyPrunes`)
-   * runs it through that seam at the next boundary.
+   * A selection holds individual rows, and the prune that eventually runs takes
+   * the closed range they span: selecting rows 3, 4 and 5 prunes 3–5. That is
+   * the harness's own granularity — `compactRegion(start, end)` takes one
+   * balanced span — so the selection is a way of choosing the span, not a set of
+   * independent deletions.
    *
-   * While parked it stays cancellable (`cancelPrune`), because nothing has
-   * happened yet.
+   * Nothing is pruned here. The selection is parked and run at the next turn
+   * boundary (see `applyPrunes`); until then every selected row can be
+   * deselected individually.
    * @param sessionId - the agent (= session) id.
+   * @param seq - the surface node the row stands for.
    */
-  requestPrune(sessionId: string): void {
-    this.pendingPrunes.add(sessionId)
+  togglePruneSelection(sessionId: string, seq: number): void {
+    const current = this.pendingPrunes.get(sessionId) ?? new Set<number>()
+    if (current.has(seq)) current.delete(seq)
+    else current.add(seq)
+    if (current.size === 0) this.pendingPrunes.delete(sessionId)
+    else this.pendingPrunes.set(sessionId, current)
   }
 
   /**
-   * Drop a parked prune request.
+   * Drop one row from the selection, or the whole selection.
    * @param sessionId - the agent (= session) id.
-   * @returns whether a request was waiting.
+   * @param seq - the row to drop; omitted clears the whole selection.
+   * @returns whether anything was selected.
    */
-  cancelPrune(sessionId: string): boolean {
-    return this.pendingPrunes.delete(sessionId)
+  cancelPrune(sessionId: string, seq?: number): boolean {
+    const current = this.pendingPrunes.get(sessionId)
+    if (current === undefined) return false
+    if (seq === undefined) return this.pendingPrunes.delete(sessionId)
+    current.delete(seq)
+    if (current.size === 0) { this.pendingPrunes.delete(sessionId); return false }
+    return true
+  }
+
+  /** @inheritdoc */
+  pendingPruneSeqs(sessionId: string): number[] {
+    return [...(this.pendingPrunes.get(sessionId) ?? [])].sort((a, b) => a - b)
   }
 
   /**
-   * Whether this conversation has a prune waiting to take effect.
+   * Whether this conversation has rows selected for pruning.
    * @param sessionId - the agent (= session) id.
-   * @returns true while the request is parked.
+   * @returns true while a selection is parked.
    */
   hasPendingPrune(sessionId: string): boolean {
     return this.pendingPrunes.has(sessionId)
@@ -573,28 +591,34 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
    * @returns the outcome, or null when nothing was requested or it could not run.
    */
   async applyPrunes(agent: Agent): Promise<PruneOutcome | null> {
-    if (!this.pendingPrunes.has(agent.id)) return null
+    const selection = this.pendingPrunes.get(agent.id)
+    if (selection === undefined || selection.size === 0) return null
     const compaction = this.compactionService()
     if (compaction === undefined) {
       // Without a compaction engine the request cannot be honoured; drop it so
-      // the panel stops reporting a pending prune that will never run.
+      // the panel stops reporting a selection that will never run.
       this.pendingPrunes.delete(agent.id)
       return { ok: false, reason: 'unavailable' }
     }
+    // The closed range the selected rows span: the harness prunes one balanced
+    // span per call, so the selection defines that span's ends.
+    const seqs = [...selection].sort((a, b) => a - b)
+    const start = seqs[0] as number
+    const end = seqs[seqs.length - 1] as number
     try {
-      // Claim the idle phase BEFORE clearing the request: `runMaintenance`
+      // Claim the idle phase BEFORE clearing the selection: `runMaintenance`
       // throws synchronously when a turn (or another maintenance task) already
-      // owns the agent, and in that case the request must stay parked for the
+      // owns the agent, and in that case the selection must stay parked for the
       // next quiet boundary rather than being silently consumed.
       const run = agent.runMaintenance(async (signal) => {
-        await compaction.compactIfNeeded(agent, 'pressure', signal)
+        await compaction.compactRegion(start, end, agent, signal)
       })
       this.pendingPrunes.delete(agent.id)
       await run
-      return { ok: true }
+      return { ok: true, start, end }
     } catch (error) {
-      // Busy keeps the request; a genuine failure does not (retrying a broken
-      // compaction every boundary would never succeed).
+      // Busy keeps the selection; a genuine failure does not (retrying a broken
+      // range every boundary would never succeed).
       const busy = String(error).includes('maintenance') || String(error).includes('turn')
       if (!busy) this.pendingPrunes.delete(agent.id)
       return { ok: false, reason: busy ? 'busy' : 'failed', detail: String(error) }
@@ -610,16 +634,14 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
    * @returns the engine, or undefined when no compaction capability exists.
    */
   private compactionService(): {
-    compactIfNeeded(agent: Agent, trigger: 'pressure' | 'context-overflow', signal: AbortSignal): Promise<unknown>
+    compactRegion(start: number, end: number, agent: Agent, signal?: AbortSignal): Promise<unknown>
   } | undefined {
     try {
       const host = this.hostCtx as { get?: (name: string, strict?: boolean) => unknown } | undefined
-      const service = host?.get?.('compaction', false) as {
-        compactIfNeeded?: unknown
-      } | undefined
-      if (service === undefined || typeof service.compactIfNeeded !== 'function') return undefined
+      const service = host?.get?.('compaction', false) as { compactRegion?: unknown } | undefined
+      if (service === undefined || typeof service.compactRegion !== 'function') return undefined
       return service as {
-        compactIfNeeded(agent: Agent, trigger: 'pressure' | 'context-overflow', signal: AbortSignal): Promise<unknown>
+        compactRegion(start: number, end: number, agent: Agent, signal?: AbortSignal): Promise<unknown>
       }
     } catch {
       return undefined
