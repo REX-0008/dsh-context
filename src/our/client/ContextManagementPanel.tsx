@@ -472,11 +472,14 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
    * The prune control, on ONE message row.
    *
    * Each row toggles ITSELF in or out of the selection, so several rows can be
-   * chosen — and dropped — independently. The prune that eventually runs takes
-   * the closed span those rows cover (picking 3, 4 and 5 prunes 3–5), because
-   * the harness prunes one balanced range per call; the confirmation states the
-   * span it will actually send so the selection is never misread as separate
-   * deletions.
+   * chosen — and dropped — independently. Each selected row is pruned on its
+   * own (one call per item), so picking three rows removes exactly those three
+   * rather than everything between them.
+   *
+   * The 按轮剪枝 button on the same row selects the whole round instead: the
+   * run's user message, the assistant replies, the tool calls and their results.
+   * It resolves to the same per-item calls, so a round can be narrowed
+   * afterwards by deselecting single rows.
    *
    * Selecting only PARKS the choice: it runs at the next turn boundary, and
    * until then every row can still be deselected. Once it has run it cannot be

@@ -1241,11 +1241,14 @@ export function makeContextBrowser(
             // the round is what the caller marks. A node belongs to the first
             // request whose seq is at or after it — the request that consumed it.
             const owner = requests.find(req => req.seq >= n.seq)
-            // The round's nodes, taken from the same request mapping: a node
-            // belongs to the first request at or after it.
+            // The round's nodes, taken from the WHOLE surface (`view.nodes`), not
+            // from this category's slice: a round spans every category — the user
+            // message, the assistant replies, the tool calls and their results —
+            // so collecting only the open category's rows would prune a fraction
+            // of the round the user asked for.
             const roundSeqs = owner?.turn === undefined
               ? undefined
-              : nodes
+              : view.nodes
                 .filter(candidate => requests.find(req => req.seq >= candidate.seq)?.turn === owner.turn)
                 .map(candidate => candidate.seq)
             const rowRef: MessageRowRef = {
