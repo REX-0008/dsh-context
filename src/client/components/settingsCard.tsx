@@ -28,8 +28,12 @@ export interface SettingsCardProps {
    * root-scope card has no session of its own.
    */
   useSessions?: unknown
-  /** The currency the price list displays in (follows the active locale). */
-  currency?: 'usd' | 'cny'
+  /**
+   * Reads the display currency. A CALLBACK rather than a value: the slot outlet
+   * re-renders on a locale switch, so reading per render keeps the price list in
+   * step with the language.
+   */
+  currencyOf?: () => 'usd' | 'cny'
 }
 
 interface PrefRowProps {
@@ -80,10 +84,11 @@ function PrefRow(props: PrefRowProps): ReactElement {
  */
 function BillingBlock(props: {
   t: ViewKit['t']
-  currency: CostCurrency
-  useSessions: unknown
+  currencyOf?: () => CostCurrency
+  useSessions?: unknown
 }): ReactElement {
   const [open, setOpen] = useState(false)
+  const currency: CostCurrency = props.currencyOf?.() ?? 'usd'
   const rows = tableRows()
   // The seat is read through the same helper the overview uses, which enforces
   // the standard-prop contract (a hook taking a selector) and degrades a missing
@@ -120,10 +125,10 @@ function BillingBlock(props: {
                 <li key={key} className="lc-price-row">
                   <span className="lc-price-key">{key}</span>
                   <span className="lc-price-rates">
-                    {props.t('settings.billingHit') + ' ' + formatPriceRate(row.hit, props.currency)}
-                    {' · ' + props.t('settings.billingMiss') + ' ' + formatPriceRate(row.miss, props.currency)}
-                    {' · ' + props.t('settings.billingWrite') + ' ' + formatPriceRate(row.write, props.currency)}
-                    {' · ' + props.t('settings.billingOut') + ' ' + formatPriceRate(row.out, props.currency)}
+                    {props.t('settings.billingHit') + ' ' + formatPriceRate(row.hit, currency)}
+                    {' · ' + props.t('settings.billingMiss') + ' ' + formatPriceRate(row.miss, currency)}
+                    {' · ' + props.t('settings.billingWrite') + ' ' + formatPriceRate(row.write, currency)}
+                    {' · ' + props.t('settings.billingOut') + ' ' + formatPriceRate(row.out, currency)}
                   </span>
                 </li>
               ))}
@@ -236,7 +241,7 @@ export function makeSettingsCard(kit: ViewKit): (props: SettingsCardProps) => Re
                 ]}
                 onPick={(id) => { props.set?.('defaultFileSort', id) }}
               />
-              <BillingBlock t={t} currency={props.currency ?? 'usd'} useSessions={props.useSessions} />
+              <BillingBlock t={t} currencyOf={props.currencyOf} useSessions={props.useSessions} />
             </div>
           )
           : null}

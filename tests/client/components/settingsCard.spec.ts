@@ -385,7 +385,7 @@ describe('SettingsCard', () => {
   test('the price list renders in CNY when the card is given that currency', async () => {
     const m = await mount(h(SettingsCard, {
       useContextSettings: hookFor(stateOf()),
-      currency: 'cny',
+      currencyOf: () => 'cny',
     }))
     await click(query(m.container, '.lc-settings-head') as HTMLElement)
     await click(billingHead(m.container))
