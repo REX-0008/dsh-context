@@ -100,3 +100,34 @@ export function tableRateOf(model: string): PriceTriple | null {
 export function tableKeys(): string[] {
   return ROWS.map(entry => entry.key).sort((a, b) => normalizeModel(b).length - normalizeModel(a).length)
 }
+
+/**
+ * The table's rows for display: every key with its rates, in table order.
+ *
+ * The settings panel lists these so the maintained figures are visible where
+ * they are edited, rather than only reachable by reading the source.
+ * @returns one entry per row.
+ */
+export function tableRows(): Array<{ key: string; row: PriceTriple }> {
+  return ROWS.map(entry => ({ key: entry.key, row: entry.row }))
+}
+
+/**
+ * Which of the given model ids the table cannot price.
+ *
+ * The panel uses this to report gaps when its price list is opened: a model in
+ * use with no row silently drops out of every cost comparison, so the gap is
+ * worth surfacing where the table is maintained.
+ * @param models - the model ids to check (duplicates are collapsed).
+ * @returns the distinct ids with no matching row, in first-seen order.
+ */
+export function unpricedModels(models: readonly string[]): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const model of models) {
+    if (model === '' || seen.has(model)) continue
+    seen.add(model)
+    if (tableRateOf(model) === null) out.push(model)
+  }
+  return out
+}

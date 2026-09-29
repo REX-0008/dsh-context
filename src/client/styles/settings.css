@@ -13,3 +13,66 @@
 .lc-settings-label { flex: 1; min-width: 0; font-size: 14px; color: var(--dsw-alias-label-primary); }
 .lc-settings-select { display: inline-flex; align-items: center; gap: 12px; height: 36px; padding: 0 14px; border: none; border-radius: 18px; background: var(--dsw-alias-bg-module-platform); font: inherit; font-size: 14px; line-height: 22px; color: var(--dsw-alias-label-primary); cursor: pointer; transition: background-color var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, ease-in-out); }
 .lc-settings-note { color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 1.5; margin: 12px 0 4px; }
+/* ---- billing: the maintained price table, shown where it is edited ---- */
+
+/* The sub-head is a nested disclosure, so it must not inherit the card head's
+   size: the outer head is the card's own title. */
+.lc-settings-billing {
+  display: block;
+  padding: 0;
+}
+
+.lc-settings-subhead {
+  padding: 8px 0;
+}
+
+.lc-settings-subhead .lc-settings-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.lc-settings-subhead .lc-settings-desc {
+  font-size: 12px;
+}
+
+.lc-settings-billing-body {
+  padding: 4px 0 8px;
+}
+
+/* A model with no price silently drops out of every cost comparison, so the gap
+   note is a warning, not a footnote. */
+.lc-settings-missing {
+  color: var(--dsw-alias-state-warn-primary);
+}
+
+.lc-price-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.lc-price-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
+}
+
+.lc-price-row:last-child {
+  border-bottom: 0;
+}
+
+.lc-price-key {
+  flex: none;
+  min-width: 8em;
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.lc-price-rates {
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+  font-variant-numeric: tabular-nums;
+}

@@ -169,6 +169,12 @@ function apply(ctx: ClientCtx): void {
           inject: () => ({
             hooks: { contextSettings: settings.store },
             set: (field: SettingsField, value: string) => { settings.set(field, value) },
+            // The price list's gap report needs the models actually billed; the
+            // sessions seat is the only model-carrying source a root-scope card
+            // can reach.
+            useSessions: (c as unknown as { useSessions?: unknown }).useSessions,
+            currency: ctx.locale !== undefined && typeof ctx.locale.getLocale === 'function'
+              && ctx.locale.getLocale().active === 'zh' ? 'cny' as const : 'usd' as const,
           }) },
         // Root-scope keyed slot: no sessionId on these props — the face
         // (hooks + set) arrives through the registration's inject.

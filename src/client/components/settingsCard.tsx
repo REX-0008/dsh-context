@@ -11,12 +11,25 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react'
 import { IconChevronDownOutline14, Menu } from '@deepseek-ai/dsh-client-ui-primitives'
 import { consumeCardExpand } from '../settingsJump'
+import { formatPriceRate } from '../cost'
+import type { CostCurrency } from '../cost'
+import { tableRows, unpricedModels } from '../priceTable'
+import { seenModelsOf } from '../seenModels'
+import { sessionsSnapshotOf } from '../overview'
 import type { SettingsField, SettingsState } from '../settings'
 import type { ViewKit } from '../viewkit'
 
 export interface SettingsCardProps {
   useContextSettings?: <T>(selector: (state: SettingsState) => T) => T
   set?: (field: SettingsField, value: string) => void
+  /**
+   * The root standard kit's sessions seat, read only to learn which models have
+   * actually been billed — the price table's gap report needs that, and a
+   * root-scope card has no session of its own.
+   */
+  useSessions?: unknown
+  /** The currency the price list displays in (follows the active locale). */
+  currency?: 'usd' | 'cny'
 }
 
 interface PrefRowProps {
@@ -55,6 +68,69 @@ function PrefRow(props: PrefRowProps): ReactElement {
           </button>
         )}
       />
+    </div>
+  )
+}
+
+/**
+ * The billing block: the maintained price table, its gaps, and the rates.
+ *
+ * Collapsed by default and rendered only once opened, so the settings card stays
+ * short; the gap check runs on open, which is when it is worth reporting.
+ */
+function BillingBlock(props: {
+  t: ViewKit['t']
+  currency: CostCurrency
+  useSessions: unknown
+}): ReactElement {
+  const [open, setOpen] = useState(false)
+  const rows = tableRows()
+  // The seat is read through the same helper the overview uses, which enforces
+  // the standard-prop contract (a hook taking a selector) and degrades a missing
+  // or hostile seat to null rather than throwing inside a settings panel.
+  const snapshot = sessionsSnapshotOf(props)
+  const seen = open ? seenModelsOf(snapshot) : []
+  const missing = open ? unpricedModels(seen) : []
+  return (
+    <div className="lc-settings-row lc-settings-billing">
+      <button
+        type="button"
+        className="lc-settings-head lc-settings-subhead"
+        aria-expanded={open}
+        onClick={() => { setOpen(!open) }}
+      >
+        <span className="lc-settings-headtext">
+          <span className="lc-settings-name">{props.t('settings.billing')}</span>
+          <span className="lc-settings-desc">{props.t('settings.billingDesc', { n: rows.length })}</span>
+        </span>
+        <IconChevronDownOutline14 className="lc-settings-chevron" />
+      </button>
+      {open
+        ? (
+          <div className="lc-settings-billing-body">
+            {missing.length > 0
+              ? (
+                <p className="lc-settings-note lc-settings-missing" role="status">
+                  {props.t('settings.billingMissing', { n: missing.length, list: missing.join('、') })}
+                </p>
+              )
+              : <p className="lc-settings-note" role="status">{props.t('settings.billingComplete')}</p>}
+            <ul className="lc-price-list">
+              {rows.map(({ key, row }) => (
+                <li key={key} className="lc-price-row">
+                  <span className="lc-price-key">{key}</span>
+                  <span className="lc-price-rates">
+                    {props.t('settings.billingHit') + ' ' + formatPriceRate(row.hit, props.currency)}
+                    {' · ' + props.t('settings.billingMiss') + ' ' + formatPriceRate(row.miss, props.currency)}
+                    {' · ' + props.t('settings.billingWrite') + ' ' + formatPriceRate(row.write, props.currency)}
+                    {' · ' + props.t('settings.billingOut') + ' ' + formatPriceRate(row.out, props.currency)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )
+        : null}
     </div>
   )
 }
@@ -160,6 +236,7 @@ export function makeSettingsCard(kit: ViewKit): (props: SettingsCardProps) => Re
                 ]}
                 onPick={(id) => { props.set?.('defaultFileSort', id) }}
               />
+              <BillingBlock t={t} currency={props.currency ?? 'usd'} useSessions={props.useSessions} />
             </div>
           )
           : null}

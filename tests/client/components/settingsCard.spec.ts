@@ -289,4 +289,108 @@ describe('SettingsCard', () => {
     assert.equal(query(again.container, '.lc-settings-head').getAttribute('aria-expanded'), 'false')
     await again.unmount()
   })
+
+  // ---- the billing block ----
+
+  /** The collapsed billing head (a nested disclosure inside the card body). */
+  function billingHead(container: HTMLElement): HTMLElement {
+    return query(container, '.lc-settings-subhead') as HTMLElement
+  }
+
+  /**
+   * The `useSessions` standard prop: a HOOK taking a selector, which is the
+   * contract `sessionsSnapshotOf` enforces (the same seat the overview card
+   * receives). A plain face, or a function ignoring its selector, reads as null.
+   */
+  function sessionsSeat(snapshot: unknown): unknown {
+    return <T,>(selector: (value: unknown) => T): T => selector(snapshot)
+  }
+
+  test('the billing block is collapsed until opened', async () => {
+    const m = await mount(h(SettingsCard, {
+      useContextSettings: hookFor(stateOf()),
+      // The card's own head opens the card; the billing head is its own toggle.
+    }))
+    await click(query(m.container, '.lc-settings-head') as HTMLElement)
+    const head = billingHead(m.container)
+    assert.equal(head.getAttribute('aria-expanded'), 'false')
+    assert.equal(queryAll(m.container, '.lc-price-row').length, 0, 'rows render only once opened')
+    await m.unmount()
+  })
+
+  test('opening the billing block lists every price row with its rates', async () => {
+    const m = await mount(h(SettingsCard, { useContextSettings: hookFor(stateOf()) }))
+    await click(query(m.container, '.lc-settings-head') as HTMLElement)
+    await click(billingHead(m.container))
+    assert.equal(billingHead(m.container).getAttribute('aria-expanded'), 'true')
+    const rows = queryAll(m.container, '.lc-price-row')
+    assert.ok(rows.length > 0, 'the table rows are listed')
+    // Each row names its key and shows four rates.
+    const first = rows[0] as HTMLElement
+    assert.ok((query(first, '.lc-price-key')?.textContent ?? '').length > 0)
+    const rates = query(first, '.lc-price-rates')?.textContent ?? ''
+    for (const label of ['cache hit', 'miss', 'cache write', 'output']) assert.ok(rates.includes(label))
+    // Opening again closes it.
+    await click(billingHead(m.container))
+    assert.equal(billingHead(m.container).getAttribute('aria-expanded'), 'false')
+    await m.unmount()
+  })
+
+  test('a model used with no price is reported as a gap when the list opens', async () => {
+    const m = await mount(h(SettingsCard, {
+      useContextSettings: hookFor(stateOf()),
+      // One priced model and one the table cannot price.
+      useSessions: sessionsSeat({
+        sessions: [
+          { timeline: { cost: { p: { 'deepseek-v4.1-flash': {}, 'mystery-model': {} } } } },
+        ],
+      }),
+    }))
+    await click(query(m.container, '.lc-settings-head') as HTMLElement)
+    await click(billingHead(m.container))
+
+    const notes = queryAll(m.container, '.lc-settings-missing')
+    assert.equal(notes.length, 1, 'the gap note is shown')
+    const body = notes[0]?.textContent ?? ''
+    assert.ok(body.includes('mystery-model'), 'the unpriced model is named')
+    assert.ok(!body.includes('deepseek-v4.1-flash'), 'the priced model is not reported')
+    await m.unmount()
+  })
+
+  test('every model priced reports completeness instead of a gap', async () => {
+    const m = await mount(h(SettingsCard, {
+      useContextSettings: hookFor(stateOf()),
+      useSessions: sessionsSeat({
+        sessions: [{ timeline: { cost: { p: { 'deepseek-v4.1-flash': {} } } } }],
+      }),
+    }))
+    await click(query(m.container, '.lc-settings-head') as HTMLElement)
+    await click(billingHead(m.container))
+    assert.equal(queryAll(m.container, '.lc-settings-missing').length, 0)
+    assert.ok(text(m.container).includes('has a price'))
+    await m.unmount()
+  })
+
+  test('a missing sessions seat still lists the table and reports no gap', async () => {
+    // No useSessions prop at all: the seat resolves to null, so nothing is seen
+    // and nothing is missing — the table itself must still render.
+    const m = await mount(h(SettingsCard, { useContextSettings: hookFor(stateOf()) }))
+    await click(query(m.container, '.lc-settings-head') as HTMLElement)
+    await click(billingHead(m.container))
+    assert.ok(queryAll(m.container, '.lc-price-row').length > 0)
+    assert.equal(queryAll(m.container, '.lc-settings-missing').length, 0)
+    await m.unmount()
+  })
+
+  test('the price list renders in CNY when the card is given that currency', async () => {
+    const m = await mount(h(SettingsCard, {
+      useContextSettings: hookFor(stateOf()),
+      currency: 'cny',
+    }))
+    await click(query(m.container, '.lc-settings-head') as HTMLElement)
+    await click(billingHead(m.container))
+    const rates = text(query(m.container, '.lc-price-rates') as HTMLElement)
+    assert.ok(rates.includes('¥'), 'the CNY symbol is used')
+    await m.unmount()
+  })
 })
