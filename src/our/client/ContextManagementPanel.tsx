@@ -504,18 +504,21 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
           {selected ? t('our.prune.selectedOne') : t('our.prune.item')}
         </button>
         {/* Whole-round selection: one action for the round, resolved to the same
-            per-node calls as picking the rows by hand. */}
-        <button type="button" className="lc-br-tag"
-          title={t('our.prune.roundTip')}
-          onClick={(event) => {
-            event.stopPropagation()
-            if (!window.confirm(t('our.prune.confirm'))) return
-            if (row.roundSeqs !== undefined) {
+            per-node calls as picking the rows by hand. Rendered only when a round
+            is known — a row the fold could not map to a request has no round to
+            select, and offering the button would promise an action it cannot
+            perform. */}
+        {row.roundSeqs === undefined || row.roundSeqs.length === 0 ? null : (
+          <button type="button" className="lc-br-tag"
+            title={t('our.prune.roundTip')}
+            onClick={(event) => {
+              event.stopPropagation()
+              if (!window.confirm(t('our.prune.confirm'))) return
               void dispatch('selectPruneRound', { seqs: row.roundSeqs, select: true })
-            }
-          }}>
-          {t('our.prune.round')}
-        </button>
+            }}>
+            {t('our.prune.round')}
+          </button>
+        )}
       </>
     )
   }

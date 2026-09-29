@@ -142,7 +142,7 @@ describe('OverviewPanel', () => {
     const values = queryAll(m.container, '.lc-stat-value').map(el => el.textContent)
     assert.equal(values[0], '2')
     assert.equal(values[1], '1.8k')
-    assert.ok(values[2].startsWith('$'), 'priced from the book')
+    assert.ok(values[2].startsWith('$'), 'priced from the price table')
     assert.equal(values[3], '33.33%')
     // Tools + active time: both timed sessions fold into the band (7 calls each).
     assert.equal(values[4], '14')
@@ -396,7 +396,7 @@ describe('OverviewPanel', () => {
       }),
     })
     await flush() // the price book lands
-    // The card's cost: buckets exist but the book prices no such model → the dash.
+    // The card's cost: buckets exist but the table prices no such model → the dash.
     const values = queryAll(m.container, '.lc-ov-mini-value').map(el => el.textContent)
     assert.equal(values[2], '—')
     await m.unmount()

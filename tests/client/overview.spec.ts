@@ -46,8 +46,11 @@ function timelineOf(over: Record<string, unknown> = {}): Record<string, unknown>
   }
 }
 
+// Billed as `deepseek-v4.1` — the table's `4.1` row (0.14 / 1.4 / 1.4 / 2.8).
+// The harness spelling `deepseek-v4` would land on `4-flash`
+// (0.07 / 0.7 / 0.7 / 1.4) and price the fold 500 µUSD cheaper.
 const COST: SessionCostUsage = {
-  deepseek: { 'deepseek-v4': { peak: { uncached: 100, cacheRead: 50, cacheWrite: 10, output: 40 } } },
+  deepseek: { 'deepseek-v4.1': { peak: { uncached: 100, cacheRead: 50, cacheWrite: 10, output: 40 } } },
 }
 
 /** A session-list snapshot over rows of `{ id, row }` pairs. */
@@ -235,7 +238,7 @@ describe('sortRows', () => {
     updatedAt: 2,
     timeline: {
       current: { total: 900 },
-      cost: { deepseek: { m: { peak: { uncached: 1000, cacheRead: 0, cacheWrite: 0, output: 0 } } } },
+      cost: { deepseek: { 'deepseek-v4.1': { peak: { uncached: 1000, cacheRead: 0, cacheWrite: 0, output: 0 } } } },
     } as unknown as ContextTimeline,
   })
   const plain = rowOf({ id: 'plain', updatedAt: 3 })
@@ -308,6 +311,8 @@ describe('usageTotalsOf', () => {
 })
 
 describe('kpisOf', () => {
+  // The signature still threads a book, but the price SOURCE is the plugin's
+  // own table (client/priceTable.ts) and the book is ignored.
   const prices = { deepseek: { 'deepseek-v4': { hit: 0.1, miss: 1, write: 1, out: 2 } } }
 
   test('aggregates sessions, tokens, turns, cost, cache hit, tools, and time across the range', () => {
@@ -332,7 +337,9 @@ describe('kpisOf', () => {
     assert.equal(kpi.listed, 5)
     assert.equal(kpi.tokens, 200)
     assert.equal(kpi.turns, 5)
-    assert.ok(kpi.cost !== null && Math.abs(kpi.cost - 390e-6) < 1e-12, 'the DeepSeek peak bucket doubles: 2 × (50×0.1 + 100×1 + 10×1 + 40×2) per 1M')
+    // The DeepSeek peak bucket doubles the table's `4.1` row:
+    // 2 × (50×0.14 + 100×1.4 + 10×1.4 + 40×2.8) / 1M = 546 µUSD.
+    assert.ok(kpi.cost !== null && Math.abs(kpi.cost - 546e-6) < 1e-12, 'the DeepSeek peak bucket doubles the table rates')
     assert.equal(kpi.cacheHit, '31.25', '50 reads of 160 billed input, truncated')
     assert.equal(kpi.costSessions, 1, 'only the priced session counts toward the cost cell')
     assert.equal(kpi.usageSessions, 1, 'only the billed session feeds the cache-hit rate')
@@ -342,21 +349,27 @@ describe('kpisOf', () => {
     assert.equal(kpi.wallMs, 120_000)
   })
 
-  test('a session with usage the book cannot price feeds the cache-hit rate but prices to nothing', () => {
+  test('a session with usage the table cannot price leaves the priced session standing and still reaches the cache-hit rate', () => {
     const rows = [
       rowOf({ timeline: { cost: COST, requests: [] } as unknown as ContextTimeline }),
       rowOf({
         timeline: {
-          cost: { openai: { 'gpt-5': { peak: { uncached: 10, cacheRead: 5, cacheWrite: 1, output: 2 } } } },
+          // A model id the table carries no row for: usage, but no price.
+          cost: { openai: { 'no-such-model': { peak: { uncached: 10, cacheRead: 5, cacheWrite: 1, output: 2 } } } },
           requests: [],
         } as unknown as ContextTimeline,
       }),
       rowOf(),
     ]
     const kpi = kpisOf(rows, 3, prices, 'usd')
-    assert.equal(kpi.costSessions, 1, 'only the priced session counts toward the cost cell')
+    // Premise rewritten: the second fixture used to be `gpt-5`, which the
+    // table DOES carry — so the thing that now refuses a session is the
+    // table's own coverage (the fixture's `prices` book is ignored and
+    // refuses nothing). The premise stays testable: an unpriceable session
+    // still feeds the cache-hit rate while adding nothing to the cost.
+    assert.equal(kpi.costSessions, 1, 'only the session whose model the table carries counts toward the cost cell')
     assert.equal(kpi.usageSessions, 2, 'both billed sessions feed the cache-hit rate')
-    assert.ok(kpi.cost !== null && Math.abs(kpi.cost - 390e-6) < 1e-12, 'the unpriced session adds nothing to the estimate')
+    assert.ok(kpi.cost !== null && Math.abs(kpi.cost - 546e-6) < 1e-12, 'the unpriced session adds nothing to the estimate')
   })
 
   test('an unbilled set zeroes and dashes', () => {

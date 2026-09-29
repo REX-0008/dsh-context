@@ -52,6 +52,10 @@ const ROWS: TableRow[] = [
   { key: 'sonnet', row: { hit: 0.3, miss: 3, write: 3.75, out: 15 } },
   { key: 'haiku', row: { hit: 0.1, miss: 1, write: 1.25, out: 5 } },
   { key: 'gpt-5', row: { hit: 0.15, miss: 1.5, write: 1.5, out: 12 } },
+  // A later GPT generation with no published rate of its own yet: priced at the
+  // same ballpark rather than left as a dash, since a missing row would silently
+  // drop the model from every comparison the board makes.
+  { key: 'gpt-6', row: { hit: 0.15, miss: 1.5, write: 1.5, out: 12 } },
   { key: 'gemini', row: { hit: 0.1, miss: 0.8, write: 0.8, out: 3.2 } },
   { key: 'kimi', row: { hit: 0.07, miss: 0.6, write: 0.6, out: 2.4 } },
 ]
