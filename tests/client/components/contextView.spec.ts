@@ -1018,16 +1018,21 @@ describe('ContextView — scroll ledger', () => {
 })
 
 describe('ContextView — locale and settings', () => {
-  // A real-shaped models.dev slice: the cost cell prices against the injected
-  // book (1M uncached input at the $0.15 miss rate → $0.15 / ¥1).
+  // The cost cell prices from THIS PLUGIN's own table (client/priceTable.ts), so
+  // the fixture names a model the table carries: 1M uncached input at the
+  // 4.1-flash miss rate ($0.7) plus 0.5M output at its out rate ($1.4) is $1.4,
+  // doubled because the bucket is a peak one.
+  //
+  // The injected registry book is retained but no longer affects the price — the
+  // table is the single source — so it must not be what makes the cell non-empty.
   const costed = timeline({
-    cost: { 'deepseek-official': { 'deepseek-v4-flash': { peak: { uncached: 1000000, output: 500000, cacheRead: 0, cacheWrite: 0 } } } },
+    cost: { 'deepseek-official': { 'deepseek-v4.1-flash': { peak: { uncached: 1000000, output: 500000, cacheRead: 0, cacheWrite: 0 } } } },
   })
 
   beforeEach(() => {
     resetModelPrices()
     setModelPricesLoader(() => Promise.resolve({
-      deepseek: { models: { 'deepseek-v4-flash': { cost: { input: 0.15, output: 0.6, cache_read: 0.003 } } } },
+      deepseek: { models: { 'deepseek-v4.1-flash': { cost: { input: 0.15, output: 0.6, cache_read: 0.003 } } } },
     }))
   })
 

@@ -1,20 +1,23 @@
 /**
- * Session-cost estimate — prices the host-folded cumulative billed-token
- * totals (SessionCostUsage) from the client's model-price book
- * (client/modelPrices.ts): the models.dev registry, fetched through
- * @opencode-ai/models. Book rates are USD per 1M tokens; the CNY display
- * converts at the fixed 1 CNY = 0.15 USD, and the total and the tooltip's
- * rates both go through `toCurrency`, so the printed figures can never
- * drift from the math that prices the session. DeepSeek bills a period-based
- * list whose models.dev figures ARE the official off-peak rates: the Host
- * already split those buckets at fold time, so DeepSeek's `peak` buckets
- * price at twice the book rate here (the `off` buckets stay at book) —
- * never any other provider's.
+ * Session-cost estimate — prices the host-folded cumulative billed-token totals
+ * (SessionCostUsage) from THIS PLUGIN'S OWN price table (client/priceTable.ts).
+ *
+ * The figure is a COMPARISON BASELINE, not an invoice: the table is
+ * hand-maintained with rough rates, and model ids resolve fuzzily, so two
+ * spellings of one model price alike and different models or caching patterns
+ * can be ranked against each other. Rates are USD per 1M tokens; the CNY display
+ * converts at the fixed 1 CNY = 0.15 USD.
+ *
+ * Peak/off-peak is kept — a peak request costs double, which matters when
+ * comparing — but there is no per-hour banding: the host already folds each
+ * request into a `peak` or `off` bucket, so this layer only applies the
+ * multiplier.
  */
 
 import type { SessionCostUsage } from '../shared/types'
-import { isDeepSeekProvider, modelsDevProviderOf } from '../shared/providers'
+import { isDeepSeekProvider } from '../shared/providers'
 import { asRecord, numOf } from './services'
+import { tableRateOf } from './priceTable'
 
 /** The display currencies the stats board ships; the locale picks one. */
 export type CostCurrency = 'usd' | 'cny'
@@ -34,10 +37,11 @@ const PEAK_FACTOR = 2
 export interface PriceTriple { hit: number; miss: number; write: number; out: number }
 
 /**
- * The client's price book: models.dev provider id → model id → USD rates,
- * extracted from the registry (modelPrices.ts). The fold keys the cost
- * totals by the dsh provider id; `priceOf` resolves the two via
- * modelsDevProviderOf (unmapped ids pass through verbatim).
+ * A provider → model → rates book.
+ *
+ * Kept only as the shape several call sites and their tests still thread
+ * through; the price SOURCE is now the hand-maintained table
+ * (client/priceTable.ts), and `priceOf` ignores this argument.
  */
 export type ModelPrices = Record<string, Record<string, PriceTriple>>
 
@@ -56,54 +60,26 @@ export function peakOf(rate: PriceTriple): PriceTriple {
   }
 }
 
-/** One book branch (a provider's models), as far as runtime can prove it. */
-function branchOf(book: ModelPrices, id: string): Record<string, PriceTriple> | null {
-  const v: unknown = book[id]
-  return v !== null && typeof v === 'object' ? (v as Record<string, PriceTriple>) : null
-}
-
 /**
- * One branch's model id → rates, as far as runtime can prove it: exact own
- * key first (the book is untrusted wire data), then case-insensitively, then
- * by id SUFFIX — dsh spells some models short (`k3`) where the registry
- * namespaces them (`kimi-k3`). Several suffix candidates (e.g. `k3` vs a
- * hypothetical `other-k3`) are ambiguous and price nothing.
- */
-function lookup(models: Record<string, PriceTriple>, model: string): PriceTriple | null {
-  if (Object.hasOwn(models, model)) return models[model]
-  const m = model.toLowerCase()
-  let found: PriceTriple | null = null
-  let seen: string | null = null
-  for (const id in models) {
-    const lower = id.toLowerCase()
-    if (lower !== m && !lower.endsWith('-' + m)) continue
-    if (seen !== null && seen !== lower) return null
-    seen = lower
-    found = models[id]
-  }
-  return found
-}
-
-/**
- * The book's rates for one folded (provider, model) bucket, or null when
- * the book cannot price it: the dsh provider id resolves through
- * modelsDevProviderOf (unmapped ids pass through) and prices by model id —
- * exact, case-insensitive, or suffix; a provider the book does not carry
- * falls back to a cross-provider scan, priced only when exactly one branch
- * carries the model id.
+ * The table's rates for one folded (provider, model) bucket, or null when the
+ * table has no row for it.
+ *
+ * The provider is NOT consulted: the table keys on the model id alone, because
+ * the same model reaches this code through several provider ids (an account
+ * gateway, a direct endpoint) and pricing those differently would make one model
+ * look like several. Matching is the fuzzy containment in `tableRateOf`.
+ *
+ * The `prices` argument is retained so callers and tests that thread a book keep
+ * compiling; the book is no longer read.
+ * @param prices - ignored; the table is the single price source.
+ * @param provider - ignored; see above.
+ * @param model - the model id to price.
+ * @returns the rates, or null when the table cannot price it.
  */
 export function priceOf(prices: ModelPrices | null | undefined, provider: string, model: string): PriceTriple | null {
-  if (prices === null || prices === undefined) return null
-  const direct = branchOf(prices, modelsDevProviderOf(provider))
-  if (direct !== null) return lookup(direct, model)
-  let found: PriceTriple | null = null
-  for (const models of Object.values(prices)) {
-    const rate = lookup(models, model)
-    if (rate === null) continue
-    if (found !== null) return null
-    found = rate
-  }
-  return found
+  void prices
+  void provider
+  return tableRateOf(model)
 }
 
 /**

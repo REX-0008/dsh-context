@@ -1,29 +1,30 @@
-// Session-cost estimate (src/client/cost.ts): the model-price-book lookup
-// (exact, case-insensitive, and the unambiguous cross-provider fallback), the
-// USD→CNY conversion at the fixed 1 CNY = 0.15 USD, the null degradations,
-// the numOf coercion of garbage bucket fields, the money/rate formatting, and
-// the deep merge behind the stats board's family-scope cost cells.
+// Session-cost estimate (src/client/cost.ts): the fuzzy lookup against THIS
+// PLUGIN's own price table (client/priceTable.ts), the USD→CNY conversion at the
+// fixed 1 CNY = 0.15 USD, the null degradations, the numOf coercion of garbage
+// bucket fields, the money/rate formatting, and the deep merge behind the stats
+// board's family-scope cost cells.
+//
+// The provider argument and the registry book are retained in the signatures but
+// no longer affect a price: the table keys on the model id alone, so one model
+// prices the same however the log spells its provider.
 
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { estimateSessionCost, formatCost, formatPriceRate, mergeCostUsage, peakOf, priceOf, toCurrency } from '../../src/client/cost'
+import { normalizeModel, tableRateOf } from '../../src/client/priceTable'
 import type { ModelPrices } from '../../src/client/cost'
 import type { CostBucketTotals } from '../../src/shared/types'
 
 const M = 1_000_000
 
-/** Real-shaped rates (deepseek-v4-flash on models.dev — the official off-peak list; no cache_write published). */
-const FLASH = { hit: 0.003, miss: 0.15, write: 0.15, out: 0.6 }
-const PRO = { hit: 0.003625, miss: 0.435, write: 0.435, out: 0.87 }
-const KIMI = { hit: 0.19, miss: 0.95, write: 0.95, out: 4 }
-const K3 = { hit: 0.3, miss: 3, write: 3, out: 15 }
+/** The table's own rows for the models these cases use. */
+const FLASH41 = { hit: 0.07, miss: 0.7, write: 0.7, out: 1.4 }
+const V41 = { hit: 0.14, miss: 1.4, write: 1.4, out: 2.8 }
+const V32 = { hit: 0.028, miss: 0.28, write: 0.28, out: 0.42 }
+const SONNET = { hit: 0.3, miss: 3, write: 3.75, out: 15 }
 
-/** The book is keyed by the models.dev provider ids, exactly as extracted. */
-const BOOK: ModelPrices = {
-  deepseek: { 'deepseek-v4-flash': FLASH, 'deepseek-v4-pro': PRO },
-  moonshotai: { 'kimi-k2.7-code': KIMI, 'kimi-k3': K3 },
-  'opencode-go': { 'deepseek-v4-flash': FLASH },
-}
+/** A book is still accepted (and ignored) so the call sites stay covered. */
+const BOOK: ModelPrices = {}
 
 function bucket(cacheRead: number, uncached: number, cacheWrite: number, output: number): CostBucketTotals {
   return { cacheRead, uncached, cacheWrite, output }
@@ -41,176 +42,191 @@ describe('toCurrency', () => {
   })
 })
 
+describe('normalizeModel', () => {
+  test('folds case and every separator, dots included', () => {
+    // Dots go too, which is what makes `v4.1` and `41` the same form.
+    assert.equal(normalizeModel('deepseek-V4.1-Flash'), 'deepseekv41flash')
+    assert.equal(normalizeModel('deepseek4.1flash'), 'deepseek41flash')
+    assert.equal(normalizeModel('deepseek_41_flash'), 'deepseek41flash')
+    assert.equal(normalizeModel('deepseek 41 flash'), 'deepseek41flash')
+  })
+})
+
+describe('tableRateOf', () => {
+  test('the same model prices alike however it is spelled', () => {
+    // The spellings the running harness actually emits for one model.
+    for (const id of ['deepseek-V4.1-Flash', 'deepseek4.1flash', 'deepseek41flash', 'deepseek_v4.1_flash']) {
+      assert.deepEqual(tableRateOf(id), FLASH41, id + ' must price as the flash tier')
+    }
+  })
+
+  test('a tier beats its family: flash is not priced as plain v4.1', () => {
+    assert.deepEqual(tableRateOf('deepseek-v4.1-flash'), FLASH41)
+    assert.deepEqual(tableRateOf('deepseek-v4.1'), V41)
+    assert.notDeepEqual(tableRateOf('deepseek-v4.1-flash'), tableRateOf('deepseek-v4.1'))
+  })
+
+  test('older generations still price, so an old session is not a dash', () => {
+    assert.deepEqual(tableRateOf('deepseek-v3.2'), V32)
+  })
+
+  test('other vendors price too, for cross-model comparison', () => {
+    assert.deepEqual(tableRateOf('claude-sonnet-4'), SONNET)
+  })
+
+  test('a model the table does not carry prices null rather than guessing', () => {
+    assert.equal(tableRateOf('mystery-model'), null)
+    assert.equal(tableRateOf(''), null)
+  })
+})
+
 describe('priceOf', () => {
-  test('a mapped dsh provider id resolves to its models.dev branch', () => {
-    assert.equal(priceOf(BOOK, 'deepseek-official', 'deepseek-v4-flash'), FLASH)
-    assert.equal(priceOf(BOOK, 'kimi-coding', 'kimi-k2.7-code'), KIMI)
+  test('prices from the table and ignores the provider and the book', () => {
+    assert.deepEqual(priceOf(BOOK, 'deepseek-official', 'deepseek-v4.1-flash'), FLASH41)
+    // One model, several provider spellings — one price.
+    assert.deepEqual(priceOf(BOOK, 'anything-at-all', 'deepseek41flash'), FLASH41)
   })
 
-  test('an unmapped dsh provider id passes through to the book verbatim', () => {
-    assert.equal(priceOf(BOOK, 'opencode-go', 'deepseek-v4-flash'), FLASH)
-    assert.equal(priceOf({ anthropic: { claude: KIMI } }, 'anthropic', 'claude'), KIMI)
+  test('an unknown model prices null even when a book is supplied', () => {
+    assert.equal(priceOf(BOOK, 'deepseek', 'mystery'), null)
   })
 
-  test('a known provider falls back to a case-insensitive model match', () => {
-    assert.equal(priceOf({ minimax: { 'MiniMax-M2.5': KIMI } }, 'minimax-cn', 'minimax-m2.5'), KIMI)
-  })
-
-  test('a short dsh model id suffix-matches its namespaced registry id', () => {
-    assert.equal(priceOf(BOOK, 'kimi-coding', 'k3'), K3)
-    assert.equal(priceOf(BOOK, 'kimi-coding', 'K3'), K3, 'the suffix tier is case-insensitive too')
-  })
-
-  test('several suffix candidates in one branch are ambiguous', () => {
-    const book: ModelPrices = { moonshotai: { 'kimi-k3': K3, 'other-k3': KIMI } }
-    assert.equal(priceOf(book, 'kimi-coding', 'k3'), null)
-  })
-
-  test('a known provider with an unknown model prices null (no cross-provider guess)', () => {
-    assert.equal(priceOf(BOOK, 'deepseek', 'kimi-k2.7-code'), null)
-  })
-
-  test('a provider the book does not carry prices the model only when unambiguous book-wide', () => {
-    assert.equal(priceOf(BOOK, '', 'kimi-k2.7-code'), KIMI, 'unambiguous: exactly one branch carries it')
-    assert.equal(priceOf(BOOK, 'future-provider', 'kimi-k2.7-code'), KIMI)
-    assert.equal(priceOf(BOOK, '', 'deepseek-v4-flash'), null, 'ambiguous: two branches carry it')
-    assert.equal(priceOf(BOOK, '', 'mystery'), null)
-  })
-
-  test('a null or missing book prices nothing', () => {
-    assert.equal(priceOf(null, 'deepseek-official', 'deepseek-v4-flash'), null)
-    assert.equal(priceOf(undefined, '', 'kimi-k2.7-code'), null)
+  test('the book argument no longer gates the price', () => {
+    // A null book used to price nothing; the table is the source now.
+    assert.deepEqual(priceOf(null, 'deepseek-official', 'deepseek-v4.1-flash'), FLASH41)
+    assert.deepEqual(priceOf(undefined, '', 'deepseek-v4.1-flash'), FLASH41)
   })
 })
 
 describe('estimateSessionCost', () => {
-  test('null usage or null book prices to null', () => {
+  test('null usage or an absent book argument prices to null', () => {
     assert.equal(estimateSessionCost(null, BOOK, 'usd'), null)
     assert.equal(estimateSessionCost(undefined, BOOK, 'cny'), null)
     assert.equal(estimateSessionCost({}, null, 'usd'), null)
   })
 
-  test('usage without any priced bucket returns null', () => {
+  test('usage without any priced model returns null', () => {
     assert.equal(estimateSessionCost({}, BOOK, 'usd'), null)
     assert.equal(estimateSessionCost({ 'deepseek-official': { unknown: { peak: bucket(0, M, 0, 0) } } }, BOOK, 'usd'), null)
-    assert.equal(estimateSessionCost({ unmapped: { 'deepseek-v4-flash': { peak: bucket(0, M, 0, 0) } } }, BOOK, 'usd'), null)
   })
 
   test('prices every period bucket at its own rate (hit / miss / write / out)', () => {
+    // v4.1 off-peak: 1M of each bucket at its rate; sonnet peak doubles.
     const usage = {
-      'deepseek-official': {
-        'deepseek-v4-flash': { off: bucket(M, M, M, M) },
-        'deepseek-v4-pro': { off: bucket(M, M, M, M) },
-      },
-      'kimi-coding': { 'kimi-k2.7-code': { peak: bucket(0, M, 0, M) } },
+      'deepseek-official': { 'deepseek-v4.1': { off: bucket(M, M, M, M) } },
+      'anthropic': { 'claude-sonnet-4': { off: bucket(0, M, 0, 0) } },
     }
-    close(estimateSessionCost(usage, BOOK, 'usd'), 0.903 + (0.003625 + 0.435 + 0.435 + 0.87) + 0.95 + 4)
+    close(estimateSessionCost(usage, BOOK, 'usd'), (0.14 + 1.4 + 1.4 + 2.8) + 3)
   })
 
-  test('peak buckets price at twice the book rate for DeepSeek only', () => {
+  test('peak buckets price at twice the table rate for DeepSeek only', () => {
     const split = { peak: bucket(0, M, 0, 0), off: bucket(0, M, 0, 0) }
-    close(estimateSessionCost({ 'deepseek-official': { 'deepseek-v4-flash': split } }, BOOK, 'usd'), 0.3 + 0.15)
+    // flash miss 0.7 -> peak 1.4, off 0.7
+    close(estimateSessionCost({ 'deepseek-official': { 'deepseek-v4.1-flash': split } }, BOOK, 'usd'), 1.4 + 0.7)
+    // A non-DeepSeek provider bills both buckets flat: no doubling.
     close(
-      estimateSessionCost({ 'kimi-coding': { 'kimi-k2.7-code': split } }, BOOK, 'usd'),
-      0.95 + 0.95,
-      'a flat-rate provider bills a peak bucket at book price, never doubled',
+      estimateSessionCost({ anthropic: { 'claude-sonnet-4': split } }, BOOK, 'usd'),
+      3 + 3,
+      'a non-DeepSeek provider bills a peak bucket at the table rate, never doubled',
     )
   })
 
   test('a missing model is skipped while priced ones still sum', () => {
-    const usage = { 'kimi-coding': { 'kimi-k2.7-code': { peak: bucket(0, M, 0, 0) } } }
-    close(estimateSessionCost(usage, BOOK, 'usd'), 0.95)
+    const usage = { anthropic: { 'claude-sonnet-4': { peak: bucket(0, M, 0, 0) } } }
+    close(estimateSessionCost(usage, BOOK, 'usd'), 3)
   })
 
   test('the CNY currency converts the USD total at 1 CNY = 0.15 USD', () => {
-    const usage = { 'deepseek-official': { 'deepseek-v4-flash': { peak: bucket(0, M, 0, 0) } } }
-    // 1M peak-window miss bills the official CNY peak price: ¥2.
-    close(estimateSessionCost(usage, BOOK, 'cny'), 2)
+    // 1M off-peak flash miss = $0.7 -> ¥0.7/0.15
+    const usage = { 'deepseek-official': { 'deepseek-v4.1-flash': { off: bucket(0, M, 0, 0) } } }
+    close(estimateSessionCost(usage, BOOK, 'cny'), 0.7 / 0.15)
   })
 
   test('non-number bucket fields are coerced to zero by numOf', () => {
     const garbage = { cacheRead: NaN, uncached: 'x', cacheWrite: undefined, output: Infinity } as unknown as CostBucketTotals
-    assert.equal(estimateSessionCost({ 'deepseek-official': { 'deepseek-v4-flash': { peak: garbage } } }, BOOK, 'usd'), 0)
+    assert.equal(estimateSessionCost({ 'deepseek-official': { 'deepseek-v4.1-flash': { peak: garbage } } }, BOOK, 'usd'), 0)
   })
 
   test('garbage fields degrade while real fields still price', () => {
     const mixed = { cacheRead: M, uncached: NaN, cacheWrite: M / 2, output: 'junk' } as unknown as CostBucketTotals
-    close(estimateSessionCost({ 'deepseek-official': { 'deepseek-v4-flash': { peak: mixed } } }, BOOK, 'usd'), 2 * (0.003 + 0.5 * 0.15))
+    // peak flash: 1M cacheRead at 0.07 + 0.5M write at 0.7, all doubled
+    close(estimateSessionCost({ 'deepseek-official': { 'deepseek-v4.1-flash': { peak: mixed } } }, BOOK, 'usd'), 2 * (0.07 + 0.5 * 0.7))
   })
 
   test('hostile provider branches, periods, and buckets are skipped, not fatal', () => {
     const usage = {
       junk: 'x',
-      'kimi-coding': { broken: null, 'kimi-k2.7-code': { peak: 'junk', off: bucket(0, M, 0, 0) } },
-      'deepseek-official': { 'deepseek-v4-flash': { peak: bucket(0, M, 0, 0) } },
+      anthropic: { broken: null, 'claude-sonnet-4': { peak: 'junk', off: bucket(0, M, 0, 0) } },
+      'deepseek-official': { 'deepseek-v4.1-flash': { peak: bucket(0, M, 0, 0) } },
     } as unknown as { [provider: string]: Record<string, Record<string, CostBucketTotals>> }
-    close(estimateSessionCost(usage, BOOK, 'usd'), 0.3 + 0.95)
+    close(estimateSessionCost(usage, BOOK, 'usd'), 1.4 + 3)
   })
 })
 
 describe('mergeCostUsage', () => {
   test('sums every bucket across usages, keyed by provider, model, and period', () => {
     const merged = mergeCostUsage(
-      { 'deepseek-official': { 'deepseek-v4-flash': { peak: bucket(M, 0, 0, 0) } } },
+      { 'deepseek-official': { 'deepseek-v4.1-flash': { peak: bucket(M, 0, 0, 0) } } },
       {
         'deepseek-official': {
-          'deepseek-v4-flash': { peak: bucket(2 * M, 0, 0, 0), off: bucket(0, M, 0, 0) },
-          'deepseek-v4-pro': { peak: bucket(0, 0, 0, M) },
+          'deepseek-v4.1-flash': { peak: bucket(2 * M, 0, 0, 0), off: bucket(0, M, 0, 0) },
+          'deepseek-v4.1': { peak: bucket(0, 0, 0, M) },
         },
-        'kimi-coding': { 'kimi-k2.7-code': { peak: bucket(0, 3 * M, 0, 0) } },
+        'anthropic': { 'claude-sonnet-4': { peak: bucket(0, 3 * M, 0, 0) } },
       },
     )
     assert.deepEqual(merged, {
       'deepseek-official': {
-        'deepseek-v4-flash': { peak: bucket(3 * M, 0, 0, 0), off: bucket(0, M, 0, 0) },
-        'deepseek-v4-pro': { peak: bucket(0, 0, 0, M) },
+        'deepseek-v4.1-flash': { peak: bucket(3 * M, 0, 0, 0), off: bucket(0, M, 0, 0) },
+        'deepseek-v4.1': { peak: bucket(0, 0, 0, M) },
       },
-      'kimi-coding': { 'kimi-k2.7-code': { peak: bucket(0, 3 * M, 0, 0) } },
+      'anthropic': { 'claude-sonnet-4': { peak: bucket(0, 3 * M, 0, 0) } },
     })
   })
 
   test('the merged estimate equals the sum of the sides priced apart', () => {
-    const a = { 'deepseek-official': { 'deepseek-v4-flash': { peak: bucket(M, M, 0, 0) } } }
-    const b = { 'kimi-coding': { 'kimi-k2.7-code': { peak: bucket(0, 2 * M, 0, 0) } } }
+    const a = { 'deepseek-official': { 'deepseek-v4.1-flash': { peak: bucket(M, M, 0, 0) } } }
+    const b = { 'anthropic': { 'claude-sonnet-4': { peak: bucket(0, 2 * M, 0, 0) } } }
     const total = estimateSessionCost(mergeCostUsage(a, b), BOOK, 'usd')
     close(total ?? 0, (estimateSessionCost(a, BOOK, 'usd') ?? 0) + (estimateSessionCost(b, BOOK, 'usd') ?? 0))
   })
 
   test('null and absent sides drop out; nothing usable merges to null', () => {
-    const usage = { 'deepseek-official': { 'deepseek-v4-flash': { peak: bucket(M, 0, 0, 0) } } }
+    const usage = { 'deepseek-official': { 'deepseek-v4.1-flash': { peak: bucket(M, 0, 0, 0) } } }
     assert.deepEqual(mergeCostUsage(null, usage, undefined), usage)
     assert.equal(mergeCostUsage(null, undefined, null), null)
     assert.equal(mergeCostUsage(), null)
   })
 
   test('a bucket that merged with only zeros still counts (the estimator prices $0, not a dash)', () => {
-    const zero = { 'deepseek-official': { 'deepseek-v4-flash': { peak: bucket(0, 0, 0, 0) } } }
+    const zero = { 'deepseek-official': { 'deepseek-v4.1-flash': { peak: bucket(0, 0, 0, 0) } } }
     assert.deepEqual(mergeCostUsage(zero), zero)
     assert.equal(estimateSessionCost(mergeCostUsage(zero), BOOK, 'usd'), 0)
   })
 
   test('hostile branches are skipped, not fatal, and the inputs never mutate', () => {
-    const a = { 'deepseek-official': { 'deepseek-v4-flash': { peak: bucket(M, 0, 0, 0) } } }
+    const a = { 'deepseek-official': { 'deepseek-v4.1-flash': { peak: bucket(M, 0, 0, 0) } } }
     const hostile = {
       junk: 5,
       arr: [{ peak: bucket(M, 0, 0, 0) }],
-      'kimi-coding': { broken: null, 'kimi-k2.7-code': { peak: 'junk', off: bucket(0, M, 0, 0) } },
+      // A hostile sibling branch of the SAME provider as the good one, so the
+      // merge must keep the good model under its own provider key.
+      'deepseek-official': { broken: null, 'deepseek-v4.1': { peak: 'junk', off: bucket(0, M, 0, 0) } },
     } as unknown as Record<string, never>
     const merged = mergeCostUsage(a, hostile)
     assert.deepEqual(merged, {
-      'deepseek-official': { 'deepseek-v4-flash': { peak: bucket(M, 0, 0, 0) } },
-      'kimi-coding': { 'kimi-k2.7-code': { off: bucket(0, M, 0, 0) } },
+      'deepseek-official': {
+        'deepseek-v4.1-flash': { peak: bucket(M, 0, 0, 0) },
+        'deepseek-v4.1': { off: bucket(0, M, 0, 0) },
+      },
     })
-    assert.deepEqual(a, { 'deepseek-official': { 'deepseek-v4-flash': { peak: bucket(M, 0, 0, 0) } } }, 'the source usage stays untouched')
+    assert.deepEqual(a, { 'deepseek-official': { 'deepseek-v4.1-flash': { peak: bucket(M, 0, 0, 0) } } }, 'the source usage stays untouched')
   })
 })
 
 describe('peakOf', () => {
-  test('doubles every rate component onto the official peak list', () => {
-    // The book's deepseek figures ARE the official off-peak rates; doubled
-    // they must reproduce the official peak list (api-docs.deepseek.com):
-    // flash peak per 1M — hit $0.006, miss $0.3, output $1.2.
-    assert.deepEqual(peakOf(FLASH), { hit: 0.006, miss: 0.3, write: 0.3, out: 1.2 })
+  test('doubles every rate component so a peak figure can be shown beside the base', () => {
+    assert.deepEqual(peakOf(FLASH41), { hit: 0.14, miss: 1.4, write: 1.4, out: 2.8 })
   })
 })
 
