@@ -34,6 +34,22 @@ describe('Config validator (cordis Standard Schema face)', () => {
       defaultToolSort: 'count',
       defaultFileSort: 'count',
       insightsEntry: 'show',
+      // Our insert (PATCHES.md #9): the write layer's settings tree rides the
+      // entry config as a volatile field; absent config resolves its empty maps.
+      panel: {
+        contextOverrides: {},
+        conversationDisabledContexts: {},
+        conversationDisabledSections: {},
+        conversationOverrides: {},
+        modules: {},
+        presetDisabledContexts: {},
+        presetDisabledSections: {},
+        sectionOriginals: {},
+        sectionOverrides: {},
+        sectionWeights: {},
+        suppressedInjections: {},
+        toolRestrictions: {},
+      },
     })
     assert.deepEqual(resolveBounds(undefined), DEFAULT_BOUNDS)
     assert.deepEqual(resolveBounds({}), DEFAULT_BOUNDS)

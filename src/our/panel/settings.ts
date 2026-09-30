@@ -45,8 +45,9 @@ export const DEFAULT_SETTINGS: ContextPanelSettings = {
   suppressedInjections: {},
 }
 
-/** Namespace schema (schemastery primitives: z.dict replaces zod's z.record; fields are optional by default). */
-export const CONTEXT_PANEL_SCHEMA: z<ContextPanelSettings> = z.object({
+
+/** The field set both carriers share. */
+const FIELDS = {
   scope: z.union([z.const('conversation'), z.const('agent')]),
   autoSyncPreset: z.boolean(),
   panelWidth: z.number(),
@@ -62,7 +63,19 @@ export const CONTEXT_PANEL_SCHEMA: z<ContextPanelSettings> = z.object({
   sectionOverrides: z.dict(z.dict(z.string())),
   sectionWeights: z.dict(z.dict(z.number())),
   sectionOriginals: z.dict(z.dict(z.string())),
-})
+}
+
+/** Namespace schema (schemastery primitives: z.dict replaces zod's z.record; fields are optional by default). */
+export const CONTEXT_PANEL_SCHEMA: z<ContextPanelSettings> = z.object(FIELDS)
+
+/**
+ * The entry-config carrier for harness 0.2+ (host/config.ts nests it under
+ * `panel` and marks it volatile). A separate ROOT node: the volatile mark
+ * mutates the node it is applied to, and the registration schema above must
+ * keep resolving namespace values as plain data on the 0.1.x lines.
+ */
+export const CONTEXT_PANEL_ENTRY_SCHEMA: z<ContextPanelSettings> = z.object(FIELDS)
+
 
 /** Merge two patches (the latter overrides the former; undefined fields are ignored). */
 export function mergePatch(...patches: Array<PromptModulePatch | undefined>): PromptModulePatch {
@@ -77,4 +90,3 @@ export function mergePatch(...patches: Array<PromptModulePatch | undefined>): Pr
   }
   return out
 }
-

@@ -18,6 +18,12 @@
 
 import z from '@deepseek-ai/schemastery'
 import type { DefaultFileSort, DefaultGranularity, DefaultPlacement, DefaultTrendMode, DefaultToolSort, InsightsEntry } from '../shared/types'
+// OUR INSERT POINT (PATCHES.md #9): the context-management write layer's
+// settings tree rides the entry config on harness 0.2+ (see src/our/panel/scope.ts).
+import { CONTEXT_PANEL_ENTRY_SCHEMA } from '../our/panel/settings'
+// The runtime value is the Volatile live reference; folds never read it, the
+// typed face only satisfies the schema's inferred param (see the field doc).
+import type { ContextPanelSettings } from '../our/types'
 
 export interface Config {
   /** Cap on kept per-step request records (the hard step backstop). */
@@ -47,6 +53,14 @@ export interface Config {
   defaultFileSort?: DefaultFileSort
   /** Whether the Context Insights panel's sidebar entry is offered. */
   insightsEntry?: InsightsEntry
+  /**
+   * The context-management write layer's settings tree (OUR INSERT — see
+   * PATCHES.md #9). The settings surface on harness 0.2+ (volatile → live-
+   * editable without remounting; cordis resolves it to a live reference the
+   * folds never read) and inert on the older lines, where the write layer
+   * registers its own settings namespace instead.
+   */
+  panel?: ContextPanelSettings
 }
 
 /** The fold's retention/slice bounds, as the schema resolves them. */
@@ -100,6 +114,10 @@ export const Config = z.object({
   defaultToolSort: volatileField(z.union(['size', 'count', 'name']).default('count').loose()),
   defaultFileSort: volatileField(z.union(['count', 'latest', 'path']).default('count').loose()),
   insightsEntry: volatileField(z.union(['show', 'hide']).default('show').loose()),
+  // OUR INSERT (PATCHES.md #9): the context-management settings tree — the
+  // settings surface on 0.2+; a separate root so the volatile mark never
+  // leaks into the registration schema (src/our/panel/settings.ts).
+  panel: volatileField(CONTEXT_PANEL_ENTRY_SCHEMA),
 })
 
 /** Resolve the fold's retention bounds (the schema fills every default). */

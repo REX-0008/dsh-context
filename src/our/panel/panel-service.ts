@@ -13,9 +13,9 @@
  * @module @our/context-panel/panel-service
  */
 import type { Context } from '@deepseek-ai/cordis'
-import type { SettingsScope } from '@deepseek-ai/dsh-settings'
+import type { PanelScope } from './scope'
 import type { ContextAssemblerService } from '../assembler/service'
-import type { ContextPanelSettings, PromptModulePatch } from '../types'
+import type { PromptModulePatch } from '../types'
 import { mergePatch } from './settings'
 
 /** The ctx.contextPanel public contract. */
@@ -96,7 +96,7 @@ export interface ContextPanelService {
  */
 export function createPanelService(
   ctx: Context,
-  getScope: () => SettingsScope<ContextPanelSettings>,
+  getScope: () => PanelScope,
   engine: ContextAssemblerService,
 ): ContextPanelService {
   return {

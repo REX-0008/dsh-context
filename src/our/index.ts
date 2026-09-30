@@ -25,8 +25,8 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 // No compaction type import: the capability is optional and its package name is
 // not resolvable from every install, so the `compaction/summary` guard below
 // compares by string instead of relying on the merged event table.
-import type { SettingsScope } from '@deepseek-ai/dsh-settings'
 import { CONTEXT_PANEL_NS, CONTEXT_PANEL_SCHEMA, DEFAULT_SETTINGS } from './panel/settings'
+import { createProfileScope, wrapLegacyScope, type LegacySettingsFace, type LegacySettingsScope, type PanelScope, type SettingsFormsFace } from './panel/scope'
 import { createPanelService, type ContextPanelService } from './panel/panel-service'
 import type { ContextAssemblerService } from './assembler/service'
 import { ContextAssemblerEngine } from './assembler/engine'
@@ -39,7 +39,7 @@ import type { ContextPanelSettings } from './types'
 
 /** Wiring refs the routes read lazily (settings/webServer inject asynchronously). */
 interface Wiring {
-  scope?: SettingsScope<ContextPanelSettings>
+  scope?: PanelScope
   service?: ContextPanelService
   engine?: ContextAssemblerService
   sections?: SectionRegistry
@@ -287,7 +287,7 @@ type ActionPayload = Record<string, unknown>
 /** One action handler. */
 interface ActionContext {
   service: ContextPanelService
-  scope: SettingsScope<ContextPanelSettings>
+  scope: PanelScope
   sessionId: string
   p: ActionPayload
   engine?: ContextAssemblerService
@@ -514,7 +514,7 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
   },
   clearOverrides: ({ scope, sessionId }) => {
     const value = scope.get()
-    const { [sessionId]: _removed, ...rest }: Record<string, Record<string, unknown>> = value.conversationOverrides
+    const { [sessionId]: _removed, ...rest }: ContextPanelSettings['conversationOverrides'] = value.conversationOverrides
     return scope.update({ conversationOverrides: rest })
   },
 }
@@ -582,10 +582,16 @@ export function applyOur(ctx: Context, bridge?: OurHostBridge): void {
   ctx.effect(() => {
     const wiring: Wiring = bridge === undefined ? {} : { bridge }
     const disposeCore = ctx.inject(['settings', 'sessionProjections'], (sctx) => {
-      const scope = sctx.settings.register(CONTEXT_PANEL_NS as never, CONTEXT_PANEL_SCHEMA as never, {
-        base: DEFAULT_SETTINGS,
-        applies: 'live',
-      }) as unknown as SettingsScope<ContextPanelSettings>
+      // Two harness generations: 0.1.x registers a live namespace scope; 0.2.x
+      // made the entry config the settings surface (host/config.ts nests our
+      // tree under `panel`) and serves it through describe/update instead.
+      const settings = sctx.settings as unknown as Partial<LegacySettingsFace & SettingsFormsFace>
+      const scope: PanelScope = typeof settings.register === 'function'
+        ? wrapLegacyScope(settings.register(CONTEXT_PANEL_NS, CONTEXT_PANEL_SCHEMA, { base: DEFAULT_SETTINGS, applies: 'live' }) as LegacySettingsScope)
+        : createProfileScope(settings as SettingsFormsFace)
+      // The raw entry-config form would duplicate our panel UI; keep the entry
+      // out of the auto-generated settings pages (a no-op on the register face).
+      settings.configure?.({ auto: false }, ctx.fiber)
       const engine = new ContextAssemblerEngine()
       // The engine resolves agents on demand (an agent created before this
       // plugin mounted still resolves), so it needs the host context.

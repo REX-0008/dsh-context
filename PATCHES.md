@@ -13,7 +13,7 @@ Rule: every entry here must be an **insert-only** change (added lines, no
 rewritten upstream logic). If an update ever requires rewriting upstream code,
 that is a signal to reconsider the approach rather than grow this file.
 
-Baseline: upstream `v0.53.4`.
+Baseline: upstream `v0.6.x` (merge commit `98073b6`, upstream/main `31ae13a`).
 
 ---
 
@@ -113,7 +113,56 @@ plus, in the category head: the `lc-br-cat-pruned` class on the row and a
 nesting a button in a button is invalid markup). Without these props the heads
 render exactly as before.
 
-## 7. `src/client/i18n.ts` — our added keys
+## 8. `src/client/components/browser.tsx` — delivered system row
+
+**Anchor**: `catBody`'s `system` branch, right before the built-in prompt row.
+
+```tsx
+const sysNode = view.system
+const deliveredText = sysNode !== null ? headerContent.get(sysNode.seq)?.system : undefined
+const deliveredLabel = props.systemDeliveredLabel ?? catLabel('system')
+const delivered = deliveredText !== undefined && sysNode !== null ? elemRow('sys-delivered', null, deliveredLabel, sysNode.tokens, undefined, <TextSection ... />) : null
+```
+
+Renders the actually-delivered system prompt of the live/pinned request above
+the caller-supplied rows; hidden when no delivered content exists. The
+`&& sysNode !== null` clause is required for TS narrowing (the ternary above
+does not link back to `sysNode`). Also: the render-time `openable` guard in the
+category list mirrors `toggleCat` exactly (`(c.key === 'system' &&
+props.systemRows !== undefined)` clause) — without it a toggled-open system
+category with caller rows only never renders its body.
+
+## 9. `src/host/config.ts` — entry-config carrier for the write layer
+
+**Import** (after the upstream imports):
+
+```ts
+// OUR INSERT POINT (PATCHES.md #9): the context-management write layer's
+// settings tree rides the entry config on harness 0.2+ (see src/our/panel/scope.ts).
+import { CONTEXT_PANEL_ENTRY_SCHEMA } from '../our/panel/settings'
+import type { ContextPanelSettings } from '../our/types'
+```
+
+**Interface** (`Config` gains one optional field):
+
+```ts
+  /** The context-management write layer's settings tree (OUR INSERT — see PATCHES.md #9). ... */
+  panel?: ContextPanelSettings
+```
+
+**Schema** (after `insightsEntry`):
+
+```ts
+  panel: volatileField(CONTEXT_PANEL_ENTRY_SCHEMA),
+```
+
+The `volatileField` wrapper makes the subtree live-editable on harness 0.2+
+settings (profile patch, no remount) and a plain inert field on older lines.
+The interface types the field as `ContextPanelSettings` although the runtime
+value is the Volatile live reference — folds never read it; the typed face
+only satisfies the schema's inferred param in `Config(config ?? {})`.
+
+## 10. `src/client/i18n.ts` — our added keys
 
 **Anchor**: the end of `DICT_ZH` and `DICT_EN`.
 

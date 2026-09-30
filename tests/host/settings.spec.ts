@@ -1,59 +1,31 @@
 // Integration tests for the plugin settings namespace (src/host/settings.ts)
-// against the REAL cordis context and the REAL dsh-settings provider base —
-// the dsh-canonical harness pattern: an in-memory SettingsProvider subclass,
-// mounted as a plugin, with installSettings layering the namespace on top.
+// against the real cordis context. The register face is generation-specific —
+// dsh V4+ removed `settings.register` and no longer exports the provider base
+// class at all — so both service faces are stubbed here: a V3 service carrying
+// `register` and a V4+ service carrying only `describe`.
 
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { SettingsProvider } from '@deepseek-ai/dsh-settings'
-import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
-import { installSettings, SETTINGS_NAMESPACE } from '../../src/host/settings'
-import type { PluginSettings } from '../../src/host/settings'
+import { installSettings, SETTINGS_NAMESPACE, SettingsSchema } from '../../src/host/settings'
 
-/** A provider implementing only the two storage primitives; the Service Definition owns the rest. */
-class MemorySettings extends SettingsProvider {
-  doc: Record<string, unknown>
+/** A V3-shaped service: the register face stores the namespace and its schema. */
+class MemorySettings {
+  readonly registered = new Map<string, unknown>()
 
-  constructor(ctx: ConstructorParameters<typeof SettingsProvider>[0], options?: { doc?: Record<string, unknown> }) {
-    super(ctx)
-    this.doc = structuredClone(options?.doc ?? {})
-  }
-
-  get writable(): boolean {
-    return true
-  }
-
-  protected load(): Promise<Record<string, unknown>> {
-    return Promise.resolve(structuredClone(this.doc))
-  }
-
-  protected persist(ns: SettingsNamespace, section: Record<string, unknown>): Promise<void> {
-    this.doc[String(ns)] = structuredClone(section)
-    return Promise.resolve()
+  register(ns: string, schema: unknown): unknown {
+    this.registered.set(ns, schema)
+    return undefined
   }
 }
 
-// The raw string is what the dsh settings `register` accepts at runtime; the
-// branded cast satisfies the SettingsNamespace type face (see
-// src/host/settings.ts).
-const ns = SETTINGS_NAMESPACE as SettingsNamespace
-
 /** Poll until the inject callback inside installSettings has registered the namespace. */
-async function untilRegistered(ctx: Context): Promise<void> {
+async function untilRegistered(provider: MemorySettings): Promise<void> {
   for (let i = 0; i < 200; i++) {
-    if (ctx.settings.get(ns) !== undefined) return
+    if (provider.registered.has(SETTINGS_NAMESPACE)) return
     await new Promise(resolve => setTimeout(resolve, 1))
   }
   assert.fail('the dsh-context settings namespace was never registered')
-}
-
-async function boot(doc?: Record<string, unknown>) {
-  const ctx = new Context()
-  await ctx.plugin(MemorySettings, doc === undefined ? undefined : { doc })
-  installSettings(ctx)
-  await untilRegistered(ctx)
-  return { ctx, provider: ctx.get('settings') as MemorySettings }
 }
 
 describe('installSettings', () => {
@@ -61,11 +33,17 @@ describe('installSettings', () => {
     assert.equal(SETTINGS_NAMESPACE, 'dsh-context')
   })
 
-  test('registers the dsh-context namespace with schema defaults', async () => {
-    const { ctx } = await boot()
-    const descriptors = ctx.settings.describe()
-    assert.ok(descriptors.some(d => String(d.ns) === 'dsh-context'), 'the namespace is registered')
-    assert.deepEqual(ctx.settings.get(ns), {
+  test('registers the dsh-context namespace with the section schema', async () => {
+    const provider = new MemorySettings()
+    const ctx = new Context()
+    ctx.provide('settings', provider)
+    installSettings(ctx)
+    await untilRegistered(provider)
+    assert.equal(provider.registered.get(SETTINGS_NAMESPACE), SettingsSchema, 'the section schema is registered')
+  })
+
+  test('the schema resolves defaults and degrades stale values', () => {
+    assert.deepEqual(SettingsSchema({}), {
       defaultPlacement: 'all',
       defaultGranularity: 'step',
       defaultTrendMode: 'total',
@@ -74,66 +52,11 @@ describe('installSettings', () => {
       defaultFileSort: 'count',
       insightsEntry: 'show',
     }, 'schema defaults resolve')
-  })
-
-  test('updates flow through the real scope; invalid values reject', async () => {
-    const { ctx, provider } = await boot()
-    await ctx.settings.update(ns, { defaultGranularity: 'turn' })
-    assert.deepEqual(ctx.settings.get(ns), {
-      defaultPlacement: 'all',
-      defaultGranularity: 'turn',
-      defaultTrendMode: 'total',
-      defaultDeltaBase: 'step',
-      defaultToolSort: 'count',
-      defaultFileSort: 'count',
-      insightsEntry: 'show',
-    }, 'the update resolves over the schema defaults')
-    assert.deepEqual(provider.doc['dsh-context'], { defaultGranularity: 'turn' }, 'the provider persisted the section')
-
-    await ctx.settings.update(ns, { defaultPlacement: 'sidebar', defaultTrendMode: 'delta', defaultDeltaBase: 'turn', defaultFileSort: 'path', insightsEntry: 'hide' })
-    assert.deepEqual(ctx.settings.get(ns), {
-      defaultPlacement: 'sidebar',
-      defaultGranularity: 'turn',
-      defaultTrendMode: 'delta',
-      defaultDeltaBase: 'turn',
-      defaultToolSort: 'count',
-      defaultFileSort: 'path',
-      insightsEntry: 'hide',
-    }, 'every preference field resolves independently')
-
-    await assert.rejects(
-      ctx.settings.update(ns, { defaultGranularity: 'week' }),
-      'an unknown granularity fails validation before anything persists',
-    )
-    // The loose fields degrade instead of rejecting: a stale file sort,
-    // placement, tool sort, delta baseline, or insights entry resolves to the default.
-    await ctx.settings.update(ns, { defaultFileSort: 'net', defaultPlacement: 'window', defaultToolSort: 'net', defaultDeltaBase: 'net', insightsEntry: 'gone' })
-    assert.deepEqual(ctx.settings.get(ns), {
-      defaultPlacement: 'all',
-      defaultGranularity: 'turn',
-      defaultTrendMode: 'delta',
-      defaultDeltaBase: 'step',
-      defaultToolSort: 'count',
-      defaultFileSort: 'count',
-      insightsEntry: 'show',
-    }, 'a stale value degrades to the schema default')
-    assert.deepEqual(
-      provider.doc['dsh-context'],
-      { defaultPlacement: 'window', defaultGranularity: 'turn', defaultTrendMode: 'delta', defaultToolSort: 'net', defaultDeltaBase: 'net', defaultFileSort: 'net', insightsEntry: 'gone' },
-      'the stale value stays raw in storage and degrades at read',
-    )
-  })
-
-  test('a stale persisted preference degrades to the default (loose)', async () => {
-    const { ctx } = await boot({ 'dsh-context': { defaultPlacement: 'window', defaultTrendMode: 'net', defaultToolSort: 'alpha', defaultDeltaBase: 'net', defaultFileSort: 'alpha', insightsEntry: 'gone' } })
-    const value = ctx.settings.get(ns) as PluginSettings
-    assert.equal(value.defaultPlacement, 'all', 'the stale placement falls back instead of breaking the section')
-    assert.equal(value.defaultTrendMode, 'total', 'the stale value falls back instead of breaking the section')
-    assert.equal(value.defaultDeltaBase, 'step', 'the stale delta baseline falls back instead of breaking the section')
-    assert.equal(value.defaultToolSort, 'count', 'the stale tool sort falls back instead of breaking the section')
-    assert.equal(value.defaultFileSort, 'count', 'the stale file sort falls back instead of breaking the section')
-    assert.equal(value.insightsEntry, 'show', 'the stale insights entry falls back to visible instead of breaking the section')
-    assert.equal(value.defaultGranularity, 'step')
+    // The stale values are only legal at runtime (the type face is strict);
+    // the loose fields accept them and resolve back to the defaults.
+    const resolved = SettingsSchema({ defaultFileSort: 'net', insightsEntry: 'gone' } as never)
+    assert.equal(resolved.defaultFileSort, 'count', 'a stale file sort degrades to the default')
+    assert.equal(resolved.insightsEntry, 'show', 'a stale insights entry degrades to visible')
   })
 
   test('without a settings provider the install is inert', () => {
