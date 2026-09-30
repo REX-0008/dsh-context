@@ -94,9 +94,18 @@ export function makeDetailFetcher(
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ sessionId }),
     })
-    if (!response.ok) throw new Error(`dsh-context: detail route HTTP ${response.status}`)
+    if (!response.ok) {
+      // TEMP DIAGNOSTIC (detail 404 on desktop): surface who answered — the
+      // connection dispatcher replies 'not found', the SPA fallback replies HTML.
+      const probe = await Promise.resolve().then(() => response.text()).catch(() => '')
+      console.error('[dsh-context] detail HTTP ' + String(response.status) + ' body: ' + probe.slice(0, 300))
+      throw new Error(`dsh-context: detail route HTTP ${String(response.status)}`)
+    }
     const r = asRecord(await response.json())
-    if (r === null || r.ok !== true) throw new Error('dsh-context: detail read failed')
+    if (r === null || r.ok !== true) {
+      console.error('[dsh-context] detail envelope: ' + JSON.stringify(r).slice(0, 400))
+      throw new Error('dsh-context: detail read failed')
+    }
     if (r.value === null) return null
     const detail = detailOf(r.value)
     if (detail === null) throw new Error('dsh-context: detail read malformed')
