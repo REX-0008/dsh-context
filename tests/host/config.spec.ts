@@ -55,6 +55,21 @@ describe('Config validator (cordis Standard Schema face)', () => {
     assert.deepEqual(resolveBounds({}), DEFAULT_BOUNDS)
   })
 
+  // cordis resolves the raw entry config BEFORE apply, so apply's config
+  // argument carries every volatile field as its live reference. Resolving the
+  // bounds through the full schema a second time re-entered those resolvers,
+  // and the object-valued `panel` tree was refused by createVolatile
+  // ("volatile config cannot contain functions") — failing the whole entry and
+  // taking its projection units and detail route down with it.
+  test('the already-resolved config (volatile references in place) resolves bounds', () => {
+    const resolved = Config(undefined)
+    assert.deepEqual(resolveBounds(resolved as unknown as Config), DEFAULT_BOUNDS)
+    assert.deepEqual(
+      resolveBounds({ ...resolved, maxNodes: 7 } as unknown as Config).maxNodes,
+      7,
+    )
+  })
+
   test('each field overrides independently', () => {
     assert.equal(resolveBounds({ maxRequestSteps: 7 }).maxRequestSteps, 7)
     assert.equal(resolveBounds({ maxKeptTurns: 7 }).maxKeptTurns, 7)

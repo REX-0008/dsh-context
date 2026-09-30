@@ -98,6 +98,28 @@ function count(defaultValue: number) {
   return z.number().min(1).step(1).default(defaultValue)
 }
 
+/**
+ * The fold's retention/slice bounds as their OWN schema.
+ *
+ * `resolveBounds` resolves through this instead of the full entry `Config`:
+ * cordis has already resolved the raw entry config before `apply` runs, so the
+ * value it passes back carries each volatile field as its live reference. A
+ * second pass through the full schema would re-enter those fields' resolvers —
+ * and a resolve that yields an object (this plugin's `panel` tree) is refused
+ * by `createVolatile` ("volatile config cannot contain functions"), failing the
+ * whole entry. Resolving only the scalar bounds keeps both callers correct: the
+ * raw partial patch a test hands in, and the already-resolved config cordis
+ * passes to `apply`.
+ */
+const BoundsSchema = z.object({
+  maxRequestSteps: count(DEFAULT_BOUNDS.maxRequestSteps),
+  maxKeptTurns: count(DEFAULT_BOUNDS.maxKeptTurns),
+  maxEvents: count(DEFAULT_BOUNDS.maxEvents),
+  maxNodes: count(DEFAULT_BOUNDS.maxNodes),
+  maxArchiveNodes: count(DEFAULT_BOUNDS.maxArchiveNodes),
+  maxFileOps: count(DEFAULT_BOUNDS.maxFileOps),
+})
+
 /** The cordis `Config` validator and the Config-form generation's served schema. */
 export const Config = z.object({
   maxRequestSteps: count(DEFAULT_BOUNDS.maxRequestSteps),
@@ -120,12 +142,17 @@ export const Config = z.object({
   panel: volatileField(CONTEXT_PANEL_ENTRY_SCHEMA),
 })
 
-/** Resolve the fold's retention bounds (the schema fills every default). */
+/**
+ * Resolve the fold's retention bounds (the schema fills every default).
+ *
+ * Accepts either the raw partial patch or the config cordis already resolved
+ * (see `BoundsSchema`): only the scalar bounds are read, so the volatile
+ * preference subtrees are never re-resolved.
+ */
 export function resolveBounds(config: Config | undefined): FoldBounds {
-  // The schema resolves defaults for every omitted field, so the bounds are
-  // all present; the volatile preference references are not fold data and
-  // stay out of the returned object.
-  const resolved = Config(config ?? {}) as FoldBounds & Record<string, unknown>
+  // Extra keys (the volatile preference references) merge through unread; the
+  // returned object carries only fold data.
+  const resolved = BoundsSchema(config ?? {}) as FoldBounds & Record<string, unknown>
   return {
     maxRequestSteps: resolved.maxRequestSteps,
     maxKeptTurns: resolved.maxKeptTurns,

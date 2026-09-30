@@ -159,8 +159,21 @@ import type { ContextPanelSettings } from '../our/types'
 The `volatileField` wrapper makes the subtree live-editable on harness 0.2+
 settings (profile patch, no remount) and a plain inert field on older lines.
 The interface types the field as `ContextPanelSettings` although the runtime
-value is the Volatile live reference — folds never read it; the typed face
-only satisfies the schema's inferred param in `Config(config ?? {})`.
+value is the Volatile live reference — folds never read it.
+
+**The re-resolve hazard (fixed with the field).** cordis resolves the raw entry
+config through this schema BEFORE `apply`, so the config `apply` receives
+carries `panel` as an already-built Volatile reference. `resolveBounds` used to
+run the whole `Config` a second time; that re-entered the volatile resolver, and
+`createVolatile` refuses a resolve whose value contains functions — the live
+reference's `get`. The entry then failed at its first statement, and cordis
+rolled back every effect the fiber had registered: the timeline/headers/activity
+units and the detail route disappeared while the browser half still served its
+UI, so the Context panel's detail read hit the connection dispatcher's bare
+`not found`. Upstream's volatile fields escaped this only because they are
+scalar and `.loose()` — a second resolve degrades them to their default. The
+bounds now resolve through a bounds-only schema (`BoundsSchema`), which never
+touches the volatile subtrees.
 
 ## 10. `src/client/i18n.ts` — our added keys
 
