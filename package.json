@@ -119,6 +119,7 @@
     "@types/js-yaml": "^4.0.9",
     "@deepseek-ai/dsh-util-workspace-path": "0.2.0-rc.1",
     "@deepseek-ai/schemastery": "^3.18.4",
+    "@opencode-ai/models": "^0.0.87",
     "@shikijs/langs": "^4.3.1",
     "@stylistic/eslint-plugin": "^5.10.0",
     "@tailwindcss/node": "4.3.3",

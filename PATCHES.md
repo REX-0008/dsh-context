@@ -15,6 +15,27 @@ that is a signal to reconsider the approach rather than grow this file.
 
 Baseline: upstream `v0.6.x` (merge commit `98073b6`, upstream/main `31ae13a`).
 
+## 0. Pricing: upstream's models.dev registry, not a local table
+
+An earlier local change replaced upstream's price source with a hand-maintained
+17-row table (`src/client/priceTable.ts` + `src/client/seenModels.ts`, with
+`cost.ts`/`modelPrices.ts`/`providers.ts` rewritten around it). That was
+reverted: upstream prices from the [models.dev](https://models.dev) registry
+through `@opencode-ai/models`, which carries **215 providers and 7,914 priced
+models** keyed by (provider, model) with an `npm`-package fallback index for
+unknown provider ids. The table covered 17 keys by fuzzy containment, so the
+same model could match a neighbouring tier's rates (measured: `deepseek-v4-flash`
+priced at 0.7/1.4 against the registry's actual 0.15/0.6) and newer models
+(`deepseek-v4-pro`, `gpt-5.4`, `claude-sonnet-5`, `glm-5.3`, `kimi-k3`…) had no
+row at all. A wrong cost figure is worse than none.
+
+So these files are **unmodified upstream** and must stay that way:
+`src/client/cost.ts`, `src/client/modelPrices.ts`, `src/shared/providers.ts`,
+`src/client/modelPrices.ts`'s dependency `@opencode-ai/models`, and the pricing
+sections of `statsContext.tsx` / `settingsCard.tsx` / `i18n.ts`. The former
+`settings.billing*` i18n keys and the settings card's `BillingBlock` went with
+the table.
+
 ---
 
 ## 1. `src/host/index.ts` — import

@@ -370,8 +370,8 @@ export function createContextTimelineDefinition(config: Config, slim: () => bool
     //
     // 17: the session-cost totals (`cost`) rekeyed from the DeepSeek
     // family × peak/off-period buckets to per-(provider, model) totals,
-    // priced client-side from a price source by model id (now this plugin's
-    // own table, client/priceTable.ts). The old shape cannot be
+    // priced client-side from the models.dev registry (client/modelPrices.ts)
+    // instead of the hardcoded rate table. The old shape cannot be
     // reinterpreted, so cached rows refold from the log, which rebuilds the
     // new keys.
     //

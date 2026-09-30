@@ -8,13 +8,14 @@
 import { act, createElement as h, type ReactElement } from 'react'
 import assert from 'node:assert/strict'
 import { createRoot } from 'react-dom/client'
-import { afterEach, describe, test, vi } from 'vitest'
+import { afterEach, beforeEach, describe, test, vi } from 'vitest'
 import { makeContextView } from '../../../src/client/components/contextView'
 import { watchHistoryFaces } from '../../../src/client/historyPage'
 import { requestContextFocus, takeContextFocus } from '../../../src/client/viewFocus'
 import { resetTimelineDetailStores } from '../../../src/client/timelineSource'
 import { createContextSettings } from '../../../src/client/settings'
 import type { SettingsScopeLike } from '../../../src/client/settings'
+import { resetModelPrices, setModelPricesLoader } from '../../../src/client/modelPrices'
 import type { UseChatLike } from '../../../src/client/services'
 import type { ContextTimeline } from '../../../src/shared/types'
 import { DICT_EN } from '../../../src/client/i18n'
@@ -1074,12 +1075,21 @@ describe('ContextView — scroll ledger', () => {
 })
 
 describe('ContextView — locale and settings', () => {
-  // The cost cell prices from THIS PLUGIN's own table (client/priceTable.ts), so
-  // the fixture names a model the table carries: 1M uncached input at the
-  // 4.1-flash miss rate ($0.7) plus 0.5M output at its out rate ($1.4) is $1.4,
-  // doubled because the bucket is a peak one.
+  // A real-shaped models.dev slice: the cost cell prices against the injected
+  // book (1M uncached input at the $0.15 miss rate → $0.15 / ¥1).
   const costed = timeline({
-    cost: { 'deepseek-official': { 'deepseek-v4.1-flash': { peak: { uncached: 1000000, output: 500000, cacheRead: 0, cacheWrite: 0 } } } },
+    cost: { 'deepseek-official': { 'deepseek-v4-flash': { peak: { uncached: 1000000, output: 500000, cacheRead: 0, cacheWrite: 0 } } } },
+  })
+
+  beforeEach(() => {
+    resetModelPrices()
+    setModelPricesLoader(() => Promise.resolve({
+      deepseek: { models: { 'deepseek-v4-flash': { cost: { input: 0.15, output: 0.6, cache_read: 0.003 } } } },
+    }))
+  })
+
+  afterEach(() => {
+    resetModelPrices()
   })
 
   test('cost prices in USD by default (no locale service), CNY under zh', async () => {

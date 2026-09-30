@@ -556,8 +556,8 @@ export interface CostModelUsage {
  * The session-cost estimate's raw material: cumulative provider-reported
  * billed-token totals, keyed by the request envelope's DSH provider id (''
  * when a log carries none) and then by its model id — the exact (provider,
- * model) keys the Client's price table resolves (client/priceTable.ts,
- * fuzzily by model id). Running totals per key; absent until a
+ * model) faces the Client's model-price book resolves (the models.dev
+ * registry, client/modelPrices.ts). Running totals per key; absent until a
  * request with a known model reports usage.
  */
 export interface SessionCostUsage {

@@ -697,10 +697,10 @@ export function isPeakUtc(time: number): boolean {
  * buckets arrive sanitized ({@link BilledUsage}), so the totals stay at the
  * schemas' non-negative safe integers no matter what the provider reported.
  * The key is the request envelope's (provider, model) face — the exact
- * lookup the Client's price table resolves (client/priceTable.ts, fuzzily
- * by model id alone). A request without a provider still accumulates (under
- * the '' key) and the Client prices it whenever the table carries the model;
- * without a model there is nothing to price. DeepSeek's period-based list splits the buckets
+ * lookup the Client's model-price book resolves (models.dev). A request
+ * without a provider still accumulates (under the '' key) and the Client
+ * prices it when the model id is unambiguous; without a model there is
+ * nothing to price. DeepSeek's period-based list splits the buckets
  * (peak windows at list price, all other hours half price); every other
  * provider books everything under the list-price period.
  */

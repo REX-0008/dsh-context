@@ -470,7 +470,7 @@ export function tokenPartsOf(rows: readonly OverviewRow[]): { parts: TokenPartTo
   return { parts: [...sums.values()], total }
 }
 
-/** The KPI band's figures, priced from this plugin's price table (null cost until a priced model reports usage). */
+/** The KPI band's figures, priced from the models.dev book (null cost until the book lands). */
 export interface OverviewKpis {
   /** Sessions in the current range filter. */
   sessions: number

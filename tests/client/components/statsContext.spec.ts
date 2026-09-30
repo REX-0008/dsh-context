@@ -3,18 +3,18 @@
 // human-input tally, the chat-line cache-hit cell with its whole-session
 // share tip, the family-scope priced cost cell (current agent + subagents)
 // with its per-model rate tooltip, and the subagents' own share — in both
-// locales. The model-price book is a constant built from the plugin's own
-// table (client/priceTable.ts) — every rate comes from that table. The
-// context-event tallies live
+// locales, against an injected model-price
+// book (the store never reaches the network). The context-event tallies live
 // on the events card's kind filters (contextView.spec.ts); `countsOfRecords`
 // still derives every count the split generation's wire head carries, pinned
 // here.
 
 import { act, createElement as h } from 'react'
 import assert from 'node:assert/strict'
-import { afterEach, describe, test, vi } from 'vitest'
+import { afterEach, describe, test, vi, beforeEach } from 'vitest'
 import { countsOfRecords, makeStatsContext, makeSubagentCost } from '../../../src/client/components/statsContext'
 import { makeAgentHeads } from '../../../src/client/agentHeads'
+import { resetModelPrices, setModelPricesLoader } from '../../../src/client/modelPrices'
 import type { ContextEventRecord, ContextTimeline, RequestRecord, SessionCostUsage, TokenUsage } from '../../../src/shared/types'
 import { TestClientCtx, asClientCtx } from '../helpers/harness'
 import { flush, makeKit, mount, queryAll, text } from '../helpers/kit'
@@ -24,6 +24,12 @@ const kitZh = makeKit('zh')
 const NO_SUB = (): SessionCostUsage | null => null
 const StatsContext = makeStatsContext(kit, NO_SUB)
 const StatsContextZh = makeStatsContext(kitZh, NO_SUB)
+
+/** A minimal real-shaped slice of the models.dev /api.json payload. */
+const PROVIDERS = {
+  deepseek: { models: { 'deepseek-v4-flash': { cost: { input: 0.15, output: 0.6, cache_read: 0.003 } } } },
+  zhipuai: { models: { 'glm-5.3-flash': { cost: { input: 0.075, output: 0.25, cache_read: 0.015, cache_write: 0 } } } },
+}
 
 const COST: SessionCostUsage = {
   'deepseek-official': { 'deepseek-v4-flash': { peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } },
@@ -49,6 +55,15 @@ function cells(container: HTMLElement): { labels: string[]; values: string[] } {
     values: grid.map(el => el.querySelector('.lc-stat-value')?.textContent ?? ''),
   }
 }
+
+beforeEach(() => {
+  resetModelPrices()
+  setModelPricesLoader(() => Promise.resolve(PROVIDERS))
+})
+
+afterEach(() => {
+  resetModelPrices()
+})
 
 describe('countsOfRecords (the inline generation derivation)', () => {
   test('tallies distinct turns, records, and the three priced event kinds', () => {
@@ -81,9 +96,8 @@ describe('StatsContext', () => {
     const { labels, values } = cells(m.container)
     assert.equal(labels.length, 7)
     assert.deepEqual(labels, ['Turns', 'Steps', 'Human Inputs?', 'Tool Calls', 'Cache Hit?', 'Cost?', 'Subagent Cost?'])
-    // 1M uncached input at the doubled peak miss rate (2 × $0.7, the table's
-    // `4-flash` row); no subagent usage → the sub cell dashes.
-    assert.deepEqual(values, ['3', '4', '7', '3', '66.66%', '$1.40', '—'])
+    // 1M uncached input at the doubled peak miss rate (2 × $0.15); no subagent usage → the sub cell dashes.
+    assert.deepEqual(values, ['3', '4', '7', '3', '66.66%', '$0.30', '—'])
     await m.unmount()
   })
 
@@ -124,14 +138,12 @@ describe('StatsContext', () => {
     const costTip = tips[2]
     assert.ok(costTip.includes('this agent and all its subagents'), 'the cost tip names the family scope')
     assert.ok(costTip.includes('Per-1M-token rates:'))
-
-    assert.ok(costTip.includes('the 4-flash row of the price table'), 'the listing line names the matched table row')
-    // The table lists its own base rates (the footnotes carry the peak scheme).
-    assert.ok(costTip.includes('Cache input $0.07'))
-    assert.ok(costTip.includes('Uncached input $0.70'))
-    assert.ok(costTip.includes('Cache write $0.70'))
-    assert.ok(costTip.includes('Output $1.40'))
-
+    assert.ok(costTip.includes('Priced as listed on models.dev for deepseek · deepseek-v4-flash.'), 'the listing line names the resolved registry face')
+    // The table lists the book's own rates (the footnotes carry the peak scheme).
+    assert.ok(costTip.includes('Cache input $0.00'))
+    assert.ok(costTip.includes('Uncached input $0.15'))
+    assert.ok(costTip.includes('Cache write $0.15'))
+    assert.ok(costTip.includes('Output $0.60'))
     assert.ok(costTip.includes('peak windows'), 'a DeepSeek session explains the peak/off-peak scheme')
     assert.ok(!costTip.includes('|'), 'no peak|off pairs — the footnotes carry the scheme')
     assert.ok(tips[3].includes('every subagent session'), 'the sub cell explains its own scope')
@@ -147,13 +159,48 @@ describe('StatsContext', () => {
     }))
     await flush()
     const costTip = text(queryAll(m.container, '.lc-stat-tip')[2])
-    assert.ok(costTip.includes('the glm-5 row of the price table'))
+    assert.ok(costTip.includes('Priced as listed on models.dev for zhipuai · glm-5.3-flash.'))
     assert.ok(!costTip.includes('DeepSeek'), 'the DeepSeek scheme note stays out of other providers’ bubbles')
-    assert.ok(costTip.includes('Uncached input $0.60'))
+    // glm-5.3-flash lists cache_write at 0 — the zero band drops from the table.
+    assert.ok(costTip.includes('Uncached input $0.07'))
+    assert.ok(!costTip.includes('Cache write'))
     await m.unmount()
   })
 
-  test('a multi-provider session names the matched table row on each listing line', async () => {
+  test('the cost cell links to the models.dev provider listing when one provider priced the scope', async () => {
+    const m = await mount(h(StatsContext, {
+      counts: { turns: 0, steps: 0, injects: 0, compactions: 0, prunes: 0 },
+      usage: null,
+      cost: COST,
+      locale: 'en',
+    }))
+    await flush()
+    const links = queryAll(m.container, 'a.lc-stat')
+    assert.equal(links.length, 1, 'the cost cell is the only link')
+    assert.equal(links[0].getAttribute('href'), 'https://models.dev/providers/deepseek/')
+    assert.equal(links[0].getAttribute('target'), '_blank')
+    assert.ok(links[0].textContent.includes('$0.30'), 'the link keeps the framed cell body')
+    assert.ok(queryAll(m.container, '.lc-stat').length > links.length, 'the sibling cells stay plain')
+    await m.unmount()
+  })
+
+  test('a multi-provider scope keeps the cost cell unlinked', async () => {
+    const two: SessionCostUsage = {
+      'deepseek-official': { 'deepseek-v4-flash': { peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } },
+      'zai-coding-cn': { 'glm-5.3-flash': { peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } },
+    }
+    const m = await mount(h(StatsContext, {
+      counts: { turns: 0, steps: 0, injects: 0, compactions: 0, prunes: 0 },
+      usage: null,
+      cost: two,
+      locale: 'en',
+    }))
+    await flush()
+    assert.equal(queryAll(m.container, 'a.lc-stat').length, 0, 'two providers name their faces in the tooltip instead')
+    await m.unmount()
+  })
+
+  test('a multi-provider session names the resolved registry face on each listing line', async () => {
     const two: SessionCostUsage = {
       'deepseek-official': { 'deepseek-v4-flash': { peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } },
       'zai-coding-cn': { 'glm-5.3-flash': { peak: { uncached: 2_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } },
@@ -166,13 +213,10 @@ describe('StatsContext', () => {
     }))
     await flush()
     const costTip = text(queryAll(m.container, '.lc-stat-tip')[2])
-
-    assert.ok(costTip.includes('the 4-flash row of the price table'))
-    assert.ok(costTip.includes('the glm-5 row of the price table'))
-    // 1M × $0.7 × 2 (the DeepSeek peak doubles the table's `4-flash` miss rate)
-    // + 2M × $0.6 (the `glm-5` miss rate) = $2.60.
-    assert.ok(cells(m.container).values.at(-2) === '$2.60')
-
+    assert.ok(costTip.includes('for deepseek · deepseek-v4-flash.'))
+    assert.ok(costTip.includes('for zhipuai · glm-5.3-flash.'))
+    // 1M × $0.15 × 2 (the DeepSeek peak) + 2M × $0.075 = $0.45.
+    assert.ok(cells(m.container).values.at(-2) === '$0.45')
     await m.unmount()
   })
 
@@ -187,26 +231,54 @@ describe('StatsContext', () => {
     assert.ok(text(m.container).includes('上下文统计'))
     const { labels, values } = cells(m.container)
     assert.deepEqual(labels, ['轮次', '步数', '用户输入?', '工具调用', '缓存命中?', '费用?', '子 Agent 费用?'])
-    // $1.40 / 0.15 = ¥9.33; the rates convert through the same fixed rate.
-    assert.deepEqual(values, ['1', '1', '0', '0', '66.66%', '¥9.33', '—'])
+    // $0.30 / 0.15 = ¥2; the rates convert through the same fixed rate.
+    assert.deepEqual(values, ['1', '1', '0', '0', '66.66%', '¥2.00', '—'])
     assert.ok(text(queryAll(m.container, '.lc-stat-tip')[1]).includes('整个会话累计'), 'the cache-hit tip localizes too')
     const costTip = text(queryAll(m.container, '.lc-stat-tip')[2])
-
     assert.ok(costTip.includes('含当前智能体及所有子智能体'), 'the cost tip names the family scope too')
-    assert.ok(costTip.includes('每百万 Token 价格：'))
-    assert.ok(costTip.includes('按价格表条目 4-flash 的估算费率如上。'))
+    assert.ok(costTip.includes('每百万 Token 价格'))
+    assert.ok(costTip.includes('按 deepseek · deepseek-v4-flash 在 models.dev 的刊登价格如上。'))
     assert.ok(costTip.includes('人民币按 1 元 = 0.15 美元换算。'), 'the CNY display carries the conversion footnote')
-    assert.ok(costTip.includes('缓存输入 ¥0.47'))
-    assert.ok(costTip.includes('未缓存输入 ¥4.67'))
-    assert.ok(costTip.includes('缓存写入 ¥4.67'))
-    assert.ok(costTip.includes('输出 ¥9.33'))
-
+    // The table lists the book rates converted at the fixed rate.
+    assert.ok(costTip.includes('缓存输入 ¥0.02'))
+    assert.ok(costTip.includes('未缓存输入 ¥1.00'))
+    assert.ok(costTip.includes('缓存写入 ¥1.00'))
+    assert.ok(costTip.includes('输出 ¥4.00'))
     assert.ok(text(queryAll(m.container, '.lc-stat-tip')[3]).includes('子 Agent 会话'), 'the sub tip localizes too')
     await m.unmount()
   })
 
-  test('a DeepSeek off bucket prices at the table rate and the footnotes carry the scheme', async () => {
+  test('usage with no book yet stays a dash until the fetch lands', async () => {
+    setModelPricesLoader(() => new Promise(() => {}))
+    const m = await mount(h(StatsContext, {
+      counts: { turns: 0, steps: 0, injects: 0, compactions: 0, prunes: 0 },
+      usage: USAGE,
+      cost: COST,
+      locale: 'en',
+    }))
+    await flush()
+    assert.ok(cells(m.container).values.at(-2) === '—')
+    assert.ok(!text(m.container).includes('unavailable'), 'a pending fetch is not a failure')
+    await m.unmount()
+  })
 
+  test('a failed price fetch dashes the cell and notes the outage in the tip', async () => {
+    setModelPricesLoader(() => Promise.reject(new Error('down')))
+    const m = await mount(h(StatsContext, {
+      counts: { turns: 0, steps: 0, injects: 0, compactions: 0, prunes: 0 },
+      usage: USAGE,
+      cost: COST,
+      locale: 'en',
+    }))
+    await flush()
+    assert.ok(cells(m.container).values.at(-2) === '—')
+    const costTip = text(queryAll(m.container, '.lc-stat-tip')[2])
+    assert.ok(costTip.includes('unavailable'))
+    assert.ok(!costTip.includes('Per-1M-token rates'))
+    await m.unmount()
+  })
+
+  test('a DeepSeek off bucket prices at book and the footnotes carry the peak scheme', async () => {
     const split: SessionCostUsage = {
       'deepseek-official': {
         'deepseek-v4-flash': {
@@ -222,18 +294,17 @@ describe('StatsContext', () => {
       locale: 'en',
     }))
     await flush()
-    // 1M at the doubled $1.4 peak miss rate + 2M at the $0.7 off-peak (table) rate.
-    assert.ok(cells(m.container).values.at(-2) === '$2.80')
+    // 1M at the doubled $0.3 peak miss rate + 2M at the $0.15 off-peak (book) rate.
+    assert.ok(cells(m.container).values.at(-2) === '$0.60')
     const costTip = text(queryAll(m.container, '.lc-stat-tip')[2])
-
-    assert.ok(costTip.includes('Uncached input $0.70'), 'the table lists its base rates once, whatever the billed buckets')
+    assert.ok(costTip.includes('Cache input $0.00'), 'the table lists the book rates once, whatever the billed buckets')
+    assert.ok(costTip.includes('Uncached input $0.15'))
     assert.ok(costTip.includes('peak windows'), 'the peak-window footnote explains the bucket split')
     assert.ok(!costTip.includes('|'))
-
     await m.unmount()
   })
 
-  test('a session whose models the table cannot price notes the outage too', async () => {
+  test('a session whose models the book cannot price notes the outage too', async () => {
     const m = await mount(h(StatsContext, {
       counts: { turns: 0, steps: 0, injects: 0, compactions: 0, prunes: 0 },
       usage: USAGE,
@@ -264,13 +335,13 @@ describe('StatsContext', () => {
     }))
     await flush()
     const costTip = text(queryAll(m.container, '.lc-stat-tip')[2])
-    assert.ok(costTip.includes('the glm-5 row of the price table'))
+    assert.ok(costTip.includes('glm-5.3-flash'))
     assert.ok(!costTip.includes('junk'))
     // No row may show the peak|off-peak pair — that is DeepSeek's alone.
     const rows = queryAll(m.container, '.lc-stat-tip-row').map(el => text(el))
     assert.ok(rows.every(r => !r.includes('|')))
-    // Both buckets bill at the table rate: 2M × $0.6 — no half-price off-peak.
-    assert.ok(cells(m.container).values.at(-2) === '$1.20')
+    // Both buckets bill at list price: 2M × $0.075 — no half-price off-peak.
+    assert.ok(cells(m.container).values.at(-2) === '$0.15')
     await m.unmount()
   })
 })
@@ -289,15 +360,14 @@ describe('StatsContext — the subagent-cost cell (injected seat)', () => {
       locale: 'en',
     }))
     await flush()
-    // Family total: 1M × $1.4 (the doubled `4-flash` peak) + 2M × $0.6 (the
-    // `glm-5` miss rate); the subagents' share: $1.20.
-    assert.deepEqual(cells(m.container).values.slice(-2), ['$2.60', '$1.20'])
+    // Family total: 1M × $0.30 (the doubled peak) + 2M × $0.075; the subagents' share: $0.15.
+    assert.deepEqual(cells(m.container).values.slice(-2), ['$0.45', '$0.15'])
     const tips = queryAll(m.container, '.lc-stat-tip').map(el => text(el))
     // The rate table covers BOTH sides' models in either tip.
-    assert.ok(tips[2].includes('the 4-flash row of the price table'))
-    assert.ok(tips[2].includes('the glm-5 row of the price table'))
+    assert.ok(tips[2].includes('for deepseek · deepseek-v4-flash.'))
+    assert.ok(tips[2].includes('for zhipuai · glm-5.3-flash.'))
     assert.ok(tips[3].includes('every subagent session'))
-    assert.ok(tips[3].includes('the glm-5 row of the price table'), 'the sub tip carries its own price table')
+    assert.ok(tips[3].includes('for zhipuai · glm-5.3-flash.'), 'the sub tip carries its own price table')
     await m.unmount()
   })
 
@@ -309,8 +379,7 @@ describe('StatsContext — the subagent-cost cell (injected seat)', () => {
       locale: 'en',
     }))
     await flush()
-    // The subagents' own glm-5.3-flash buckets: 2M × $0.6 = $1.20.
-    assert.deepEqual(cells(m.container).values.slice(-2), ['$1.20', '$1.20'])
+    assert.deepEqual(cells(m.container).values.slice(-2), ['$0.15', '$0.15'])
     await m.unmount()
   })
 
@@ -325,15 +394,15 @@ describe('StatsContext — the subagent-cost cell (injected seat)', () => {
       locale: 'en',
     }))
     await flush()
-    // The off bucket bills at the table rate: 1M × $0.7.
-    assert.deepEqual(cells(m.container).values.slice(-2), ['$0.70', '$0.70'])
+    // The off bucket bills at book: 1M × $0.15.
+    assert.deepEqual(cells(m.container).values.slice(-2), ['$0.15', '$0.15'])
     const tips = queryAll(m.container, '.lc-stat-tip').map(el => text(el))
     assert.ok(tips[2].includes('peak windows'))
     assert.ok(tips[3].includes('peak windows'), 'the sub tip explains the scheme its own figure rides')
     await m.unmount()
   })
 
-  test('a sub usage the table cannot price dashes the cell and notes the outage in its tip', async () => {
+  test('a sub usage the book cannot price dashes the cell and notes the outage in its tip', async () => {
     const Stats = makeStatsContext(kit, () => ({ future: { 'mystery-model': { peak: { uncached: 1, cacheRead: 0, cacheWrite: 0, output: 0 } } } }))
     const m = await mount(h(Stats, {
       counts: { turns: 0, steps: 0, injects: 0, compactions: 0, prunes: 0 },
@@ -342,10 +411,10 @@ describe('StatsContext — the subagent-cost cell (injected seat)', () => {
       locale: 'en',
     }))
     await flush()
-    // The family's own model still prices: $1.40 (the doubled peak). The
+    // The family's own model still prices: $0.30 (the doubled peak). The
     // unpriceable sub branch merges in (pricing zero) but cannot lift the
     // total — the sub cell dashes.
-    assert.deepEqual(cells(m.container).values.slice(-2), ['$1.40', '—'])
+    assert.deepEqual(cells(m.container).values.slice(-2), ['$0.30', '—'])
     const tips = queryAll(m.container, '.lc-stat-tip').map(el => text(el))
     assert.ok(tips[3].includes('unavailable'))
     await m.unmount()
@@ -434,9 +503,8 @@ describe('StatsContext — the real subagent-cost seat (makeSubagentCost)', () =
       sessionId: 'root',
     }))
     await flush()
-    // The warm row's usage prices while the cold read is still in flight:
-    // 2M × $0.6 (the glm-5.3-flash miss rate) = $1.20.
-    assert.deepEqual(cells(m.container).values.slice(-2), ['$1.20', '$1.20'])
+    // The warm row's usage prices while the cold read is still in flight.
+    assert.deepEqual(cells(m.container).values.slice(-2), ['$0.15', '$0.15'])
     assert.deepEqual(calls, ['cold'], 'only the timeline-less relative fetched')
     // A snapshot tick while the read is in flight re-attaches the SAME
     // pending read; when it lands, the duplicate settle bails on identity.
@@ -448,7 +516,7 @@ describe('StatsContext — the real subagent-cost seat (makeSubagentCost)', () =
       })
     })
     await flush()
-    // The cold read lands: its $1.20 merges into both cells.
+    // The cold read lands: its $0.15 merges into both cells.
     await act(async () => {
       release?.({
         ok: true,
@@ -468,7 +536,7 @@ describe('StatsContext — the real subagent-cost seat (makeSubagentCost)', () =
       })
     })
     await flush()
-    assert.deepEqual(cells(m.container).values.slice(-2), ['$2.40', '$2.40'])
+    assert.deepEqual(cells(m.container).values.slice(-2), ['$0.30', '$0.30'])
     await m.unmount()
   })
 

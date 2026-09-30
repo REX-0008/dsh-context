@@ -7,10 +7,15 @@ import { act, createElement as h } from 'react'
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, test, vi } from 'vitest'
 import { makeOverviewPanel } from '../../../src/client/components/overviewPanel'
+import { resetModelPrices, setModelPricesLoader } from '../../../src/client/modelPrices'
 import { overviewStore } from '../../../src/client/overviewStore'
 import { dayKeyOf } from '../../../src/shared/days'
 import { TestClientCtx, asClientCtx } from '../helpers/harness'
 import { click, flush, keydown, makeKit, mount, query, queryAll, text, until, type Mounted } from '../helpers/kit'
+
+const PROVIDERS = {
+  deepseek: { models: { 'deepseek-v4-flash': { cost: { input: 1, output: 2, cache_read: 0.1 } } } },
+}
 
 const NOW = Date.now()
 const TODAY = dayKeyOf(NOW) ?? ''
@@ -97,8 +102,8 @@ async function openPanel(
   await act(async () => {
     overviewStore.set(true)
   })
-  // A second act window keeps any deferred notify inside act, as it did when
-  // the price book still fetched.
+  // The price book's first fetch resolves a microtask or two behind the store
+  // flip; a second act window keeps its notify inside act.
   await flush()
   return { m, Panel }
 }
@@ -107,6 +112,8 @@ async function openPanel(
 const backfillPosts: string[] = []
 
 beforeEach(() => {
+  resetModelPrices()
+  setModelPricesLoader(() => Promise.resolve(PROVIDERS))
   backfillPosts.length = 0
   // The header's balance capsule POSTs its own route on open (client/balance.ts);
   // only the warm-up trigger is this spec's subject.
@@ -119,6 +126,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   overviewStore.set(false)
+  resetModelPrices()
   vi.unstubAllGlobals()
   await new Promise(resolve => setTimeout(resolve, 1))
 })
@@ -147,7 +155,7 @@ describe('OverviewPanel', () => {
     const values = queryAll(m.container, '.lc-stat-value').map(el => el.textContent)
     assert.equal(values[0], '2')
     assert.equal(values[1], '1.8k')
-    assert.ok(values[2].startsWith('$'), 'priced from the price table')
+    assert.ok(values[2].startsWith('$'), 'priced from the book')
     assert.equal(values[3], '33.33%')
     // Tools + active time: both timed sessions fold into the band (7 calls each).
     assert.equal(values[4], '14')
@@ -446,7 +454,7 @@ describe('OverviewPanel', () => {
     assert.ok(text(m.container).includes('Token 统计'), 'the aggregate stats row rides the zh dictionary too')
     assert.ok(text(m.container).includes('系统提示词'), 'the Context tab\'s composition categories render in zh')
     assert.ok(text(m.container).includes('打开插件设置'), 'the settings row rides the zh dictionary too')
-    await flush()
+    await flush() // the price book lands
     const values = queryAll(m.container, '.lc-stat-value').map(el => el.textContent)
     assert.ok(values[2].startsWith('¥'), 'CNY under the zh locale')
     await m.unmount()
@@ -474,8 +482,8 @@ describe('OverviewPanel', () => {
         phase: 'ready',
       }),
     })
-    await flush()
-    // The card's cost: buckets exist but the table prices no such model → the dash.
+    await flush() // the price book lands
+    // The card's cost: buckets exist but the book prices no such model → the dash.
     const values = queryAll(m.container, '.lc-ov-mini-value').map(el => el.textContent)
     assert.equal(values[2], '—')
     await m.unmount()
@@ -499,7 +507,7 @@ describe('OverviewPanel', () => {
       overviewStore.set(true)
     })
     await flush()
-    await flush()
+    await flush() // the price book lands
     const values = queryAll(m.container, '.lc-stat-value').map(el => el.textContent)
     assert.ok(values[2].startsWith('$'), 'USD when the locale face cannot report an active locale')
     await m.unmount()

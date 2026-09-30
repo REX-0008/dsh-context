@@ -32,7 +32,7 @@ import {
 } from '../../src/client/overview'
 import type { ClientCtx } from '../../src/client/services'
 import type { ContextActivity, ContextTimeline, SessionCostUsage } from '../../src/shared/types'
-import type { ModelBook } from '../../src/client/cost'
+import { priceIndexOf } from '../../src/client/cost'
 
 /** The minimal wire-valid timeline head, overridable per case. */
 function timelineOf(over: Record<string, unknown> = {}): Record<string, unknown> {
@@ -48,11 +48,8 @@ function timelineOf(over: Record<string, unknown> = {}): Record<string, unknown>
   }
 }
 
-// Billed as `deepseek-v4.1` — the table's `4.1` row (0.14 / 1.4 / 1.4 / 2.8).
-// The harness spelling `deepseek-v4` lands on the `4` row, whose rates
-// match `4.1`, so either spelling prices this fold the same.
 const COST: SessionCostUsage = {
-  deepseek: { 'deepseek-v4.1': { peak: { uncached: 100, cacheRead: 50, cacheWrite: 10, output: 40 } } },
+  deepseek: { 'deepseek-v4': { peak: { uncached: 100, cacheRead: 50, cacheWrite: 10, output: 40 } } },
 }
 
 /** A session-list snapshot over rows of `{ id, row }` pairs. */
@@ -255,7 +252,7 @@ describe('sortRows', () => {
     updatedAt: 2,
     timeline: {
       current: { total: 900 },
-      cost: { deepseek: { 'deepseek-v4.1': { peak: { uncached: 1000, cacheRead: 0, cacheWrite: 0, output: 0 } } } },
+      cost: { deepseek: { m: { peak: { uncached: 1000, cacheRead: 0, cacheWrite: 0, output: 0 } } } },
     } as unknown as ContextTimeline,
   })
   const plain = rowOf({ id: 'plain', updatedAt: 3 })
@@ -437,11 +434,7 @@ describe('tokenPartsOf', () => {
 })
 
 describe('kpisOf', () => {
-
-  // The signature still threads a book, but the price SOURCE is the plugin's
-  // own table (client/priceTable.ts) and the book is ignored.
-  const prices: ModelBook = { prices: { deepseek: { 'deepseek-v4.1': { hit: 0.14, miss: 1.4, write: 1.4, out: 2.8 } } } }
-
+  const prices = { prices: { deepseek: { 'deepseek-v4': { hit: 0.1, miss: 1, write: 1, out: 2 } } }, index: priceIndexOf({ deepseek: { 'deepseek-v4': { hit: 0.1, miss: 1, write: 1, out: 2 } } }, {}) }
 
   test('aggregates sessions, tokens, turns, cost, cache hit, tools, and time across the range', () => {
     const rows = [
@@ -466,9 +459,7 @@ describe('kpisOf', () => {
     assert.equal(kpi.listed, 5)
     assert.equal(kpi.tokens, 200)
     assert.equal(kpi.turns, 5)
-    // The DeepSeek peak bucket doubles the table's `4.1` row:
-    // 2 × (50×0.14 + 100×1.4 + 10×1.4 + 40×2.8) / 1M = 546 µUSD.
-    assert.ok(kpi.cost !== null && Math.abs(kpi.cost - 546e-6) < 1e-12, 'the DeepSeek peak bucket doubles the table rates')
+    assert.ok(kpi.cost !== null && Math.abs(kpi.cost - 390e-6) < 1e-12, 'the DeepSeek peak bucket doubles: 2 × (50×0.1 + 100×1 + 10×1 + 40×2) per 1M')
     assert.equal(kpi.cacheHit, '31.25', '50 reads of 160 billed input, truncated')
     assert.equal(kpi.costSessions, 1, 'only the priced session counts toward the cost cell')
     assert.equal(kpi.usageSessions, 1, 'only the billed session feeds the cache-hit rate')
@@ -483,15 +474,12 @@ describe('kpisOf', () => {
     assert.deepEqual(kpi.timing, { wallMs: 120_000, ttftMs: 1_000, genMs: 30_000, calls: 6, toolsMs: 20_000, toolCalls: 7, tools: {} })
   })
 
-  test('a session with usage the table cannot price leaves the priced session standing and still reaches the cache-hit rate', () => {
+  test('a session with usage the book cannot price feeds the cache-hit rate but prices to nothing', () => {
     const rows = [
       rowOf({ timeline: { cost: COST, current: { system: 100, tools: 50, user: 30, inject: 10, skill: 10, assistant: 200, tool: 100, total: 500 }, requests: [] } as unknown as ContextTimeline }),
       rowOf({
         timeline: {
-
-          // A model id the table carries no row for: usage, but no price.
-          cost: { openai: { 'no-such-model': { peak: { uncached: 10, cacheRead: 5, cacheWrite: 1, output: 2 } } } },
-
+          cost: { openai: { 'gpt-5': { peak: { uncached: 10, cacheRead: 5, cacheWrite: 1, output: 2 } } } },
           current: { system: 10, tools: 0, user: 0, inject: 0, skill: 0, assistant: 0, tool: 0, total: 10 },
           requests: [],
         } as unknown as ContextTimeline,
@@ -499,16 +487,11 @@ describe('kpisOf', () => {
       rowOf(),
     ]
     const kpi = kpisOf(rows, 3, prices, 'usd')
-    // Premise rewritten: the second fixture used to be `gpt-5`, which the
-    // table DOES carry — so the thing that now refuses a session is the
-    // table's own coverage (the fixture's `prices` book is ignored and
-    // refuses nothing). The premise stays testable: an unpriceable session
-    // still feeds the cache-hit rate while adding nothing to the cost.
-    assert.equal(kpi.costSessions, 1, 'only the session whose model the table carries counts toward the cost cell')
+    assert.equal(kpi.costSessions, 1, 'only the priced session counts toward the cost cell')
     assert.equal(kpi.usageSessions, 2, 'both billed sessions feed the cache-hit rate')
-
-    assert.ok(kpi.cost !== null && Math.abs(kpi.cost - 546e-6) < 1e-12, 'the unpriced session adds nothing to the estimate')
-
+    assert.ok(kpi.cost !== null && Math.abs(kpi.cost - 390e-6) < 1e-12, 'the unpriced session adds nothing to the estimate')
+    assert.equal(kpi.tokenParts?.total, 218, 'both sessions\' billed totals fold into the split')
+    assert.equal(kpi.timing, null)
   })
 
   test('an unbilled set zeroes and dashes', () => {
@@ -529,7 +512,7 @@ describe('kpisOf', () => {
 })
 
 describe('aggregateDays', () => {
-  const book: ModelBook = { prices: { deepseek: { 'deepseek-v4.1': { hit: 0.14, miss: 1.4, write: 1.4, out: 2.8 } } } }
+  const book = { prices: { deepseek: { 'deepseek-v4': { hit: 0.1, miss: 1, write: 1, out: 2 } } }, index: priceIndexOf({ deepseek: { 'deepseek-v4': { hit: 0.1, miss: 1, write: 1, out: 2 } } }, {}) }
   const FEE: SessionCostUsage = { deepseek: { 'deepseek-v4': { peak: { uncached: 100, cacheRead: 50, cacheWrite: 0, output: 40 } } } }
 
   test('merges every row’s ledger, skipping rows without one', () => {
@@ -565,11 +548,11 @@ describe('aggregateDays', () => {
       rowOf({ activity: { days: { '2026-09-14': { tokens: 9, requests: 1, cost: { openai: { 'gpt-5': { peak: { uncached: 10, cacheRead: 0, cacheWrite: 0, output: 1 } } } } } } } }),
     ]
     const days = aggregateDays(rows, book, 'usd')
-    // The DeepSeek peak buckets double the table's `4` row:
-    // (100·1.4 + 50·0.14 + 40·2.8)·2/1e6 plus the second session's (1·1.4 + 1·2.8)·2/1e6.
-    assert.ok(Math.abs((days['2026-09-16'].cost ?? 0) - 526.4e-6) < 1e-12)
+    // The DeepSeek peak buckets double the list price: (100·1 + 50·0.1 + 40·2)·2/1e6 plus the
+    // second session's (1·1 + 1·2)·2/1e6.
+    assert.ok(Math.abs((days['2026-09-16'].cost ?? 0) - 376e-6) < 1e-12)
     assert.equal(days['2026-09-15'].cost, null, 'a day without pricing records prices to nothing')
-    assert.ok(Math.abs((days['2026-09-14'].cost ?? 0) - 27e-6) < 1e-12, 'the table prices gpt-5 peak flat (no DeepSeek doubling): (10·1.5 + 1·12)/1e6')
+    assert.equal(days['2026-09-14'].cost, null, 'a model the book cannot price prices to nothing')
   })
 
   test('a day with no book prices to null', () => {

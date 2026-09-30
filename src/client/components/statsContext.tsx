@@ -12,13 +12,12 @@
  * decimal — and dashes until a provider reports usage. The cost cells price
  * the host-folded cumulative billed totals (complete session logs, never
  * trimmed; the subagents' usage folds out of the session-list snapshot,
- * `makeSubagentCost` below) from this plugin's hand-maintained price table
- * (client/priceTable.ts) in the locale's currency; their hover bubbles (a '?'
- * marker + styled DOM tip) explain each scope and list the per-1M-token rates
- * of the models the family actually billed, straight from the same table
- * (cost.ts), so printed rates can never drift from the math. Models the table
- * cannot price drop from the lists; a scope with usage but nothing priced
- * notes it.
+ * `makeSubagentCost` below) from the models.dev price book (modelPrices.ts)
+ * in the locale's currency; their hover bubbles (a '?' marker + styled DOM
+ * tip) explain each scope and list the per-1M-token rates of the models the
+ * family actually billed, straight from the same book (cost.ts), so printed
+ * rates can never drift from the math. A book that has not loaded (or
+ * failed) dashes the cells and notes the outage.
  *
  * The counts arrive precomputed: the split-generation wire head carries them
  * (shared/types.ts `TimelineCounts` — computed over the retained records),
@@ -39,7 +38,7 @@ import { asRecord, numOf, type ClientCtx } from '../services'
 import { isDeepSeekProvider } from '../../shared/providers'
 import type { ViewKit } from '../viewkit'
 
-/** One billed model's tooltip block: the usage key and the table row its price resolved to. */
+/** One billed model's tooltip block: the usage key and the registry face its price resolved to. */
 interface PriceRow { key: string; face: PriceFace }
 
 /** The four billed buckets of a price block, in display order, with their label keys. */
@@ -51,13 +50,13 @@ const BANDS: readonly (readonly [keyof PriceFace['rate'], string])[] = [
 ]
 
 /**
- * The billed models' price blocks — the usage keys priced against the table,
- * in fold order, each carrying the table row (key · rates) its price matched.
- * Hostile branches skip; unpriced models drop (their buckets simply do not
- * contribute).
+ * The billed models' price blocks — the usage keys priced against the book,
+ * in fold order, each carrying the registry face (models.dev provider id ·
+ * model id) its rates resolved from. Hostile branches skip; unpriced models
+ * drop (their buckets simply do not contribute).
  */
-function priceRowsOf(usage: SessionCostUsage | undefined, book: ModelBook): PriceRow[] {
-  if (usage === undefined) return []
+function priceRowsOf(usage: SessionCostUsage | undefined, book: ModelBook | null): PriceRow[] {
+  if (usage === undefined || book === null) return []
   const rows: PriceRow[] = []
   for (const provider of Object.keys(usage)) {
     const models = asRecord(usage[provider])
@@ -158,7 +157,7 @@ export function makeStatsContext(
     sessionId?: string
   }): ReactElement {
     const currency: CostCurrency = props.locale === 'zh' ? 'cny' : 'usd'
-    const { book } = useModelPrices()
+    const { book, failed } = useModelPrices()
     // Both cost cells price the same host-folded cumulative totals, at one
     // scope each: the family total (the current agent's own usage plus every
     // subagent session's) in the cost cell, the subagents' share alone in
@@ -175,15 +174,16 @@ export function makeStatsContext(
     // of it.
     const deepseek = usage !== undefined && Object.keys(usage).some(p => isDeepSeekProvider(p))
     const subDeepseek = subUsage !== null && Object.keys(subUsage).some(p => isDeepSeekProvider(p))
-    // Usage folded but nothing priced (the table carries none of this
-    // scope's models): say so instead of a bare dash.
+    // Usage folded but nothing priced (the book has not loaded, or carries
+    // none of this scope's models): say so instead of a bare dash.
     const unpriced = rows.length === 0 && usage !== undefined && Object.keys(usage).length > 0
-    const subUnpriced = subRows.length === 0 && subUsage !== null
-    // One scope's price table: the billed buckets' rates at the table's list
+      && (failed || book !== null)
+    const subUnpriced = subRows.length === 0 && subUsage !== null && (failed || book !== null)
+    // One scope's price table: the billed buckets' rates at the book's list
     // per model — a zero list price carries no information, so its band drops
     // (free/token-plan listings keep only their listing line) — each block
-    // closed by the listing line naming the table row (the key) the rates
-    // matched.
+    // closed by the listing line naming the registry face (provider id ·
+    // model id) the rates resolved from.
     const pricesBlock = (blocks: PriceRow[]): ReactNode =>
       blocks.length > 0 ? (
         <span key="prices" className="lc-stat-tip-prices">
@@ -197,7 +197,7 @@ export function makeStatsContext(
                   <b>{fmtRate(r.face.rate[bucket])}</b>
                 </span>
               ))}
-              <span className="lc-stat-tip-by">{t('stats.costPriceTable', { m: r.face.mid })}</span>
+              <span className="lc-stat-tip-by">{t('stats.costPriceBy', { p: r.face.pid, m: r.face.mid })}</span>
             </span>
           ))}
         </span>
@@ -231,8 +231,10 @@ export function makeStatsContext(
         numOf(props.usage.cacheReadTokens),
         numOf(props.usage.uncachedInputTokens) + numOf(props.usage.cacheReadTokens) + numOf(props.usage.cacheWriteTokens),
       )
-    const cell = (label: string, value: string | number, tip?: ReactNode): ReactElement => {
-      // The framed cell body (the tooltip frames and reveals off this same element).
+    const cell = (label: string, value: string | number, tip?: ReactNode, href?: string): ReactElement => {
+      // The framed cell body, as a div — or as an anchor opening the models.dev
+      // provider listing in a new tab when the caller hands a destination (the
+      // tooltip still frames and reveals off this same element).
       const body = (
         <>
           <span className="lc-stat-label">
@@ -244,8 +246,16 @@ export function makeStatsContext(
         </>
       )
       const className = 'lc-stat' + (tip === undefined ? '' : ' lc-stat-tipped group/tip')
-      return <div className={className}>{body}</div>
+      return href === undefined
+        ? <div className={className}>{body}</div>
+        : <a className={className} href={href} target="_blank" rel="noreferrer noopener">{body}</a>
     }
+    // The cost cell links to the listing when ONE models.dev provider priced
+    // the whole scope — the natural "check these rates" destination. A
+    // multi-provider scope names each face in the tooltip instead and stays
+    // unlinked.
+    const costPids = new Set(rows.map(r => r.face.pid).filter(p => p !== ''))
+    const costHref = costPids.size === 1 ? 'https://models.dev/providers/' + [...costPids][0] + '/' : undefined
     return (
       <div className="lc-card lc-col-stats flex-[3] min-w-[min(360px,100%)]">
         <div className="lc-card-title">
@@ -260,7 +270,7 @@ export function makeStatsContext(
           {cell(t('stats.humanInputs'), props.humanInputs ?? 0, t('stats.humanInputsTip'))}
           {cell(t('stats.toolCalls'), props.toolCalls ?? 0)}
           {cell(t('stats.cacheHit'), hit === null ? '—' : `${hit}%`, t('stats.cacheHitTip'))}
-          {cell(t('stats.cost'), cost === null ? '—' : formatCost(cost, currency), costTip)}
+          {cell(t('stats.cost'), cost === null ? '—' : formatCost(cost, currency), costTip, costHref)}
           {cell(t('stats.subCost'), subCost === null ? '—' : formatCost(subCost, currency), subTip)}
         </div>
       </div>
