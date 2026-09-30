@@ -626,12 +626,16 @@ export function makeTrendChart(kit: ViewKit): (props: TrendChartProps) => ReactE
     const measureRef = useRef(measureVisible)
     useLayoutEffect(() => { measureRef.current = measureVisible })
     // A pane resize (sidebar collapse/drag, window resize) changes the visible window without any render, so the
-    // observer re-measures. jsdom exposes no ResizeObserver — the commit/scroll measures cover those paths.
+    // observer re-measures. Environments without ResizeObserver (jsdom without the
+    // setup stub) fall back to the commit/scroll measures.
     useLayoutEffect(() => {
       const el = scrollRef.current
       /* v8 ignore next 1 -- the scroll div renders unconditionally and React
          attaches refs before layout effects run; el is never null here. */
       if (el === null) return
+      /* v8 ignore next 1 -- the setup stub gives every jsdom test a
+         ResizeObserver, so this guard is static in tests (it covers real
+         browsers without the API). */
       if (typeof ResizeObserver !== 'function') return
       const observer = new ResizeObserver(() => { measureRef.current(el) })
       observer.observe(el)

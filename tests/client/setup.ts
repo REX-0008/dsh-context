@@ -7,3 +7,14 @@
 if (typeof Element !== 'undefined' && Element.prototype.scrollIntoView === undefined) {
   Element.prototype.scrollIntoView = () => {}
 }
+
+// jsdom has no ResizeObserver; the primitives' fit-to-content effects (tooltip
+// bubbles, balance capsule) mount one. A no-op stand-in skips real layout.
+class ResizeObserverStub {
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+}
+if ((globalThis as { ResizeObserver?: unknown }).ResizeObserver === undefined) {
+  ;(globalThis as { ResizeObserver?: unknown }).ResizeObserver = ResizeObserverStub
+}
