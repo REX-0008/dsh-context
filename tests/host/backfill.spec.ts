@@ -59,10 +59,19 @@ function captureLogs(ctx: Context): LogLine[] {
   return lines
 }
 
-/** The migration-refusal error dsh raises for a legacy log it cannot migrate. */
-function unsupportedMigrationError(): Error {
-  const error = new Error('subagent/descriptor 0 uses unsupported descriptor version 2; source v0 artifact remains unchanged')
-  error.name = 'SessionFormatUnsupportedMigrationError'
+/**
+ * One format-refusal face of the persistence seam. The format edge throws
+ * `SessionFormatUnsupportedMigrationError`, but the seam translates it — with
+ * the "source vN artifact remains unchanged (raw log: …)" suffix — into
+ * `SessionFormatUnsupportedError` before the error escapes (issue #75): the
+ * pass must classify BOTH faces as the same refusal.
+ */
+function unsupportedFormatError(name: string): Error {
+  const error = new Error(
+    'subagent/descriptor 0 uses unsupported descriptor version 2'
+    + '; source v0 artifact remains unchanged (raw log: C:\\Users\\u\\.dsh\\sessions\\log.jsonl.zstd)',
+  )
+  error.name = name
   return error
 }
 
@@ -275,6 +284,47 @@ describe('watchActivityBackfill', () => {
     assert.deepEqual(state.coldSnapshots, [])
   })
 
+  test('the 0.1.7 face answers when the 3-arg spelling throws (the rc.2 cachedSnapshot signature)', async () => {
+    // dsh 0.1.7-rc.2 dropped the probe's offset parameter: a 3-arg call binds
+    // the branded offset onto `keys`, where `new Set(0)` throws as soon as a
+    // served record is reached. The probe must fall through to the newer
+    // 2-arg face instead of reading every served session as "not served".
+    const ctx = new Context()
+    const state = fakeState([{ header: { id: 'a', cwd: '/repo/a' } }])
+    const arities: number[] = []
+    const route: RouteBox = {}
+    ctx.provide('connection', connectionOf(route))
+    ctx.provide('sessionQuery', {
+      listSessions: async () => {
+        arities.push(0)
+        return state.listed
+      },
+    })
+    ctx.provide('sessionProjectionCache', {
+      cachedSnapshot: (header: { id: string }, offsetOrKeys: unknown, keys?: unknown) => {
+        arities.push(keys === undefined ? 2 : 3)
+        if (keys !== undefined) throw new TypeError('offset is not iterable')
+        return header.id === 'a'
+          ? { asOfSeq: 0, values: { contextActivity: { days: {} }, contextTimeline: { ok: true } } }
+          : undefined
+      },
+      coldSnapshot: () => {
+        state.coldSnapshots.push('x')
+        return {}
+      },
+    })
+    ctx.provide('sessionPersistence', { open: async () => ({}) })
+    ctx.provide('sessions', { get: () => undefined })
+    const dispose = watchActivityBackfill(ctx)
+    await trigger(route)
+    await until(() => (arities.length > 0 ? true : undefined), 'the corpus was queried')
+    await new Promise(resolve => setTimeout(resolve, 40))
+    dispose()
+    assert.deepEqual(state.coldReads, [], 'the newer face served the rows — no cold read')
+    assert.deepEqual(state.coldSnapshots, [])
+    assert.deepEqual([...new Set(arities)].sort(), [0, 2, 3], 'the 3-arg spelling was tried first, the 2-arg face answered')
+  })
+
   test('a rejection landing AFTER abort skips the warn (the unload owns the silence)', async () => {
     const ctx = new Context()
     let started = false
@@ -435,8 +485,11 @@ describe('watchActivityBackfill', () => {
       { header: { id: 'legacy-2', cwd: '/repo/legacy-2' } },
       { header: { id: 'good', cwd: '/repo/good' } },
     ])
-    state.failReads.set('legacy-1', unsupportedMigrationError())
-    state.failReads.set('legacy-2', unsupportedMigrationError())
+    // One refusal per face of the seam's translation: the translated name a
+    // real dsh delivers, and the untranslated format-edge name (either may
+    // arrive) — both classify alike, one summary for the pair.
+    state.failReads.set('legacy-1', unsupportedFormatError('SessionFormatUnsupportedError'))
+    state.failReads.set('legacy-2', unsupportedFormatError('SessionFormatUnsupportedMigrationError'))
     const route = arm(ctx, state)
     const lines = captureLogs(ctx)
     const dispose = watchActivityBackfill(ctx)

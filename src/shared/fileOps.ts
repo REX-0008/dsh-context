@@ -2,12 +2,12 @@
  * The file-operation parser — the ONE derivation of "what the agent did to
  * files" from a settled file-tool call. Shared by both halves: the host fold
  * books the op log from the durable tool lifecycle (tool/call +
- * tool/result + tool/code-dispatch), and the client's INLINE-generation
+ * tool/result + tool/ptc-dispatch), and the client's INLINE-generation
  * fallback re-derives ops from the conversation-window join when an older
  * host serves no `fileOps`.
  *
  * Tool coverage matches the harness's built-ins on every supported baseline
- * (0.1.2-rc.1): read / read_image / write / edit (tool-fs) and grep / glob
+ * (0.1.5-rc.1): read / read_image / write / edit (tool-fs) and grep / glob
  * (tool-fs-search), plus the Anthropic-style `str_replace_editor` (view
  * reads, every other command writes). Line deltas are estimates read off the
  * call ARGUMENTS (an edit's old/new strings, a write's content), never off
@@ -58,6 +58,26 @@ export function kindOfTool(tool: string | undefined): FileOpRecord['kind'] | nul
 export function kindOfCall(tool: string, args: Record<string, unknown> | null): FileOpRecord['kind'] | null {
   if (tool === 'str_replace_editor') return args !== null && args.command === 'view' ? 'read' : 'write'
   return kindOfTool(tool)
+}
+
+/**
+ * Whether a settled call's arguments can yield an op at all: the file tools
+ * plus `str_replace_editor`, whose purpose follows its `command`. The public
+ * face of the gate {@link opsOfCall} short-circuits on — callers that decide
+ * whether to parse or to KEEP a call's raw arguments ask here instead of
+ * restating the tool list.
+ */
+export function opBearingTool(tool: string): boolean {
+  return tool === 'str_replace_editor' || kindOfTool(tool) !== null
+}
+
+/**
+ * Whether a call's raw arguments must ride the fold state
+ * (TimelineState.callNames): every op-bearing tool, plus `run_code`, whose
+ * `description` labels the ops its nested dispatches book at flush time.
+ */
+export function rawArgsNeeded(tool: string): boolean {
+  return opBearingTool(tool) || tool === 'run_code'
 }
 
 /**
@@ -203,7 +223,10 @@ export function opsOfCall(input: {
   parent?: number
   program?: string
 }): FileOpRecord[] {
-  const args = parseCallArgs(input.argsRaw)
+  // A non-op-bearing tool never rows one — skip its arguments parse entirely
+  // (a call's arguments are its largest payload, and the fold may hand a large
+  // bash/pwsh call here).
+  const args = opBearingTool(input.tool) ? parseCallArgs(input.argsRaw) : null
   const kind = kindOfCall(input.tool, args)
   if (kind === null) return []
   const stamp: FileOpRecord = {

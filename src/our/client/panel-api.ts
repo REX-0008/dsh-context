@@ -119,7 +119,10 @@ export async function fetchState(sessionId: string): Promise<PanelState> {
   }
 }
 
-/** Dispatch one action (updateModule / sync / setToolRestriction / setScope / setAutoSyncPreset / apply / editSkillDirs / editBaseline / clearOverrides / setGlobalSectionEnabled). */
+/**
+ * Dispatch one action (updateModule / sync / setToolRestriction / setScope / setAutoSyncPreset /
+ * apply / editSkillDirs / editBaseline / clearOverrides / setGlobalSectionEnabled).
+ */
 export async function dispatchAction(sessionId: string, action: string, payload?: object): Promise<void> {
   const res = await fetch('/api/context-panel-write/action', {
     method: 'POST',

@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
-import { normalizeModel, tableKeys, tableRateOf, tableRows, unpricedModels } from '../../src/client/priceTable'
+import { normalizeModel, tableFaceOf, tableKeys, tableRateOf, tableRows, unpricedModels } from '../../src/client/priceTable'
 
 describe('normalizeModel', () => {
   test('folds case and every separator, dots included', () => {
@@ -40,6 +40,20 @@ describe('tableRateOf', () => {
   test('an id no row covers prices null rather than guessing', () => {
     assert.equal(tableRateOf('mystery-model'), null)
     assert.equal(tableRateOf(''), null)
+  })
+})
+
+describe('tableFaceOf', () => {
+  test('names the matched row key beside its rates', () => {
+    const face = tableFaceOf('deepseek-V4.1-Flash')
+    assert.ok(face !== null)
+    assert.equal(face.mid, '4.1-flash')
+    assert.deepEqual(face.rate, tableRateOf('deepseek-V4.1-Flash'))
+  })
+
+  test('a model no row covers faces null, blanks included', () => {
+    assert.equal(tableFaceOf('mystery-model'), null)
+    assert.equal(tableFaceOf(''), null)
   })
 })
 

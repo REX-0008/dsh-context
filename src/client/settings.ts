@@ -12,11 +12,11 @@
  * members keeps the dependency graph honest.
  */
 
-import type { DefaultFileSort, DefaultGranularity, DefaultPlacement, DefaultToolSort, DefaultTrendMode, InsightsEntry, SettingsField } from '../shared/types'
+import type { DefaultDeltaBase, DefaultFileSort, DefaultGranularity, DefaultPlacement, DefaultToolSort, DefaultTrendMode, InsightsEntry, SettingsField } from '../shared/types'
 
 // The preference vocabulary is declared once in shared/types.ts; re-exported
 // here so client-side consumers keep their canonical import path.
-export type { DefaultFileSort, DefaultGranularity, DefaultPlacement, DefaultToolSort, DefaultTrendMode, InsightsEntry, SettingsField } from '../shared/types'
+export type { DefaultDeltaBase, DefaultFileSort, DefaultGranularity, DefaultPlacement, DefaultToolSort, DefaultTrendMode, InsightsEntry, SettingsField } from '../shared/types'
 
 /** The bound settings scope (ctx.settingsScope.bind result), as consumed. */
 export interface SettingsScopeLike {
@@ -30,6 +30,17 @@ export interface SettingsScopeBinderFace {
   bind(spec: { namespace: string }): SettingsScopeLike
 }
 
+/**
+ * The ctx.configForms service face (the Config-form generation's settings
+ * transport), as consumed: forms bind per namespace, and `whileServed` keeps
+ * a registration alive while the Host serves any of them. The bound form
+ * satisfies {@link SettingsScopeLike} (same snapshot/subscribe/set shape).
+ */
+export interface ConfigFormsFace {
+  get(namespace: string): SettingsScopeLike
+  whileServed(namespaces: readonly string[], register: () => () => void): () => void
+}
+
 /** The preference snapshot the card renders and the view reads at mount. */
 export interface SettingsState {
   /** Scope sync: loading until the first Host section, unavailable when unserved. */
@@ -37,6 +48,7 @@ export interface SettingsState {
   placement: DefaultPlacement
   granularity: DefaultGranularity
   mode: DefaultTrendMode
+  deltaBase: DefaultDeltaBase
   toolSort: DefaultToolSort
   fileSort: DefaultFileSort
   insightsEntry: InsightsEntry
@@ -49,6 +61,7 @@ export interface ContextSettings {
   defaultPlacement(): DefaultPlacement
   defaultGranularity(): DefaultGranularity
   defaultTrendMode(): DefaultTrendMode
+  defaultDeltaBase(): DefaultDeltaBase
   defaultToolSort(): DefaultToolSort
   defaultFileSort(): DefaultFileSort
   insightsEntry(): InsightsEntry
@@ -61,6 +74,7 @@ type Prefs = {
   placement?: DefaultPlacement
   granularity?: DefaultGranularity
   mode?: DefaultTrendMode
+  deltaBase?: DefaultDeltaBase
   toolSort?: DefaultToolSort
   fileSort?: DefaultFileSort
   insightsEntry?: InsightsEntry
@@ -73,6 +87,7 @@ function prefsOf(value: unknown): Prefs {
     ...(v.defaultPlacement === 'all' || v.defaultPlacement === 'tab' || v.defaultPlacement === 'sidebar' ? { placement: v.defaultPlacement } : {}),
     ...(v.defaultGranularity === 'step' || v.defaultGranularity === 'turn' ? { granularity: v.defaultGranularity } : {}),
     ...(v.defaultTrendMode === 'total' || v.defaultTrendMode === 'delta' ? { mode: v.defaultTrendMode } : {}),
+    ...(v.defaultDeltaBase === 'step' || v.defaultDeltaBase === 'turn' ? { deltaBase: v.defaultDeltaBase } : {}),
     ...(v.defaultToolSort === 'size' || v.defaultToolSort === 'count' || v.defaultToolSort === 'name' ? { toolSort: v.defaultToolSort } : {}),
     ...(v.defaultFileSort === 'count' || v.defaultFileSort === 'latest' || v.defaultFileSort === 'path' ? { fileSort: v.defaultFileSort } : {}),
     ...(v.insightsEntry === 'show' || v.insightsEntry === 'hide' ? { insightsEntry: v.insightsEntry } : {}),
@@ -80,13 +95,13 @@ function prefsOf(value: unknown): Prefs {
 }
 
 export function createContextSettings(): ContextSettings {
-  let state: SettingsState = { status: 'loading', placement: 'all', granularity: 'step', mode: 'total', toolSort: 'count', fileSort: 'count', insightsEntry: 'show', writable: false }
+  let state: SettingsState = { status: 'loading', placement: 'all', granularity: 'step', mode: 'total', deltaBase: 'step', toolSort: 'count', fileSort: 'count', insightsEntry: 'show', writable: false }
   let scope: SettingsScopeLike | undefined
   const listeners = new Set<() => void>()
   const publish = (next: SettingsState): void => {
     if (next.status === state.status && next.placement === state.placement && next.granularity === state.granularity
-      && next.mode === state.mode && next.toolSort === state.toolSort && next.fileSort === state.fileSort
-      && next.insightsEntry === state.insightsEntry && next.writable === state.writable) return
+      && next.mode === state.mode && next.deltaBase === state.deltaBase && next.toolSort === state.toolSort
+      && next.fileSort === state.fileSort && next.insightsEntry === state.insightsEntry && next.writable === state.writable) return
     state = next
     for (const listener of listeners) listener()
   }
@@ -108,6 +123,7 @@ export function createContextSettings(): ContextSettings {
       placement: prefs.placement ?? (raw?.defaultPlacement === undefined ? state.placement : 'all'),
       granularity: prefs.granularity ?? state.granularity,
       mode: prefs.mode ?? state.mode,
+      deltaBase: prefs.deltaBase ?? state.deltaBase,
       toolSort: prefs.toolSort ?? state.toolSort,
       fileSort: prefs.fileSort ?? state.fileSort,
       insightsEntry: prefs.insightsEntry ?? (raw?.insightsEntry === undefined ? state.insightsEntry : 'show'),
@@ -126,6 +142,7 @@ export function createContextSettings(): ContextSettings {
     defaultPlacement: () => state.placement,
     defaultGranularity: () => state.granularity,
     defaultTrendMode: () => state.mode,
+    defaultDeltaBase: () => state.deltaBase,
     defaultToolSort: () => state.toolSort,
     defaultFileSort: () => state.fileSort,
     insightsEntry: () => state.insightsEntry,

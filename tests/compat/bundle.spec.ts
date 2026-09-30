@@ -38,7 +38,7 @@ describe.skipIf(staging.artifactsMissing())('bundle smoke — the built lib/clie
   } = { dicts: new Map(), slots: [], sources: [], disposers: [] }
 
   const styleTags = (): HTMLElement[] =>
-    [...dom.window.document.head.querySelectorAll<HTMLElement>('style[data-plugin="dsh-context"]')]
+    [...dom.window.document.head.querySelectorAll<HTMLElement>('style[data-plugin="@our/context-panel-write"]')]
 
   beforeAll(() => {
     globals.window = dom.window
@@ -108,9 +108,9 @@ describe.skipIf(staging.artifactsMissing())('bundle smoke — the built lib/clie
     state.plugin.apply(ctx)
   })
 
-  test('handoff: the bundle registers as dsh-context with the factory closure', () => {
+  test('handoff: the bundle registers under the package name with the factory closure', () => {
     assert.ok(handoff !== null, 'bundle must register through __ModuleLoader__.load')
-    assert.equal(handoff.id, 'dsh-context', 'handoff id is the package name')
+    assert.equal(handoff.id, '@our/context-panel-write', 'handoff id is the package name')
     assert.equal(typeof handoff.factory, 'function')
     assert.equal(state.plugin?.name, 'dsh-context')
     assert.deepEqual(state.plugin?.inject, ['slots', 'locale'])
@@ -119,7 +119,7 @@ describe.skipIf(staging.artifactsMissing())('bundle smoke — the built lib/clie
   test('CSS channel: plugin-owned style tags, one per sheet, minified', () => {
     assert.ok(styleTags().length > 1, 'plugin-owned <style data-plugin> tags injected at factory execution')
     const tagIds = styleTags().map(tag => tag.dataset.pluginCss)
-    assert.ok(tagIds.every(id => typeof id === 'string' && id.startsWith('dsh-context/')), 'official data-plugin-css tag ids')
+    assert.ok(tagIds.every(id => typeof id === 'string' && id.startsWith('@our/context-panel-write/')), 'official data-plugin-css tag ids')
     assert.equal(new Set(tagIds).size, tagIds.length, 'one tag per stylesheet, no duplicate tag ids')
     const css = styleTags().map(tag => tag.textContent).join('\n')
     for (const marker of ['.lc-root', '.lc-br-elem-row', '.lc-stacked-seg', '.lc-bar-tip-on', '.lc-stat-tip', '.lc-occupied-box-on']) {

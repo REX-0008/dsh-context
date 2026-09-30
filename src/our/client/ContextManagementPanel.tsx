@@ -131,11 +131,11 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
       title={tip}
       onClick={(event) => {
         event.stopPropagation()
-        setCollapsedGroups(current => ({ ...current, [key]: current[key] !== true }))
+        setCollapsedGroups(current => ({ ...current, [key]: ! current[key] }))
       }}>
-      <span className={'lc-br-chev' + (collapsedGroups[key] === true ? '' : ' lc-br-chev-on')} />
+      <span className={'lc-br-chev' + (collapsedGroups[key] ? '' : ' lc-br-chev-on')} />
       <span className="lc-br-group-title">{title}</span>
-      <span className="lc-br-group-hint">{collapsedGroups[key] === true ? t('our.expand') : t('our.collapse')}</span>
+      <span className="lc-br-group-hint">{collapsedGroups[key] ? t('our.expand') : t('our.collapse')}</span>
     </button>
   )
   /** Tools this conversation currently denies (the tool switch's off state). */
@@ -166,190 +166,190 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
         || (section.plugin ?? '').toLowerCase().includes(needle)
         || section.text.toLowerCase().includes(needle))
     return (
-    <>
-      {atPastStep ? (
-        <div className="lc-br-note">
-          {t('our.pastStep')}
-        </div>
-      ) : null}
-      {stale && !atPastStep ? (
-        <div className="lc-br-note" title={t('our.staleTableTip')}>
-          {'⚠ ' + t('our.staleTable', { src: String(state?.knownSectionsSource ?? '—') })}
-        </div>
-      ) : null}
-      {sections.length === 0 && !atPastStep ? (
-        <div className="lc-br-note">{t('our.empty')}</div>
-      ) : null}
+      <>
+        {atPastStep ? (
+          <div className="lc-br-note">
+            {t('our.pastStep')}
+          </div>
+        ) : null}
+        {stale && !atPastStep ? (
+          <div className="lc-br-note" title={t('our.staleTableTip')}>
+            {'⚠ ' + t('our.staleTable', { src: state?.knownSectionsSource ?? '—' })}
+          </div>
+        ) : null}
+        {sections.length === 0 && !atPastStep ? (
+          <div className="lc-br-note">{t('our.empty')}</div>
+        ) : null}
 
-      {/* The category's own filter toolbar, mounted even when nothing matches so
+        {/* The category's own filter toolbar, mounted even when nothing matches so
           the filter can always be cleared. */}
-      {atPastStep || sections.length === 0 ? null : toolbar(query, setQuery)}
-      {sections.length > 0 && shown.length === 0 ? (
-        <div className="lc-br-note">{t('our.noMatch')}</div>
-      ) : null}
-      {/* Scoped so the token-column alignment below applies to OUR rows only:
+        {atPastStep || sections.length === 0 ? null : toolbar(query, setQuery)}
+        {sections.length > 0 && shown.length === 0 ? (
+          <div className="lc-br-note">{t('our.noMatch')}</div>
+        ) : null}
+        {/* Scoped so the token-column alignment below applies to OUR rows only:
           upstream's tool/message rows keep their original figure width. */}
-      <div className="lc-our-sections">
-      {(atPastStep ? [] : shown).map((section) => {
-        const open = editing === section.name
-        const weightEdited = section.weight !== undefined
-        const weightValue = weightEdited ? section.weight : section.order
+        <div className="lc-our-sections">
+          {(atPastStep ? [] : shown).map((section) => {
+            const open = editing === section.name
+            const weightEdited = section.weight !== undefined
+            const weightValue = weightEdited ? section.weight : section.order
 
-        // The expanded body: upstream's own chrome (head + line count + raw /
-        // Markdown switch + copy) with our actions in the same head group,
-        // ordered raw · Markdown · edit · (write-back / restore).
-        const extra = (
-          <>
-            {section.kind === 'preset' ? (
-              <button type="button" className="lc-rich-seg-btn"
-                title={t('our.action.writeBackTip')}
-                onClick={(event) => { event.stopPropagation(); void dispatch('writeBackPreset', { name: section.name }) }}>
-                {t('our.action.writeBack')}
-              </button>
-            ) : null}
-            {section.edited ? (
-              <button type="button" className="lc-rich-seg-btn" title={t('our.action.restoreTip')}
-                onClick={(event) => { event.stopPropagation(); void dispatch('clearSectionText', { name: section.name }) }}>
-                {t('our.action.restore')}
-              </button>
-            ) : null}
-            <button type="button" className={'lc-rich-seg-btn' + (open ? ' lc-rich-seg-on' : '')}
-              title={t('our.action.editTip')}
-              onClick={(event) => {
-                event.stopPropagation()
-                if (open) setEditing(null)
-                else { setDraft(section.text); setEditing(section.name); setComparing(null) }
-              }}>
-              {t('our.action.edit')}
-            </button>
-          </>
-        )
+            // The expanded body: upstream's own chrome (head + line count + raw /
+            // Markdown switch + copy) with our actions in the same head group,
+            // ordered raw · Markdown · edit · (write-back / restore).
+            const extra = (
+              <>
+                {section.kind === 'preset' ? (
+                  <button type="button" className="lc-rich-seg-btn"
+                    title={t('our.action.writeBackTip')}
+                    onClick={(event) => { event.stopPropagation(); void dispatch('writeBackPreset', { name: section.name }) }}>
+                    {t('our.action.writeBack')}
+                  </button>
+                ) : null}
+                {section.edited ? (
+                  <button type="button" className="lc-rich-seg-btn" title={t('our.action.restoreTip')}
+                    onClick={(event) => { event.stopPropagation(); void dispatch('clearSectionText', { name: section.name }) }}>
+                    {t('our.action.restore')}
+                  </button>
+                ) : null}
+                <button type="button" className={'lc-rich-seg-btn' + (open ? ' lc-rich-seg-on' : '')}
+                  title={t('our.action.editTip')}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    if (open) setEditing(null)
+                    else { setDraft(section.text); setEditing(section.name); setComparing(null) }
+                  }}>
+                  {t('our.action.edit')}
+                </button>
+              </>
+            )
 
-        const bodyNode = open ? (
-          <>
-            <textarea value={draft} onChange={(event) => setDraft(event.target.value)} rows={12}
-              style={{ width: '100%' }} />
-            <div>
-              <button type="button" className="lc-gran-btn"
-                onClick={() => { void dispatch('setSectionText', { name: section.name, text: draft, original: section.text }).then(() => setEditing(null)) }}>
-                {t('our.action.save')}
-              </button>
-              <button type="button" className="lc-gran-btn" onClick={() => setEditing(null)}>{t('our.action.cancel')}</button>
-            </div>
-          </>
-        ) : comparing === section.name ? (
-          <>
-            <div className="lc-cols">
-              <div className="lc-col">
-                <div className="lc-empty" style={{ textAlign: 'left' }}>{t('our.compare.mine')}</div>
-                <pre className="lc-br-preview" style={{ whiteSpace: 'pre-wrap' }}>{section.text}</pre>
-              </div>
-              <div className="lc-col">
-                <div className="lc-empty" style={{ textAlign: 'left' }}>{t('our.compare.original')}</div>
-                <pre className="lc-br-preview" style={{ whiteSpace: 'pre-wrap' }}>{section.originalText ?? ''}</pre>
-              </div>
-            </div>
-            <button type="button" className="lc-gran-btn"
-              onClick={() => { void dispatch('refreshSectionBaseline', { name: section.name, original: section.originalText }).then(() => setComparing(null)) }}>
-              {t('our.action.refreshBaseline')}
-            </button>
-          </>
-        ) : body(section.name, section.text, extra)
+            const bodyNode = open ? (
+              <>
+                <textarea value={draft} onChange={(event) =>{  setDraft(event.target.value) }} rows={12}
+                  style={{ width: '100%' }} />
+                <div>
+                  <button type="button" className="lc-gran-btn"
+                    onClick={() => { void dispatch('setSectionText', { name: section.name, text: draft, original: section.text }).then(() =>{  setEditing(null) }) }}>
+                    {t('our.action.save')}
+                  </button>
+                  <button type="button" className="lc-gran-btn" onClick={() =>{  setEditing(null) }}>{t('our.action.cancel')}</button>
+                </div>
+              </>
+            ) : comparing === section.name ? (
+              <>
+                <div className="lc-cols">
+                  <div className="lc-col">
+                    <div className="lc-empty" style={{ textAlign: 'left' }}>{t('our.compare.mine')}</div>
+                    <pre className="lc-br-preview" style={{ whiteSpace: 'pre-wrap' }}>{section.text}</pre>
+                  </div>
+                  <div className="lc-col">
+                    <div className="lc-empty" style={{ textAlign: 'left' }}>{t('our.compare.original')}</div>
+                    <pre className="lc-br-preview" style={{ whiteSpace: 'pre-wrap' }}>{section.originalText ?? ''}</pre>
+                  </div>
+                </div>
+                <button type="button" className="lc-gran-btn"
+                  onClick={() => { void dispatch('refreshSectionBaseline', { name: section.name, original: section.originalText }).then(() =>{  setComparing(null) }) }}>
+                  {t('our.action.refreshBaseline')}
+                </button>
+              </>
+            ) : body(section.name, section.text, extra)
 
-        // The row's trailing slot is where tool rows carry their plugin chip and
-        // hit tally; ours carry the same chips plus the weight control and switch.
-        const trailing = (
-          <>
-            {/* The registering plugin, in the same chip the tool rows use for
+            // The row's trailing slot is where tool rows carry their plugin chip and
+            // hit tally; ours carry the same chips plus the weight control and switch.
+            const trailing = (
+              <>
+                {/* The registering plugin, in the same chip the tool rows use for
                 theirs — required on the COLLAPSED row, not only when expanded. */}
-            {section.plugin !== undefined ? (
-              <span className="lc-br-tag lc-br-tool-plugin" title={t('our.chip.pluginTip')}>{section.plugin}</span>
-            ) : (
-              <span className="lc-br-tag lc-br-sect-unknown" title={t('our.chip.unknownSourceTip')}>
-                {t('our.chip.unknownSource')}
-              </span>
-            )}
-            {section.edited ? <span className="lc-br-tag lc-br-sect-edited" title={t('our.chip.editedTip')}>{t('our.chip.edited')}</span> : null}
-            {section.originalChanged ? (
-              <button type="button" className="lc-br-tag lc-br-sect-edited" title={t('our.chip.originalChangedTip')}
-                onClick={(event) => { event.stopPropagation(); setComparing(comparing === section.name ? null : section.name) }}>
-                {t('our.chip.originalChanged')}
-              </button>
-            ) : null}
-            {weightOpen === section.name ? (
-              <input className="lc-br-tag" style={{ width: '4.5em', textAlign: 'center' }}
-                autoFocus value={weightDraft}
-                title={weightEdited && section.order !== undefined
-                  ? t('our.weightTip.original', { orig: String(section.order) })
-                  : t('our.weightTip')}
-                placeholder={weightEdited && section.order !== undefined ? String(section.order) : ''}
-                onClick={(event) => event.stopPropagation()}
-                onChange={(event) => setWeightDraft(event.target.value)}
-                onKeyDown={(event) => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur() }}
-                onBlur={(event) => {
-                  const raw = event.target.value.trim()
-                  void dispatch('setSectionWeight', { name: section.name, weight: raw === '' ? null : Number(raw) })
-                  setWeightOpen(null)
-                }} />
-            ) : (
-              <button type="button"
-                className={'lc-br-tag' + (weightEdited ? ' lc-br-sect-edited' : '') + (section.staleTable ? ' lc-br-sect-stale' : '')}
-                style={{ width: '4.5em', textAlign: 'center' }}
-                title={section.staleTable
-                  ? t('our.weightTip.stale')
-                  : weightEdited
-                    ? t('our.weightTip.edited', { orig: String(section.order ?? '—') })
-                    : section.order === undefined ? t('our.weightTip.unknown') : t('our.weightTip')}
-                onClick={(event) => { event.stopPropagation(); setWeightDraft(weightValue === undefined ? '' : String(weightValue)); setWeightOpen(section.name) }}>
-                {weightValue === undefined ? '—' : String(weightValue)}
-              </button>
-            )}
-            {/* Three states, because two disable levels exist (the deployment
+                {section.plugin !== undefined ? (
+                  <span className="lc-br-tag lc-br-tool-plugin" title={t('our.chip.pluginTip')}>{section.plugin}</span>
+                ) : (
+                  <span className="lc-br-tag lc-br-sect-unknown" title={t('our.chip.unknownSourceTip')}>
+                    {t('our.chip.unknownSource')}
+                  </span>
+                )}
+                {section.edited ? <span className="lc-br-tag lc-br-sect-edited" title={t('our.chip.editedTip')}>{t('our.chip.edited')}</span> : null}
+                {section.originalChanged ? (
+                  <button type="button" className="lc-br-tag lc-br-sect-edited" title={t('our.chip.originalChangedTip')}
+                    onClick={(event) => { event.stopPropagation(); setComparing(comparing === section.name ? null : section.name) }}>
+                    {t('our.chip.originalChanged')}
+                  </button>
+                ) : null}
+                {weightOpen === section.name ? (
+                  <input className="lc-br-tag" style={{ width: '4.5em', textAlign: 'center' }}
+                    autoFocus value={weightDraft}
+                    title={weightEdited && section.order !== undefined
+                      ? t('our.weightTip.original', { orig: String(section.order) })
+                      : t('our.weightTip')}
+                    placeholder={weightEdited && section.order !== undefined ? String(section.order) : ''}
+                    onClick={(event) =>{  event.stopPropagation() }}
+                    onChange={(event) =>{  setWeightDraft(event.target.value) }}
+                    onKeyDown={(event) => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur() }}
+                    onBlur={(event) => {
+                      const raw = event.target.value.trim()
+                      void dispatch('setSectionWeight', { name: section.name, weight: raw === '' ? null : Number(raw) })
+                      setWeightOpen(null)
+                    }} />
+                ) : (
+                  <button type="button"
+                    className={'lc-br-tag' + (weightEdited ? ' lc-br-sect-edited' : '') + (section.staleTable ? ' lc-br-sect-stale' : '')}
+                    style={{ width: '4.5em', textAlign: 'center' }}
+                    title={section.staleTable
+                      ? t('our.weightTip.stale')
+                      : weightEdited
+                        ? t('our.weightTip.edited', { orig: String(section.order ?? '—') })
+                        : section.order === undefined ? t('our.weightTip.unknown') : t('our.weightTip')}
+                    onClick={(event) => { event.stopPropagation(); setWeightDraft(weightValue === undefined ? '' : String(weightValue)); setWeightOpen(section.name) }}>
+                    {weightValue === undefined ? '—' : String(weightValue)}
+                  </button>
+                )}
+                {/* Three states, because two disable levels exist (the deployment
                 level is not managed here). Clicking cycles enabled → off-here →
                 off-for-preset → enabled, and the tooltip names the current level. */}
-            <button type="button"
-              className={'lc-br-tag' + (section.disabledAt === undefined ? '' : ' lc-br-sect-off')}
-              title={section.disabledAt === 'preset'
-                ? t('our.state.offPresetTip')
-                : section.disabledAt === 'conversation'
-                  ? t('our.state.offConversationTip')
-                  : t('our.state.onTip')}
-              onClick={(event) => {
-                event.stopPropagation()
-                const next = section.disabledAt === undefined
-                  ? { level: 'conversation' as const, off: true }
-                  : section.disabledAt === 'conversation'
-                    ? { level: 'preset' as const, off: true }
-                    : { level: 'conversation' as const, off: false }
-                void dispatch('setSectionLevel', { name: section.name, ...next })
-              }}>
-              {section.disabledAt === 'preset' ? t('our.state.offPreset') : section.disabledAt === 'conversation' ? t('our.state.offConversation') : t('our.state.on')}
-            </button>
-          </>
-        )
+                <button type="button"
+                  className={'lc-br-tag' + (section.disabledAt === undefined ? '' : ' lc-br-sect-off')}
+                  title={section.disabledAt === 'preset'
+                    ? t('our.state.offPresetTip')
+                    : section.disabledAt === 'conversation'
+                      ? t('our.state.offConversationTip')
+                      : t('our.state.onTip')}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    const next = section.disabledAt === undefined
+                      ? { level: 'conversation' as const, off: true }
+                      : section.disabledAt === 'conversation'
+                        ? { level: 'preset' as const, off: true }
+                        : { level: 'conversation' as const, off: false }
+                    void dispatch('setSectionLevel', { name: section.name, ...next })
+                  }}>
+                  {section.disabledAt === 'preset' ? t('our.state.offPreset') : section.disabledAt === 'conversation' ? t('our.state.offConversation') : t('our.state.on')}
+                </button>
+              </>
+            )
 
-        // The left tag slot states the SOURCE KIND (how a change lands) — the same
-        // slot surface rows use for their kind tag; an edited section's tag turns
-        // brand-coloured as the reminder.
-        // A tool-guidance section (`tool:<name>`) has a second, distinct switch
-        // elsewhere: the tools category carries the tool itself, whose
-        // restriction makes CALLS fail while this switch only stops the
-        // guidance TEXT from being sent. The tooltip states the difference,
-        // because the two read as the same action otherwise.
-        const isToolGuidance = section.name.startsWith('tool:')
-        const kindTag = (
-          <i className={'lc-br-kind' + (section.edited ? ' lc-br-kind-edited' : '')}
-            title={isToolGuidance ? t(KIND_HINT_KEY[section.kind]) + ' — ' + t('our.toolGuidanceHint') : t(KIND_HINT_KEY[section.kind])}>
-            {t(KIND_KEY[section.kind])}
-          </i>
-        )
-        // The token figure goes in its own column (the row's `tokens` slot, which
-        // right-aligns and now pads to a fixed width); the preview stays the name.
-        return row('sec:' + section.name, kindTag, section.name, sizeOf(section.text), undefined, bodyNode, false, trailing)
-      })}
-      </div>
+            // The left tag slot states the SOURCE KIND (how a change lands) — the same
+            // slot surface rows use for their kind tag; an edited section's tag turns
+            // brand-coloured as the reminder.
+            // A tool-guidance section (`tool:<name>`) has a second, distinct switch
+            // elsewhere: the tools category carries the tool itself, whose
+            // restriction makes CALLS fail while this switch only stops the
+            // guidance TEXT from being sent. The tooltip states the difference,
+            // because the two read as the same action otherwise.
+            const isToolGuidance = section.name.startsWith('tool:')
+            const kindTag = (
+              <i className={'lc-br-kind' + (section.edited ? ' lc-br-kind-edited' : '')}
+                title={isToolGuidance ? t(KIND_HINT_KEY[section.kind]) + ' — ' + t('our.toolGuidanceHint') : t(KIND_HINT_KEY[section.kind])}>
+                {t(KIND_KEY[section.kind])}
+              </i>
+            )
+            // The token figure goes in its own column (the row's `tokens` slot, which
+            // right-aligns and now pads to a fixed width); the preview stays the name.
+            return row('sec:' + section.name, kindTag, section.name, sizeOf(section.text), undefined, bodyNode, false, trailing)
+          })}
+        </div>
 
-    </>
+      </>
     )
   }
 
@@ -373,8 +373,8 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
    */
   const categoryRows = (category: string, row: BrowserRowBuilder): ReactNode => {
     if (category !== 'inject') return null
-    const injectorsOpen = collapsedGroups['injectors'] !== true
-    const injectedOpen = collapsedGroups['injected'] !== true
+    const injectorsOpen = ! collapsedGroups['injectors']
+    const injectedOpen = ! collapsedGroups['injected']
     return (
       <>
         {/* The runtime-context snapshot has its own prune: it removes the whole
@@ -383,7 +383,7 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
         {contextSnapshotSeqs.length > 0 ? (
           <>
             {groupHead('contexts', t('our.contexts'), t('our.contexts.tip'))}
-            {collapsedGroups['contexts'] !== true ? (
+            {!collapsedGroups['contexts'] ? (
               <button type="button" className="lc-br-tag lc-br-prune"
                 title={t('our.contexts.prune')}
                 onClick={(event) => {
@@ -558,8 +558,8 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
    */
   const messageRowMarked = (row: MessageRowRef): boolean => {
     if (pruneSeqs.length === 0) return false
-    const start = pruneSeqs[0] as number
-    const end = pruneSeqs[pruneSeqs.length - 1] as number
+    const start = pruneSeqs[0]
+    const end = pruneSeqs[pruneSeqs.length - 1]
     return row.seq >= start && row.seq <= end
   }
 

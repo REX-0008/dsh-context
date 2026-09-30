@@ -96,12 +96,42 @@ describe('trimState request/event bounds', () => {
   })
 })
 
+describe('the incremental turnRuns ledger', () => {
+  test('counts turn runs exactly like a full scan, including a turn-less first record', () => {
+    const drive = driveTimeline([
+      assistantMessage(1, {}),
+      assistantMessage(2, { turn: 1, step: 1 }),
+      assistantMessage(3, { turn: 1, step: 2 }),
+      assistantMessage(4, { turn: 2, step: 1 }),
+      assistantMessage(5, { turn: 2, step: 2 }),
+    ])
+    // Scan semantics: the leading turn-less record forms no run; runs open at
+    // turn 1 (record 2) and turn 2 (record 4).
+    assert.equal(drive.state.turnRuns, 2)
+    assertStatesPlainJson(drive)
+  })
+
+  test('a restored row folded before the field existed recomputes its base once', () => {
+    const def = timelineDef()
+    let state = def.apply(def.init(), assistantMessage(1, { turn: 1, step: 1 }))
+    state = def.apply(state, assistantMessage(2, { turn: 1, step: 2 }))
+    // A cached row from an older build carries no `turnRuns` (additive-optional).
+    delete (state as { turnRuns?: unknown }).turnRuns
+    // A request push recomputes the base incrementally (1 retained run + the new turn).
+    const pushed = def.apply(state, assistantMessage(3, { turn: 2, step: 1 }))
+    assert.equal(pushed.turnRuns, 2)
+    // A non-request change recomputes in the trim pass instead.
+    const trimmed = def.apply(state, planMode(4, { active: true }))
+    assert.equal(trimmed.turnRuns, 1)
+  })
+})
+
 describe('trimState archive pruning', () => {
   test('removals at or before the oldest retained request are dropped, recording archiveFloor', () => {
     const drive = driveTimeline([
       assistantMessage(1, { turn: 1, step: 1 }),
       compaction(2, 'prune', { shadowedSeqs: [1], shadowedTokenCount: 9 }),
-      assistantMessage(3, { turn: 1, step: 2, surfaceOp: { op: 'replace', start: 1, end: 1 } }),
+      assistantMessage(3, { turn: 1, step: 2, surfaceOp: { op: 'replace', startSeq: 1, endSeq: 1 } }),
       assistantMessage(4, { turn: 2, step: 1 }),
       assistantMessage(5, { turn: 3, step: 1 }),
     ], { maxKeptTurns: 2 })
@@ -116,13 +146,13 @@ describe('trimState archive pruning', () => {
     const drive = driveTimeline([
       userMessage(1, [{ type: 'text', text: 'aaaa' }]),
       compaction(2, 'prune', { shadowedSeqs: [1], shadowedTokenCount: 9 }),
-      userMessage(3, [{ type: 'text', text: 'b' }], undefined, { surfaceOp: { op: 'replace', start: 1, end: 1 } }),
+      userMessage(3, [{ type: 'text', text: 'b' }], undefined, { surfaceOp: { op: 'replace', startSeq: 1, endSeq: 1 } }),
       userMessage(4, [{ type: 'text', text: 'cccc' }]),
       compaction(5, 'prune', { shadowedSeqs: [4], shadowedTokenCount: 9 }),
-      userMessage(6, [{ type: 'text', text: 'd' }], undefined, { surfaceOp: { op: 'replace', start: 4, end: 4 } }),
+      userMessage(6, [{ type: 'text', text: 'd' }], undefined, { surfaceOp: { op: 'replace', startSeq: 4, endSeq: 4 } }),
       userMessage(7, [{ type: 'text', text: 'eeee' }]),
       compaction(8, 'prune', { shadowedSeqs: [7], shadowedTokenCount: 9 }),
-      userMessage(9, [{ type: 'text', text: 'f' }], undefined, { surfaceOp: { op: 'replace', start: 7, end: 7 } }),
+      userMessage(9, [{ type: 'text', text: 'f' }], undefined, { surfaceOp: { op: 'replace', startSeq: 7, endSeq: 7 } }),
     ], { maxArchiveNodes: 1 })
     assert.equal(drive.states[6].archiveFloor, 3, 'the first drop sets the floor (no existing one)')
     assert.deepEqual(drive.state.archived.map(n => n.seq), [7], 'only the newest removal survives')

@@ -16,6 +16,7 @@ import {
   numOf,
   openPathVia,
   openResourceVia,
+  openSessionVia,
   timelineOf,
   timingOf,
   tokenUsageOf,
@@ -277,9 +278,9 @@ describe('timelineOf', () => {
   })
 
   test('the unsupported gate record survives the sanitizing slow path only when well-formed', () => {
-    const kept = timelineOf({ current: 1, unsupported: { current: '0.1.1-rc.2', minimum: '0.1.2-rc.1' } })
+    const kept = timelineOf({ current: 1, unsupported: { current: '0.1.1-rc.2', minimum: '0.1.5-rc.1' } })
     assert.ok(kept !== null)
-    assert.deepEqual(kept.unsupported, { current: '0.1.1-rc.2', minimum: '0.1.2-rc.1' })
+    assert.deepEqual(kept.unsupported, { current: '0.1.1-rc.2', minimum: '0.1.5-rc.1' })
     for (const bad of ['x', null, {}, { current: 1, minimum: 'm' }, { current: 'c' }]) {
       const out = timelineOf({ current: 1, unsupported: bad })
       assert.ok(out !== null)
@@ -351,7 +352,7 @@ describe('timelineOf', () => {
 
 describe('unsupportedOf', () => {
   test('well-formed records pass through as plain data', () => {
-    assert.deepEqual(unsupportedOf({ current: '0.1.1-rc.2', minimum: '0.1.2-rc.1' }), { current: '0.1.1-rc.2', minimum: '0.1.2-rc.1' })
+    assert.deepEqual(unsupportedOf({ current: '0.1.1-rc.2', minimum: '0.1.5-rc.1' }), { current: '0.1.1-rc.2', minimum: '0.1.5-rc.1' })
   })
 
   test('non-records and wrong-typed fields degrade to null', () => {
@@ -515,6 +516,26 @@ describe('timingOf', () => {
     const out = timingOf({ ...wellFormed, reasoningMs: Number.NaN })
     assert.equal(out?.reasoningMs, undefined)
     assert.equal(out?.wallMs, wellFormed.wallMs)
+  })
+
+  test('the block counts pass through when well-formed and stay absent otherwise', () => {
+    const out = timingOf({ ...wellFormed, reasoningBlocks: 3, textBlocks: 1, toolArgBlocks: 9 })
+    assert.deepEqual(out, { ...wellFormed, reasoningBlocks: 3, textBlocks: 1, toolArgBlocks: 9 })
+    const bare = timingOf(wellFormed)
+    assert.ok(bare !== null)
+    for (const k of ['reasoningBlocks', 'textBlocks', 'toolArgBlocks']) {
+      assert.equal(Object.hasOwn(bare, k), false, `${k} stays absent`)
+    }
+  })
+
+  test('a wrong-typed or negative count drops alone; a non-finite one cannot slip through', () => {
+    const out = timingOf({ ...wellFormed, reasoningBlocks: 'x', textBlocks: -1, toolArgBlocks: 4 })
+    assert.equal(out?.reasoningBlocks, undefined)
+    assert.equal(out?.textBlocks, undefined)
+    assert.equal(out?.toolArgBlocks, 4)
+    const out2 = timingOf({ ...wellFormed, textBlocks: Number.NaN })
+    assert.equal(out2?.textBlocks, undefined)
+    assert.equal(out2?.wallMs, wellFormed.wallMs)
   })
 })
 
@@ -827,6 +848,62 @@ describe('openResourceVia', () => {
   })
 })
 
+describe('openSessionVia', () => {
+  const ctxWith = (services: Record<string, unknown>): ClientCtx => ({ get: (name: string) => services[name] }) as unknown as ClientCtx
+
+  test('jumps through the view owner — every supported line\'s own verb (issue #90)', () => {
+    // Exactly the rc.2 composition: uiWorkspace serves the navigation verb,
+    // the sessions service carries no selection at all.
+    const opened: string[] = []
+    openSessionVia(ctxWith({
+      uiWorkspace: { openSession(id: string) { opened.push(id) } },
+      sessions: { list: { getSnapshot: () => ({}) } },
+    }), 's2')
+    assert.deepEqual(opened, ['s2'])
+  })
+
+  test('the retired sessions-service verb still serves as the degradation path', () => {
+    const opened: string[] = []
+    openSessionVia(ctxWith({ sessions: { open: (id: string) => { opened.push(id) } } }), 's1')
+    assert.deepEqual(opened, ['s1'])
+  })
+
+  test('when both faces serve a verb, the view owner wins', () => {
+    const via: string[] = []
+    openSessionVia(ctxWith({
+      uiWorkspace: { openSession: (id: string) => { via.push(`workspace:${id}`) } },
+      sessions: { open: (id: string) => { via.push(`sessions:${id}`) } },
+    }), 's3')
+    assert.deepEqual(via, ['workspace:s3'])
+  })
+
+  test('the verb is invoked bound to its service instance', () => {
+    let seen: unknown
+    const face = {
+      target: 's4',
+      openSession(this: { target: string }, id: string) { seen = `${this.target}:${id}` },
+    }
+    openSessionVia(ctxWith({ uiWorkspace: face }), 's4')
+    assert.equal(seen, 's4:s4')
+  })
+
+  test('a generation serving neither verb, or a verb-less face, swallows silently', () => {
+    openSessionVia(ctxWith({}), 's5')
+    openSessionVia(ctxWith({ uiWorkspace: {}, sessions: null }), 's5')
+    openSessionVia(ctxWith({ uiWorkspace: { openSession: 7 } }), 's5')
+    openSessionVia(ctxWith({ sessions: {} }), 's5')
+    openSessionVia(ctxWith({ sessions: { open: 7 } }), 's5')
+  })
+
+  test('a hostile face never throws into the click handler', () => {
+    openSessionVia(ctxWith({ uiWorkspace: { openSession: () => { throw new Error('boom') } } }), 's6')
+    openSessionVia(ctxWith({ sessions: { open: () => { throw new Error('boom') } } }), 's6')
+    // A traced proxy can throw on the property READ itself (issue #42).
+    openSessionVia(ctxWith({ uiWorkspace: { get openSession() { throw new Error('boom') } } }), 's6')
+    openSessionVia({ get: () => { throw new Error('boom') } } as unknown as ClientCtx, 's6')
+  })
+})
+
 describe('activityOf', () => {
   test('absent or non-record values stay null (an older host serves no such key)', () => {
     assert.equal(activityOf(null), null)
@@ -860,5 +937,25 @@ describe('activityOf', () => {
       },
     })
     assert.deepEqual(out, { days: { '2026-09-16': { tokens: 15, requests: 1 } } })
+  })
+
+  test('a well-formed pricing record rides both the pass-through and the sanitized copy', () => {
+    const cost = { deepseek: { 'deepseek-v4': { peak: { uncached: 10, cacheRead: 5, cacheWrite: 0, output: 2 } } } }
+    const wire = { days: { '2026-09-16': { tokens: 15, requests: 1, cost } } }
+    assert.ok(activityOf(wire) === (wire as never))
+    const dirty = { days: { '2026-09-16': { tokens: 15, requests: 1, cost }, '09-16': { tokens: 1, requests: 1 } } }
+    assert.deepEqual(activityOf(dirty), { days: { '2026-09-16': { tokens: 15, requests: 1, cost } } })
+  })
+
+  test('a malformed pricing record drops the fee whole; the day survives', () => {
+    const out = activityOf({
+      days: {
+        '2026-09-16': { tokens: 15, requests: 1, cost: 'x' },
+        '2026-09-15': { tokens: 3, requests: 1, cost: { deepseek: 7 } },
+      },
+    })
+    assert.deepEqual(out, {
+      days: { '2026-09-16': { tokens: 15, requests: 1 }, '2026-09-15': { tokens: 3, requests: 1 } },
+    })
   })
 })

@@ -1,13 +1,13 @@
-// The shape-driven readers (src/host/logShapes.ts): every supported log
-// generation's spelling of the three seams the fold reconciles — the embedded
-// assistant stream's first token, the replacement op's endpoints, and the raw
-// chunk token test. Hostile shapes are pinned beside the happy paths: a
-// malformed record must read as "nothing here", never throw (the projection
-// registry drives the fold with no error boundary of its own).
+// The shape-driven readers (src/host/logShapes.ts): the log spellings the
+// fold reconciles — the embedded assistant stream's first token, the
+// replacement op's endpoints, and the raw chunk token test. Hostile shapes
+// are pinned beside the happy paths: a malformed record must read as
+// "nothing here", never throw (the projection registry drives the fold with
+// no error boundary of its own).
 
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
-import { decodeKindOfBlock, decodeSpansOfStream, firstTokenTimeOfStream, isTokenChunk, replaceRangeOf } from '../../src/host/logShapes'
+import { decodeKindOfBlock, decodeTallyOfStream, firstTokenTimeOfStream, isTokenChunk, replaceRangeOf } from '../../src/host/logShapes'
 
 describe('decodeKindOfBlock', () => {
   test('maps the three block kinds the harness emits', () => {
@@ -23,52 +23,71 @@ describe('decodeKindOfBlock', () => {
   })
 })
 
-describe('decodeSpansOfStream', () => {
+describe('decodeTallyOfStream', () => {
   const chunk = (time: number, blockType: string) => ({ type: 'chunk', time, chunk: { type: 'block-start', blockType } })
+  const tally = { reasoning: 0, text: 0, toolarg: 0 }
 
-  test('tiles [first marker, endTime] by block, in marker order', () => {
+  test('tiles [first marker, endTime] by block, in marker order, counting each marker', () => {
     // reasoning 1000→1300, text 1300→1500, tool args 1500→2000 (endTime).
-    assert.deepEqual(decodeSpansOfStream([
+    assert.deepEqual(decodeTallyOfStream([
       chunk(1000, 'reasoning'),
       { type: 'reasoning-chunks', time0: 1010, index: 0, dt: [], texts: ['think'] },
       chunk(1300, 'text'),
       { type: 'text-chunks', time0: 1310, index: 1, dt: [], texts: ['answer'] },
       chunk(1500, 'tool-call'),
       { type: 'tool-call-chunks', time0: 1510, index: 2, dt: [], id: 'c1', args: ['{}'] },
-    ], 2000), { reasoning: 300, text: 200, toolarg: 500 })
+    ], 2000), {
+      spans: { reasoning: 300, text: 200, toolarg: 500 },
+      blocks: { reasoning: 1, text: 1, toolarg: 1 },
+    })
   })
 
   test('a later block closes the previous one even when its own kind is unknown', () => {
-    // The unknown marker still ends the reasoning span; its own interval is lost.
-    assert.deepEqual(decodeSpansOfStream([chunk(1000, 'reasoning'), chunk(1400, 'image')], 1900), {
-      reasoning: 400, text: 0, toolarg: 0,
+    // The unknown marker still ends the reasoning span; its own interval is
+    // lost and it counts nothing.
+    assert.deepEqual(decodeTallyOfStream([chunk(1000, 'reasoning'), chunk(1400, 'image')], 1900), {
+      spans: { reasoning: 400, text: 0, toolarg: 0 },
+      blocks: { reasoning: 1, text: 0, toolarg: 0 },
     })
   })
 
   test('a single block owns the whole tail to endTime', () => {
-    assert.deepEqual(decodeSpansOfStream([chunk(500, 'text')], 900), { reasoning: 0, text: 400, toolarg: 0 })
+    assert.deepEqual(decodeTallyOfStream([chunk(500, 'text')], 900), {
+      spans: { ...tally, text: 400 },
+      blocks: { ...tally, text: 1 },
+    })
+  })
+
+  test('a zero-span block still counts (same-instant markers)', () => {
+    assert.deepEqual(decodeTallyOfStream([chunk(500, 'reasoning'), chunk(500, 'text')], 900), {
+      spans: { ...tally, text: 400 },
+      blocks: { reasoning: 1, text: 1, toolarg: 0 },
+    })
   })
 
   test('malformed records, non-finite times, and hostile containers degrade to zero', () => {
-    assert.deepEqual(decodeSpansOfStream(undefined, 100), { reasoning: 0, text: 0, toolarg: 0 })
-    assert.deepEqual(decodeSpansOfStream('stream', 100), { reasoning: 0, text: 0, toolarg: 0 })
-    assert.deepEqual(decodeSpansOfStream([], 100), { reasoning: 0, text: 0, toolarg: 0 })
-    assert.deepEqual(decodeSpansOfStream([chunk(500, 'text')], Number.NaN), { reasoning: 0, text: 0, toolarg: 0 })
-    assert.deepEqual(decodeSpansOfStream([
+    const zero = { spans: tally, blocks: tally }
+    assert.deepEqual(decodeTallyOfStream(undefined, 100), zero)
+    assert.deepEqual(decodeTallyOfStream('stream', 100), zero)
+    assert.deepEqual(decodeTallyOfStream([], 100), zero)
+    assert.deepEqual(decodeTallyOfStream([chunk(500, 'text')], Number.NaN), zero)
+    assert.deepEqual(decodeTallyOfStream([
       null, 7, 'x',
       { type: 'chunk' },
       { type: 'chunk', time: 1, chunk: null },
       { type: 'chunk', time: 2, chunk: { type: 'text-delta', text: 'x' } },
+      // The unusable time skips the record WHOLE: no span, no count.
       { type: 'chunk', time: 'x', chunk: { type: 'block-start', blockType: 'text' } },
       { type: 'text-chunks', time0: 1, index: 0, dt: [], texts: ['a'] },
-    ], 100), { reasoning: 0, text: 0, toolarg: 0 })
+    ], 100), zero)
   })
 
   test('a backwards marker clamps to a zero span instead of a negative one', () => {
     // The text block's interval is negative → 0; the reasoning block is last,
     // so it owns the tail to endTime.
-    assert.deepEqual(decodeSpansOfStream([chunk(1000, 'text'), chunk(900, 'reasoning')], 950), {
-      reasoning: 50, text: 0, toolarg: 0,
+    assert.deepEqual(decodeTallyOfStream([chunk(1000, 'text'), chunk(900, 'reasoning')], 950), {
+      spans: { reasoning: 50, text: 0, toolarg: 0 },
+      blocks: { reasoning: 1, text: 1, toolarg: 0 },
     })
   })
 })
@@ -150,11 +169,8 @@ describe('firstTokenTimeOfStream', () => {
 })
 
 describe('replaceRangeOf', () => {
-  test('reads both endpoint spellings', () => {
+  test('reads the startSeq/endSeq endpoints', () => {
     assert.deepEqual(replaceRangeOf({ op: 'replace', startSeq: 3, endSeq: 7 }), { start: 3, end: 7 })
-    assert.deepEqual(replaceRangeOf({ op: 'replace', start: 3, end: 7 }), { start: 3, end: 7 })
-    assert.deepEqual(replaceRangeOf({ op: 'replace', startSeq: 3, end: 7 }), { start: 3, end: 7 }, 'a mixed op prefers the V3 spelling')
-    assert.deepEqual(replaceRangeOf({ op: 'replace', start: 3, endSeq: 7 }), { start: 3, end: 7 }, 'a mixed op falls back per endpoint')
   })
 
   test('append, unknown, and malformed ops read as no replacement', () => {
@@ -162,6 +178,9 @@ describe('replaceRangeOf', () => {
     assert.equal(replaceRangeOf(null), null)
     assert.equal(replaceRangeOf(undefined), null)
     assert.equal(replaceRangeOf({ op: 'insert', startSeq: 1, endSeq: 2 }), null)
+    // A pre-V3 spelling (`start`/`end`) is not an endpoint this dialect
+    // carries: an op offering only those reads as malformed → append.
+    assert.equal(replaceRangeOf({ op: 'replace', start: 3, end: 7 }), null)
     assert.equal(replaceRangeOf({ op: 'replace', startSeq: 1 }), null)
     assert.equal(replaceRangeOf({ op: 'replace', startSeq: Number.NaN, endSeq: 2 }), null)
     assert.equal(replaceRangeOf({ op: 'replace', startSeq: '1', endSeq: 2 }), null)

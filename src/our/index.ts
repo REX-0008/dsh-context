@@ -75,13 +75,11 @@ function inferKind(name: string): 'preset' | 'plugin' {
  * that no longer matches the real order.
  * @param registry - the live observation registry, when composed.
  * @param name - the section name.
- * @param index - the section's position in the delivered order (0-based).
  * @returns the resolved origin, its source, and a staleness flag.
  */
 function resolveOrigin(
   registry: SectionRegistry | undefined,
   name: string,
-  index: number,
   registered?: Record<string, number>,
   toolOwnerOf?: (name: string) => string | undefined,
 ): {
@@ -124,7 +122,7 @@ function resolveOrigin(
   }
   // Nothing knows it: report the position it actually arrived at, marked as
   // unattributed, instead of inventing a number.
-  return { from: 'none', staleTable: false, order: undefined, ...(index >= 0 ? {} : {}) }
+  return { from: 'none', staleTable: false, order: undefined }
 }
 
 /**
@@ -168,9 +166,9 @@ function stateHandler(wiring: Wiring) {
       // The preset NAME (what the panel shows) and the per-preset off list.
       const presetId = engine === undefined ? undefined : engine.presetIdForSession(sessionId)
       const presetOff = new Set(presetId === undefined ? [] : (value?.presetDisabledSections?.[presetId] ?? []))
-      const overrides = value?.sectionOverrides?.[sessionId] ?? {}
-      const weights = value?.sectionWeights?.[sessionId] ?? {}
-      const originals = value?.sectionOriginals?.[sessionId] ?? {}
+      const overrides: Record<string, string | undefined> = value?.sectionOverrides?.[sessionId] ?? {}
+      const weights: Record<string, number | undefined> = value?.sectionWeights?.[sessionId] ?? {}
+      const originals: Record<string, string | undefined> = value?.sectionOriginals?.[sessionId] ?? {}
       const moduleView = engine === undefined ? [] : engine.getModuleViewForSession(sessionId)
       const ownModules = new Map(moduleView.map(module => [module.name, module]))
       // The registry read is the widest source, so it is fetched once per request
@@ -180,8 +178,8 @@ function stateHandler(wiring: Wiring) {
       const contexts = engine === undefined ? null : await engine.contextsForSession(sessionId)
       // What injected into this conversation's batches, with its content.
       const observed = engine === undefined ? [] : engine.observedInjectionsForSession(sessionId)
-      const systemSections = sections === null ? null : sections.map((section, index) => {
-        const origin = resolveOrigin(wiring.sections, section.name, index, registeredOrders, wiring.bridge?.toolOwnerOf)
+      const systemSections = sections === null ? null : sections.map((section) => {
+        const origin = resolveOrigin(wiring.sections, section.name, registeredOrders, wiring.bridge?.toolOwnerOf)
         // "Edited" means different things per kind, because the write path
         // differs. Our own module's body IS the record, so an edit shows up as a
         // body that no longer matches its seeded default; every other kind keeps
@@ -205,7 +203,7 @@ function stateHandler(wiring: Wiring) {
           // rendered from that body); only the other kinds are overridden here.
           text: own !== undefined
             ? section.text
-            : (overrides[section.name] as string | undefined) ?? section.text,
+            : (overrides[section.name]) ?? section.text,
           kind: ownModules.has(section.name) ? 'config' as const : inferKind(section.name),
           // Tri-state, naming which level switched it off so the panel can say
           // so rather than showing a bare "off".
@@ -351,7 +349,7 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
     const name = String(p.name)
     const all = { ...(scope.get().contextOverrides ?? {}) }
     const mine = { ...(all[sessionId] ?? {}) }
-    mine[name] = String(p.text ?? '')
+    mine[name] = typeof p.text === 'string' ? p.text : ''
     all[sessionId] = mine
     await scope.update({ contextOverrides: all })
   },
@@ -413,7 +411,7 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
    */
   setSectionText: async ({ scope, p, sessionId, service, engine }) => {
     const name = String(p.name)
-    const text = String(p.text ?? '')
+    const text = typeof p.text === 'string' ? p.text : ''
     // A section this plugin injects has no separate body: this plugin's persisted
     // module registry IS both its source and its body, so the edit goes straight
     // into that record. Keeping a shadow override for it would leave two bodies
@@ -432,7 +430,7 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
     overrides[sessionId] = session
     const originals = { ...(value.sectionOriginals ?? {}) }
     const sessionOriginals = { ...(originals[sessionId] ?? {}) }
-    if (typeof p.original === 'string' && sessionOriginals[name] === undefined) {
+    if (typeof p.original === 'string' && !Object.hasOwn(sessionOriginals, name)) {
       sessionOriginals[name] = p.original
     }
     originals[sessionId] = sessionOriginals
@@ -450,12 +448,10 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
     }
     const value = scope.get()
     const overrides = { ...(value.sectionOverrides ?? {}) }
-    const session = { ...(overrides[sessionId] ?? {}) }
-    delete session[name]
+    const { [name]: _override, ...session } = overrides[sessionId] ?? {}
     overrides[sessionId] = session
     const originals = { ...(value.sectionOriginals ?? {}) }
-    const sessionOriginals = { ...(originals[sessionId] ?? {}) }
-    delete sessionOriginals[name]
+    const { [name]: _original, ...sessionOriginals } = originals[sessionId] ?? {}
     originals[sessionId] = sessionOriginals
     await scope.update({ sectionOverrides: overrides, sectionOriginals: originals })
   },
@@ -501,19 +497,24 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
     }
     const value = scope.get()
     const weights = { ...(value.sectionWeights ?? {}) }
-    const session = { ...(weights[sessionId] ?? {}) }
-    if (p.weight === null || p.weight === undefined) delete session[name]
-    else session[name] = Number(p.weight)
+    let session = { ...(weights[sessionId] ?? {}) }
+    if (p.weight === null || p.weight === undefined) {
+      const { [name]: _removed, ...rest } = session
+      session = rest
+    } else {
+      session[name] = Number(p.weight)
+    }
     weights[sessionId] = session
     await scope.update({ sectionWeights: weights })
   },
-  apply: ({ service, sessionId }) => service.applyChanges(sessionId),
-  editSkillDirs: ({ service, p, sessionId }) => service.editSkillDirs((p.dirs as string[] | undefined) ?? [], sessionId),
-  editBaseline: ({ service, p, sessionId }) => service.editBaselineConfig((p.patch as Record<string, unknown> | undefined) ?? {}, sessionId),
+  apply: ({ service, sessionId }) =>{  service.applyChanges(sessionId) },
+  editSkillDirs: ({ service, p, sessionId }) =>{  service.editSkillDirs((p.dirs as string[] | undefined) ?? [], sessionId) },
+  editBaseline: ({ service, p, sessionId }) => {
+    service.editBaselineConfig((p.patch as Record<string, unknown> | undefined) ?? {}, sessionId)
+  },
   clearOverrides: ({ scope, sessionId }) => {
     const value = scope.get()
-    const rest: Record<string, Record<string, unknown>> = { ...(value.conversationOverrides ?? {}) }
-    delete rest[sessionId]
+    const { [sessionId]: _removed, ...rest }: Record<string, Record<string, unknown>> = value.conversationOverrides
     return scope.update({ conversationOverrides: rest })
   },
 }
@@ -522,7 +523,7 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
 function actionHandler(wiring: Wiring) {
   return async (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse): Promise<void> => {
     let body = ''
-    for await (const chunk of req) body += chunk
+    for await (const chunk of req) body += chunk as string
     let parsed: { action?: string; sessionId?: string; payload?: Record<string, unknown> }
     try {
       parsed = JSON.parse(body === '' ? '{}' : body) as typeof parsed
@@ -537,7 +538,8 @@ function actionHandler(wiring: Wiring) {
       res.end(JSON.stringify({ ok: false, error: 'context-panel-write not ready' }))
       return
     }
-    const handler = ACTION_HANDLERS[parsed.action ?? '']
+    const action = parsed.action ?? ''
+    const handler = Object.hasOwn(ACTION_HANDLERS, action) ? ACTION_HANDLERS[action] : undefined
     if (handler === undefined) {
       res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' })
       res.end(JSON.stringify({ ok: false, error: `unknown action ${String(parsed.action)}` }))

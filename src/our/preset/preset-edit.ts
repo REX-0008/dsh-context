@@ -93,7 +93,8 @@ export function serializeKeyBlock(key: string, value: unknown, keyIndent: number
     for (const [k, v] of entries) out.push(...serializeKeyBlock(k, v, keyIndent + 2))
     return out
   }
-  return [pad + key + ': ' + String(value)]
+  // Not JSON-compatible (bigint / symbol / function): a preset file cannot hold it, write null.
+  return [pad + key + ': null']
 }
 
 /** A resolved plugin row. */
@@ -304,7 +305,7 @@ export function appendPluginRow(
 ): string {
   const { lines, eol, trailing } = splitLines(fileText)
   // keep a blank line between this row and the previous one
-  let insert: string[] = []
+  const insert: string[] = []
   const last = lines.length - 1
   if (last >= 0 && !isBlankOrComment(lines[last])) insert.push('')
   insert.push('- id: ' + pluginId)

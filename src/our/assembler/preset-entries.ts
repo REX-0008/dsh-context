@@ -49,10 +49,13 @@ export function presetEntriesOf(agent: Agent, readProjection: (agent: Agent, key
   try {
     const doc = yamlLoad(readFileSync(file, 'utf8'))
     if (!Array.isArray(doc)) return []
-    return (doc as Array<Record<string, unknown>>)
-      .filter((entry) => entry !== null && typeof entry === 'object'
-        && typeof entry.id === 'string' && typeof entry.name === 'string')
-      .map((entry) => ({
+    return (doc as Array<unknown>)
+      .filter((raw): raw is Record<string, unknown> => {
+        if (raw === null || typeof raw !== 'object') return false
+        const entry = raw as Record<string, unknown>
+        return typeof entry.id === 'string' && typeof entry.name === 'string'
+      })
+      .map(entry => ({
         id: entry.id as string,
         name: entry.name as string,
         ...(entry.config === undefined ? {} : { config: entry.config }),

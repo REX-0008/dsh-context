@@ -1,18 +1,20 @@
+
 // Session-cost estimate (src/client/cost.ts): the fuzzy lookup against THIS
 // PLUGIN's own price table (client/priceTable.ts), the USD→CNY conversion at the
 // fixed 1 CNY = 0.15 USD, the null degradations, the numOf coercion of garbage
 // bucket fields, the money/rate formatting, and the deep merge behind the stats
 // board's family-scope cost cells.
 //
-// The provider argument and the registry book are retained in the signatures but
+// The provider argument and the book are retained in the signatures but
 // no longer affect a price: the table keys on the model id alone, so one model
 // prices the same however the log spells its provider.
 
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
-import { estimateSessionCost, formatCost, formatPriceRate, mergeCostUsage, peakOf, priceOf, toCurrency } from '../../src/client/cost'
+import { estimateSessionCost, formatCost, formatPriceRate, mergeCostUsage, priceFaceOf, priceOf, toCurrency } from '../../src/client/cost'
 import { normalizeModel, tableRateOf } from '../../src/client/priceTable'
-import type { ModelPrices } from '../../src/client/cost'
+import type { ModelBook } from '../../src/client/cost'
+
 import type { CostBucketTotals } from '../../src/shared/types'
 
 const M = 1_000_000
@@ -24,7 +26,7 @@ const V32 = { hit: 0.028, miss: 0.28, write: 0.28, out: 0.42 }
 const SONNET = { hit: 0.3, miss: 3, write: 3.75, out: 15 }
 
 /** A book is still accepted (and ignored) so the call sites stay covered. */
-const BOOK: ModelPrices = {}
+const BOOK: ModelBook = { prices: {} }
 
 function bucket(cacheRead: number, uncached: number, cacheWrite: number, output: number): CostBucketTotals {
   return { cacheRead, uncached, cacheWrite, output }
@@ -81,6 +83,7 @@ describe('tableRateOf', () => {
 })
 
 describe('priceOf', () => {
+
   test('prices from the table and ignores the provider and the book', () => {
     assert.deepEqual(priceOf(BOOK, 'deepseek-official', 'deepseek-v4.1-flash'), FLASH41)
     // One model, several provider spellings — one price.
@@ -95,10 +98,12 @@ describe('priceOf', () => {
     // A null book used to price nothing; the table is the source now.
     assert.deepEqual(priceOf(null, 'deepseek-official', 'deepseek-v4.1-flash'), FLASH41)
     assert.deepEqual(priceOf(undefined, '', 'deepseek-v4.1-flash'), FLASH41)
+
   })
 })
 
 describe('estimateSessionCost', () => {
+
   test('null usage or an absent book argument prices to null', () => {
     assert.equal(estimateSessionCost(null, BOOK, 'usd'), null)
     assert.equal(estimateSessionCost(undefined, BOOK, 'cny'), null)
@@ -108,6 +113,7 @@ describe('estimateSessionCost', () => {
   test('usage without any priced model returns null', () => {
     assert.equal(estimateSessionCost({}, BOOK, 'usd'), null)
     assert.equal(estimateSessionCost({ 'deepseek-official': { unknown: { peak: bucket(0, M, 0, 0) } } }, BOOK, 'usd'), null)
+
   })
 
   test('prices every period bucket at its own rate (hit / miss / write / out)', () => {
@@ -116,11 +122,14 @@ describe('estimateSessionCost', () => {
       'deepseek-official': { 'deepseek-v4.1': { off: bucket(M, M, M, M) } },
       'anthropic': { 'claude-sonnet-4': { off: bucket(0, M, 0, 0) } },
     }
+
     close(estimateSessionCost(usage, BOOK, 'usd'), (0.14 + 1.4 + 1.4 + 2.8) + 3)
+
   })
 
   test('peak buckets price at twice the table rate for DeepSeek only', () => {
     const split = { peak: bucket(0, M, 0, 0), off: bucket(0, M, 0, 0) }
+
     // flash miss 0.7 -> peak 1.4, off 0.7
     close(estimateSessionCost({ 'deepseek-official': { 'deepseek-v4.1-flash': split } }, BOOK, 'usd'), 1.4 + 0.7)
     // A non-DeepSeek provider bills both buckets flat: no doubling.
@@ -128,10 +137,15 @@ describe('estimateSessionCost', () => {
       estimateSessionCost({ anthropic: { 'claude-sonnet-4': split } }, BOOK, 'usd'),
       3 + 3,
       'a non-DeepSeek provider bills a peak bucket at the table rate, never doubled',
+
     )
+    // The account route shares DeepSeek's period list, so its peak buckets
+    // double too — the fold splits them only since providers.ts maps it.
+    close(estimateSessionCost({ 'deepseek-account': { 'deepseek-v4.1-flash': split } }, BOOK, 'usd'), 1.4 + 0.7)
   })
 
   test('a missing model is skipped while priced ones still sum', () => {
+
     const usage = { anthropic: { 'claude-sonnet-4': { peak: bucket(0, M, 0, 0) } } }
     close(estimateSessionCost(usage, BOOK, 'usd'), 3)
   })
@@ -140,17 +154,22 @@ describe('estimateSessionCost', () => {
     // 1M off-peak flash miss = $0.7 -> ¥0.7/0.15
     const usage = { 'deepseek-official': { 'deepseek-v4.1-flash': { off: bucket(0, M, 0, 0) } } }
     close(estimateSessionCost(usage, BOOK, 'cny'), 0.7 / 0.15)
+
   })
 
   test('non-number bucket fields are coerced to zero by numOf', () => {
     const garbage = { cacheRead: NaN, uncached: 'x', cacheWrite: undefined, output: Infinity } as unknown as CostBucketTotals
+
     assert.equal(estimateSessionCost({ 'deepseek-official': { 'deepseek-v4.1-flash': { peak: garbage } } }, BOOK, 'usd'), 0)
+
   })
 
   test('garbage fields degrade while real fields still price', () => {
     const mixed = { cacheRead: M, uncached: NaN, cacheWrite: M / 2, output: 'junk' } as unknown as CostBucketTotals
+
     // peak flash: 1M cacheRead at 0.07 + 0.5M write at 0.7, all doubled
     close(estimateSessionCost({ 'deepseek-official': { 'deepseek-v4.1-flash': { peak: mixed } } }, BOOK, 'usd'), 2 * (0.07 + 0.5 * 0.7))
+
   })
 
   test('hostile provider branches, periods, and buckets are skipped, not fatal', () => {
@@ -159,7 +178,9 @@ describe('estimateSessionCost', () => {
       anthropic: { broken: null, 'claude-sonnet-4': { peak: 'junk', off: bucket(0, M, 0, 0) } },
       'deepseek-official': { 'deepseek-v4.1-flash': { peak: bucket(0, M, 0, 0) } },
     } as unknown as { [provider: string]: Record<string, Record<string, CostBucketTotals>> }
+
     close(estimateSessionCost(usage, BOOK, 'usd'), 1.4 + 3)
+
   })
 })
 
@@ -185,10 +206,12 @@ describe('mergeCostUsage', () => {
   })
 
   test('the merged estimate equals the sum of the sides priced apart', () => {
+
     const a = { 'deepseek-official': { 'deepseek-v4.1-flash': { peak: bucket(M, M, 0, 0) } } }
     const b = { 'anthropic': { 'claude-sonnet-4': { peak: bucket(0, 2 * M, 0, 0) } } }
     const total = estimateSessionCost(mergeCostUsage(a, b), BOOK, 'usd')
     close(total ?? 0, (estimateSessionCost(a, BOOK, 'usd') ?? 0) + (estimateSessionCost(b, BOOK, 'usd') ?? 0))
+
   })
 
   test('null and absent sides drop out; nothing usable merges to null', () => {
@@ -224,9 +247,12 @@ describe('mergeCostUsage', () => {
   })
 })
 
-describe('peakOf', () => {
-  test('doubles every rate component so a peak figure can be shown beside the base', () => {
-    assert.deepEqual(peakOf(FLASH41), { hit: 0.14, miss: 1.4, write: 1.4, out: 2.8 })
+
+describe('priceFaceOf', () => {
+  test('names the table row every price lands on, book and provider unused', () => {
+    assert.deepEqual(priceFaceOf(BOOK, 'deepseek-official', 'deepseek-v4.1-flash'), { mid: '4.1-flash', rate: FLASH41 })
+    assert.deepEqual(priceFaceOf(null, 'anything', 'claude-sonnet-4'), { mid: 'sonnet', rate: SONNET }, 'a null book no longer gates the face')
+    assert.equal(priceFaceOf(BOOK, 'deepseek', 'mystery'), null)
   })
 })
 
@@ -248,18 +274,10 @@ describe('formatCost', () => {
 })
 
 describe('formatPriceRate', () => {
-  test('trims trailing zeros from a fixed-notation figure', () => {
-    assert.equal(formatPriceRate(3.0, 'cny'), '¥3')
-    assert.equal(formatPriceRate(4.5, 'cny'), '¥4.5')
-  })
-
-  test('trims trailing zeros from a precision-notation figure', () => {
-    assert.equal(formatPriceRate(0.007, 'usd'), '$0.007')
-    assert.equal(formatPriceRate(0.1, 'usd'), '$0.1')
-  })
-
-  test('strips the dot left behind when every decimal was a zero', () => {
-    assert.equal(formatPriceRate(9.0, 'cny'), '¥9')
-    assert.equal(formatPriceRate(1.5, 'cny'), '¥1.5')
+  test('always renders two decimals in the currency symbol', () => {
+    assert.equal(formatPriceRate(3, 'cny'), '¥3.00')
+    assert.equal(formatPriceRate(4.5, 'cny'), '¥4.50')
+    assert.equal(formatPriceRate(0.007, 'usd'), '$0.01')
+    assert.equal(formatPriceRate(0.1, 'usd'), '$0.10')
   })
 })

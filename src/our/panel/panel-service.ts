@@ -114,13 +114,13 @@ export function createPanelService(
       const scope = getScope()
       const value = scope.get()
       if (target === 'conversation') {
-        const overrides: Record<string, Record<string, PromptModulePatch>> = { ...(value.conversationOverrides ?? {}) }
+        const overrides: Record<string, Record<string, PromptModulePatch>> = { ...value.conversationOverrides }
         const sessionOverrides: Record<string, PromptModulePatch> = { ...(overrides[sessionId] ?? {}) }
         sessionOverrides[name] = mergePatch(sessionOverrides[name], patch)
         overrides[sessionId] = sessionOverrides
         await scope.update({ conversationOverrides: overrides })
       } else {
-        const modules: Record<string, PromptModulePatch> = { ...(value.modules ?? {}) }
+        const modules: Record<string, PromptModulePatch> = { ...value.modules }
         modules[name] = mergePatch(modules[name], patch)
         await scope.update({ modules })
         if (value.autoSyncPreset) engine.syncToPreset(sessionId)
@@ -129,25 +129,23 @@ export function createPanelService(
     async syncConversationToAgent(sessionId) {
       const scope = getScope()
       const value = scope.get()
-      const sessionOverrides = value.conversationOverrides?.[sessionId] ?? {}
-      const modules: Record<string, PromptModulePatch> = { ...(value.modules ?? {}) }
+      const sessionOverrides = value.conversationOverrides[sessionId] ?? {}
+      const modules: Record<string, PromptModulePatch> = { ...value.modules }
       for (const [name, patch] of Object.entries(sessionOverrides)) {
         modules[name] = mergePatch(modules[name], patch)
       }
-      const rest: Record<string, Record<string, PromptModulePatch>> = { ...(value.conversationOverrides ?? {}) }
-      delete rest[sessionId]
+      const { [sessionId]: _removed, ...rest } = value.conversationOverrides
       await scope.update({ modules, conversationOverrides: rest })
       if (value.autoSyncPreset) engine.syncToPreset(sessionId)
     },
     async setToolRestriction(name, filter) {
       const scope = getScope()
-      const restrictions: Record<string, { allow?: string[]; deny?: string[] }> = { ...(scope.get().toolRestrictions ?? {}) }
-      if (filter.allow === undefined && filter.deny === undefined) {
-        delete restrictions[name]
-      } else {
-        restrictions[name] = filter
-      }
-      await scope.update({ toolRestrictions: restrictions })
+      const restrictions: Record<string, { allow?: string[]; deny?: string[] }> = { ...scope.get().toolRestrictions }
+      const { [name]: _removed, ...rest } = restrictions
+      const updated = filter.allow === undefined && filter.deny === undefined
+        ? rest
+        : { ...restrictions, [name]: filter }
+      await scope.update({ toolRestrictions: updated })
     },
     getDirty(sessionId) {
       return engine.isDirty(sessionId)

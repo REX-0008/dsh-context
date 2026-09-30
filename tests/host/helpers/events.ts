@@ -15,7 +15,6 @@ export function at(time?: number): number {
 }
 
 export function header(seq: number, opts: {
-  system?: unknown
   tools?: unknown[]
   model?: unknown
   provider?: unknown
@@ -23,9 +22,8 @@ export function header(seq: number, opts: {
   /** Override the whole config object (e.g. to omit model/provider). */
   config?: unknown
   time?: number
-}): TimelineEvent {
+} = {}): TimelineEvent {
   const h: Record<string, unknown> = { config: opts.config ?? { model: opts.model, provider: opts.provider } }
-  if (opts.system !== undefined) h.system = opts.system
   if (opts.tools !== undefined) h.tools = opts.tools
   return { type: 'request/header', seq, time: at(opts.time), data: { header: h, reason: opts.reason ?? 'initial' } }
 }
@@ -58,11 +56,6 @@ export function stepStart(seq: number, opts: { time?: number } = {}): TimelineEv
   return { type: 'step/start', seq, time: at(opts.time) }
 }
 
-/** assistant/chunk: one stream chunk of the open step (the token flood). */
-export function assistantChunk(seq: number, chunk: unknown, opts: { time?: number } = {}): TimelineEvent {
-  return { type: 'assistant/chunk', seq, time: at(opts.time), data: { chunk } }
-}
-
 export function stepEnd(seq: number, opts: { time?: number } = {}): TimelineEvent {
   return { type: 'step/end', seq, time: at(opts.time) }
 }
@@ -79,14 +72,21 @@ export function toolResult(seq: number, opts: {
   /** The bounded presentation meta (search matches / read window) on the durable event. */
   meta?: unknown
   time?: number
+  /**
+   * The V4 spelling: `role: 'tool'`, the lifted message `toolCallId`/`isError`,
+   * direct content (no wrapper block), and no envelope `error` object — the
+   * mark rides the message alone.
+   */
+  v4?: boolean
 }): TimelineEvent {
-  const message: Record<string, unknown> = {
-    content: [{ type: 'tool-result', toolCallId: opts.callId, content: opts.content }],
-  }
+  const message: Record<string, unknown> = opts.v4 === true
+    ? { role: 'tool', toolCallId: opts.callId, content: opts.content }
+    : { content: [{ type: 'tool-result', toolCallId: opts.callId, content: opts.content }] }
   if (opts.noSource !== true) message.source = { kind: 'tool', callId: opts.callId }
+  if (opts.v4 === true && opts.error === true) message.isError = true
   const data: Record<string, unknown> = { message }
   if (opts.noEnvelopeId !== true) data.callId = opts.callId
-  if (opts.error === true) data.error = true
+  if (opts.v4 !== true && opts.error === true) data.error = true
   if (opts.meta !== undefined) data.meta = opts.meta
   return { type: 'tool/result', seq, time: at(opts.time), data, surfaceOp: 'append' }
 }
@@ -98,7 +98,7 @@ export function assistantMessage(seq: number, opts: {
   content?: ContentBlock[]
   /** Widened: hostile fixtures ride the same field (the fold re-proves every bucket). */
   usage?: Record<string, unknown>
-  /** The V2+ embedded provider stream (raw `chunk` records and packed runs). */
+  /** The embedded provider stream (raw `chunk` records and packed runs). */
   stream?: unknown
   time?: number
   surfaceOp?: TimelineEvent['surfaceOp']
@@ -111,7 +111,7 @@ export function assistantMessage(seq: number, opts: {
   return { type: 'assistant/message', seq, time: at(opts.time), data, surfaceOp: opts.surfaceOp ?? 'append' }
 }
 
-/** assistant/attempt: a settled model attempt that committed no surface message (V2+). */
+/** assistant/attempt: a settled model attempt that committed no surface message. */
 export function assistantAttempt(seq: number, opts: {
   turn?: number
   step?: number
@@ -126,14 +126,14 @@ export function assistantAttempt(seq: number, opts: {
   }
 }
 
-/** system/message: the V3 system prompt as a surface node. */
+/** system/message: the system prompt as a surface node. */
 export function systemMessage(seq: number, opts: {
   turn?: number
   step?: number
   content?: unknown
   time?: number
   surfaceOp?: TimelineEvent['surfaceOp']
-}): TimelineEvent {
+} = {}): TimelineEvent {
   return {
     type: 'system/message',
     seq,
@@ -159,12 +159,17 @@ export function planMode(seq: number, data?: Record<string, unknown>): TimelineE
   return { type: 'plan/mode', seq, time: at(), ...(data === undefined ? {} : { data }) }
 }
 
-/** An event the fold does not care about (chunk, todo, …). */
-export function foreign(seq: number, type = 'assistant/chunk'): TimelineEvent {
+/** session/end-seed: the fork/seed boundary marker; `data` widened for hostile fixtures. */
+export function endSeed(seq: number, data?: unknown): TimelineEvent {
+  return { type: 'session/end-seed', seq, time: at(), ...(data === undefined ? {} : { data }) as Record<string, unknown> }
+}
+
+/** An event the fold does not care about (a todo write, a turn marker, …). */
+export function foreign(seq: number, type = 'todo/write'): TimelineEvent {
   return { type, seq, time: at(), data: {} }
 }
 
-/** A nested PTC (Code Mode) dispatch settling inside a run_code program — both vocabulary generations. */
+/** A nested PTC (Code Mode) dispatch settling inside a run_code program. */
 export function codeDispatch(seq: number, opts: {
   rootCallId?: unknown
   parentCallId?: unknown
@@ -173,11 +178,9 @@ export function codeDispatch(seq: number, opts: {
   arguments?: unknown
   isError?: unknown
   time?: number
-  /** The V3 vocabulary tag (`tool/ptc-dispatch`); defaults to the V0/V2 `tool/code-dispatch`. */
-  type?: string
 }): TimelineEvent {
   return {
-    type: opts.type ?? 'tool/code-dispatch',
+    type: 'tool/ptc-dispatch',
     seq,
     time: at(opts.time),
     data: {

@@ -34,7 +34,7 @@
 
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { dirname, join, relative } from 'node:path'
+import { dirname, isAbsolute, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 
@@ -71,7 +71,7 @@ const HOME_PROBE_PACKAGES = ['@deepseek-ai/dsh', ...LIBRARY_PROBE_PACKAGES] as c
  */
 function ownPackageRoot(): string {
   try {
-    return dirname(fileURLToPath(import.meta.resolve('dsh-context/package.json')))
+    return dirname(fileURLToPath(import.meta.resolve('@our/context-panel-write/package.json')))
   } catch {
     /* v8 ignore next -- a loader that cannot resolve one of its own package's
        published subpaths is out of the suite's reach; the fallback keeps one
@@ -142,11 +142,15 @@ function probeAnchor(resolve: Resolve, packageNames: readonly string[]): string 
 /**
  * Whether `candidate` lies inside `root`'s tree. A `..`-prefixed relative path
  * escapes it; a sibling such as `dsh-context-extra` is reached through `..` too,
- * so it never counts as a child. A pathological child literally named `..foo`
- * would degrade to the home anchor, which is the safe direction.
+ * so it never counts as a child. On Windows, a cross-drive `relative()` returns
+ * the candidate's ABSOLUTE path (no `..` prefix) — a different drive is never
+ * inside this tree, so the absolute answer is rejected the same way. A
+ * pathological child literally named `..foo` would degrade to the home anchor,
+ * which is the safe direction.
  */
 function isInside(root: string, candidate: string): boolean {
-  return !relative(root, candidate).startsWith('..')
+  const rel = relative(root, candidate)
+  return !rel.startsWith('..') && !isAbsolute(rel)
 }
 
 /**

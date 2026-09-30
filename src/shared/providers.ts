@@ -1,24 +1,18 @@
 /**
- * The provider-id seam between dsh request envelopes and the models.dev
- * registry: client/cost.ts resolves price-book branches through it, and
- * host/fold.ts uses the DeepSeek resolution to split the session-cost totals
- * into peak/off-peak periods. Only the renames live here — an id absent
- * from the table passes through verbatim.
+ * The provider-id seam for DeepSeek's period-based billing: host/fold.ts and
+ * host/activity.ts split the billed buckets into peak/off-peak periods, and
+ * client/cost.ts prices the peak buckets at double — for DeepSeek alone.
  */
 
-const MODELS_DEV_PROVIDER_IDS: Record<string, string> = {
-  'deepseek-official': 'deepseek',
-  'kimi-coding': 'moonshotai',
-  'minimax-cn': 'minimax',
-  'zai-coding-cn': 'zhipuai',
-}
+const DEEPSEEK_PROVIDER_IDS: ReadonlySet<string> = new Set([
+  // dsh's two native DeepSeek routes share one period-based list — plus the
+  // bare vendor id some envelopes carry directly.
+  'deepseek-official',
+  'deepseek-account',
+  'deepseek',
+])
 
-/** The models.dev provider id that prices a dsh provider (identity for unmapped ids). */
-export function modelsDevProviderOf(dshProviderId: string): string {
-  return MODELS_DEV_PROVIDER_IDS[dshProviderId] ?? dshProviderId
-}
-
-/** Whether a dsh provider prices through DeepSeek's period-based list (peak / half-price off-peak). */
+/** Whether a dsh provider bills through DeepSeek's period-based list (peak / half-price off-peak). */
 export function isDeepSeekProvider(dshProviderId: string): boolean {
-  return modelsDevProviderOf(dshProviderId) === 'deepseek'
+  return DEEPSEEK_PROVIDER_IDS.has(dshProviderId)
 }

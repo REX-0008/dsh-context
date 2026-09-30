@@ -97,10 +97,49 @@ describe.skipIf(reasons.length > 0)('compat matrix — real dsh sources per base
       assert.equal(report.poisonedSnapshotThrows, true)
     })
 
-    test('settings: the tag\'s namespace enforcement accepts the plugin literal', () => {
-      const pattern = staging.namespacePatternOf(baseline)
+    test('settings: the tag\'s namespace surface matches the plugin\'s feature-detected faces', () => {
+      const settings = baseline.settings
+      // The register face the host half calls (and feature-detects): present
+      // through V3, gone on the V4+ Config-form generations.
+      assert.equal(
+        staging.dshHasString(baseline.tag, 'register(', settings.serviceFile),
+        settings.register,
+        'the settings service register face',
+      )
+      // Where the generation enforces a namespace pattern it must accept the
+      // plugin literal; where it does not (the pattern source is gone), the
+      // register probe above already pins the plugin's inert path.
+      if (settings.patternFile === undefined) return
+      const pattern = staging.namespacePatternOf(baseline, settings.patternFile)
       assert.ok(pattern !== null, 'the tag source carries NAMESPACE_PATTERN')
       assert.equal(pattern.test('dsh-context'), true)
+    })
+
+    test('balance: the settings face and the DeepSeek provider row the facts fold reads', () => {
+      // The balance route resolves the provider's settings row through the
+      // face this generation serves — the `get(ns)` section read through V3,
+      // the Config-form `describe()` projection on V4+ (the row matched by
+      // its own apiKeyEnv-bearing section shape). Presence asserted both
+      // ways, so a moved seam names itself instead of silently hiding the
+      // capsule.
+      const balance = baseline.balance
+      assert.equal(
+        staging.dshHasString(baseline.tag, balance.settingsGetNeedle, balance.settingsFile),
+        balance.settingsGetPresent,
+        'the settings service get face',
+      )
+      if (balance.settingsDescribeNeedle !== undefined) {
+        assert.equal(
+          staging.dshHasString(baseline.tag, balance.settingsDescribeNeedle, balance.settingsFile),
+          true,
+          'the settings service describe face',
+        )
+      }
+      for (const provider of balance.providerFiles) {
+        for (const needle of provider.needles) {
+          assert.equal(staging.dshHasString(baseline.tag, needle, provider.file), true, `provider seam: ${needle}`)
+        }
+      }
     })
 
     for (const slot of staging.SLOT_SEAMS) {
@@ -109,9 +148,33 @@ describe.skipIf(reasons.length > 0)('compat matrix — real dsh sources per base
       })
     }
 
-    test('client: the app frame carries the inline sidebar track (modal dock seam, dockMeasure.ts)', () => {
+    test('client: the preferences card seat and transport match the generation', () => {
+      // The keyed slot the browser half's card registers on and the settings
+      // transport it rides: `settings.plugin.item` + `settingsScope` through
+      // V3, the Plugins page's `plugins.bundle.config` + `configForms` from
+      // the Config-form generation on. Asserted BOTH ways (like the sidebar
+      // seam) so a moved seam cannot read as "unsupported here" — a slot the
+      // generation does not declare simply never receives the registration.
+      const settings = baseline.settings
       assert.equal(
-        staging.dshHasString(baseline.tag, '${cols.sidebar}px minmax(0, 1fr)', 'packages/client/ui-layout/src/client/AppFrame.tsx'),
+        settings.cardSlotFiles.some(pattern =>
+          staging.dshHasString(baseline.tag, `'${settings.cardSlot}'`, pattern)),
+        true,
+        `the card slot "${settings.cardSlot}" is declared on this generation`,
+      )
+      assert.equal(
+        staging.dshHasString(baseline.tag, `'${settings.transport}'`, settings.transportFile),
+        settings.transportPresent,
+        `the settings transport "${settings.transport}"`,
+      )
+    })
+
+    test('client: the app frame carries the inline sidebar-leading grid track (modal dock seam, dockMeasure.ts)', () => {
+      // dockMeasure reads the LEADING `Npx` track off the frame's inline
+      // gridTemplateColumns; `px minmax(` pins a sidebar-first multi-track
+      // template without pinning the newer generations' center/right spellings.
+      assert.equal(
+        staging.dshHasString(baseline.tag, 'px minmax(', 'packages/client/ui-layout/src/client/AppFrame.tsx'),
         true,
       )
     })
@@ -135,15 +198,8 @@ describe.skipIf(reasons.length > 0)('compat matrix — real dsh sources per base
       assert.equal(staging.dshHasString(baseline.tag, dc.registryNeedle, dc.registryFile), true, 'registry stateOf face')
     })
 
-    test('client: the right Sidebar tab seam (optional per generation)', () => {
+    test('client: the right Sidebar tab seam', () => {
       const sidebar = baseline.client.sidebar
-      if (sidebar === undefined) {
-        // No right Sidebar on this line: the plugin's deferred registration
-        // must never fire, which the always-on client lane pins. Assert the
-        // absence itself so a moved seam cannot read as "unsupported here".
-        assert.equal(staging.dshHasString(baseline.tag, 'sidebarRightTabs', 'packages/client/*/src/**'), false)
-        return
-      }
       assert.equal(staging.dshHasString(baseline.tag, sidebar.serviceNeedle, sidebar.serviceFile), true, 'tab-type registry service')
       assert.equal(staging.dshHasString(baseline.tag, sidebar.slotNeedle, sidebar.slotFile), true, 'keyed body seat')
       assert.equal(staging.dshHasString(baseline.tag, sidebar.titleSlotNeedle, sidebar.slotFile), true, 'keyed chip-title seat')
@@ -151,16 +207,38 @@ describe.skipIf(reasons.length > 0)('compat matrix — real dsh sources per base
     })
 
     test('client: the right Sidebar guide-entry contract (the contribution\'s shape)', () => {
-      const sidebar = baseline.client.sidebar
-      // No right Sidebar on this line: the entry is never contributed there.
-      if (sidebar === undefined) return
-      for (const field of sidebar.guideEntry.fields) {
-        assert.equal(staging.dshHasString(baseline.tag, field, sidebar.guideEntry.file), true, `guide-entry field: ${field}`)
+      for (const field of baseline.client.sidebar.guideEntry.fields) {
+        assert.equal(staging.dshHasString(baseline.tag, field, baseline.client.sidebar.guideEntry.file), true, `guide-entry field: ${field}`)
       }
+    })
+
+    test('client: the session-jump seam of this generation (issue #90)', () => {
+      // The view owner's navigation verb (the sidebar row click's own), with
+      // the signature this line spells; and the retired sessions-service
+      // `open(id)` selection verb, declared exactly where the line still has it.
+      const nav = baseline.client.sessionNav
+      assert.equal(
+        staging.dshHasString(baseline.tag, nav.workspaceNeedle, nav.workspaceFile),
+        true,
+        'the view-owner navigation verb (uiWorkspace.openSession)',
+      )
+      assert.equal(
+        staging.dshHasString(baseline.tag, 'open(id: SessionId): void', nav.sessionsFile),
+        nav.sessionsOpen,
+        'the retired sessions-service selection verb',
+      )
     })
 
     test('client: MarkdownText chrome prop', () => {
       assert.equal(staging.dshHasString(baseline.tag, baseline.client.markdownChrome, 'packages/client/ui-primitives/src/markdown/MarkdownText.tsx'), true)
+    })
+
+    test('client: the icon seams resolve on this generation (primitives.ts)', () => {
+      for (const [modern, legacy] of staging.ICON_SEAMS) {
+        const present = staging.dshHasString(baseline.tag, modern, 'packages/client/ui-primitives/src/**')
+          || staging.dshHasString(baseline.tag, legacy, 'packages/client/ui-primitives/src/**')
+        assert.equal(present, true, `icon seam: ${modern} | ${legacy}`)
+      }
     })
 
     test('host: the fold\'s event vocabulary for this generation exists in the durable log', async () => {

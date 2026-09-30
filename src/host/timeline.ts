@@ -150,10 +150,17 @@ const timingTotalsSchema = z.object({
   ttftMs: z.number().nonnegative(),
   genMs: z.number().nonnegative(),
   // Additive-optional (see TimingTotals): rows cached before the generation
-  // split carry `genMs` without these, and must keep parsing.
+  // split carry `genMs` without these, and must keep parsing. The block counts
+  // are additive-optional the same way (rows cached before they existed).
   reasoningMs: z.number().nonnegative().optional(),
+  reasoningBlocks: z.number().int().nonnegative().optional(),
   textMs: z.number().nonnegative().optional(),
+  textBlocks: z.number().int().nonnegative().optional(),
   toolArgMs: z.number().nonnegative().optional(),
+  toolArgBlocks: z.number().int().nonnegative().optional(),
+  // The throughput seat, additive-optional for the same reason.
+  speedTokens: z.number().nonnegative().optional(),
+  speedMs: z.number().nonnegative().optional(),
   calls: z.number().int().nonnegative(),
   toolsMs: z.number().nonnegative(),
   toolCalls: z.number().int().nonnegative(),
@@ -235,13 +242,13 @@ const timelineStateSchema = z.object({
   }).strict(),
   systemTokens: z.number().int().nonnegative(),
   systems: z.array(systemPromptNodeSchema).optional(),
-  systemsFromHeader: z.literal(true).optional(),
   toolsTokens: z.number().int().nonnegative(),
   model: z.string().optional(),
   provider: z.string().optional(),
   lastModel: z.string().optional(),
   contextWindow: z.number().optional(),
   requests: z.array(requestRecordSchema),
+  turnRuns: z.number().int().nonnegative().optional(),
   events: z.array(contextEventSchema),
   archived: z.array(surfaceNodeSchema),
   cost: costUsageSchema.optional(),
@@ -252,9 +259,6 @@ const timelineStateSchema = z.object({
   stepStart: z.object({
     time: z.number(),
     firstToken: z.number().optional(),
-    // The generation split's in-flight accumulator (see TimelineState.stepStart).
-    decode: z.object({ reasoning: z.number(), text: z.number(), toolarg: z.number() }).strict().optional(),
-    block: z.object({ kind: z.enum(['reasoning', 'text', 'toolarg']), since: z.number() }).strict().optional(),
   }).strict().optional(),
   callNames: z.record(z.string(), z.object({ name: z.string(), start: z.number(), argsRaw: z.string().optional() }).strict()),
   pendingShadowedSeqs: z.array(z.number()).optional(),
@@ -349,15 +353,14 @@ export function createContextTimelineDefinition(config: Config, slim: () => bool
     // TARGET (the searched path / the pattern) in addition to the per-file
     // hit rows — the op log's fold semantics changed, so cached rows refold.
     //
-    // 15 since 0.47: the fold reads BOTH supported log generations (see
-    // host/logShapes.ts) — V3 `system/message` nodes, embedded assistant
+    // 15 since 0.47: the fold reads the supported log generations (see
+    // host/logShapes.ts) — `system/message` nodes, embedded assistant
     // streams, `startSeq`/`endSeq` replacements, `tool/ptc-dispatch`. The new
-    // state fields (`systems`, `systemsFromHeader`) are additive-OPTIONAL, so
-    // cached rows keep parsing and stay USABLE: a bump would invalidate every
-    // row and orphan the key for idle sessions, which have no refresh channel
-    // until they go live again (the #37 regression) — strictly worse than a
-    // pre-fix session showing its corrected figures from the next folded
-    // event onward.
+    // state field (`systems`) is additive-OPTIONAL, so cached rows keep
+    // parsing and stay USABLE: a bump would invalidate every row and orphan
+    // the key for idle sessions, which have no refresh channel until they go
+    // live again (the #37 regression) — strictly worse than a pre-fix session
+    // showing its corrected figures from the next folded event onward.
     //
     // 16: the whole-session human-input tally (`humanInputs`) joined the
     // state — a running total that later events cannot backfill, so unlike
@@ -367,8 +370,8 @@ export function createContextTimelineDefinition(config: Config, slim: () => bool
     //
     // 17: the session-cost totals (`cost`) rekeyed from the DeepSeek
     // family × peak/off-period buckets to per-(provider, model) totals,
-    // priced client-side from the models.dev registry (client/modelPrices.ts)
-    // instead of the hardcoded rate table. The old shape cannot be
+    // priced client-side from a price source by model id (now this plugin's
+    // own table, client/priceTable.ts). The old shape cannot be
     // reinterpreted, so cached rows refold from the log, which rebuilds the
     // new keys.
     //
@@ -390,7 +393,33 @@ export function createContextTimelineDefinition(config: Config, slim: () => bool
     // rows refold from the log; the startup warm-up (backfill.ts) now probes
     // the `contextTimeline` row too, rebuilding idle sessions' rows instead
     // of orphaning the key.
-    stateVersion: 20,
+    //
+    // 21: `deepseek-account` joined the DeepSeek peak/off-peak split
+    // (shared/providers) — its cached cost buckets were all booked under
+    // `peak` and cannot be reinterpreted into the right periods, so rows
+    // refold from the log, which rebuilds the split (issue #91).
+    //
+    // Not bumped since: the supported-baseline move (0.1.2-rc.1 → 0.1.5-rc.1,
+    // the plugin floor) retired the pre-V3 log-shape branches
+    // (`header.system` envelope, `assistant/chunk` floods, `start`/`end`
+    // replacement endpoints, `tool/code-dispatch`) that only pre-V3 logs
+    // exercise — no supported log folds differently. Rows folded from those
+    // logs cannot reach this schema anyway: the projection cache's identity
+    // gate (cache-record format version vs the header's current-generation
+    // version) discards them wholesale and the session refolds from the
+    // migrated log. And in the schema itself the strict `stepStart`
+    // sub-schema DISCARDS — not strips — a row still carrying the removed
+    // decode accumulators, which every reader treats as "not served,
+    // refold". Bumping would invalidate every in-generation row and orphan
+    // the key for idle sessions (the #37 regression) for no correctness gain.
+    // 22: the fold zeroes the session-cost totals at the tagged fork/seed
+    // boundary (`session/end-seed` carrying `inherited: true`): a seeded
+    // session's cost now counts post-seed spend only — the parent-history
+    // prefix its seed replayed verbatim, settlements included, was already
+    // priced by the session it forked from (issue #94). Cached rows for
+    // seeded forks refold from the log; untagged resume markers reset
+    // nothing, so ordinary rows refold to the same totals.
+    stateVersion: 22,
   }
   return definition
 }

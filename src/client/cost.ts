@@ -11,13 +11,14 @@
  * Peak/off-peak is kept — a peak request costs double, which matters when
  * comparing — but there is no per-hour banding: the host already folds each
  * request into a `peak` or `off` bucket, so this layer only applies the
- * multiplier.
+ * multiplier. The table lists off-peak rates, so only DeepSeek's `peak`
+ * buckets price at double.
  */
 
 import type { SessionCostUsage } from '../shared/types'
 import { isDeepSeekProvider } from '../shared/providers'
 import { asRecord, numOf } from './services'
-import { tableRateOf } from './priceTable'
+import { tableFaceOf } from './priceTable'
 
 /** The display currencies the stats board ships; the locale picks one. */
 export type CostCurrency = 'usd' | 'cny'
@@ -30,84 +31,84 @@ const PEAK_FACTOR = 2
 
 /**
  * Per-1M-token rates (USD): cache-hit input, cache-miss input, cache
- * write, output (reasoning included). Absent registry fields fall back to
- * the input rate (a provider that publishes no cache prices bills those
- * buckets as plain input).
+ * write, output (reasoning included).
  */
 export interface PriceTriple { hit: number; miss: number; write: number; out: number }
 
 /**
  * A provider → model → rates book.
  *
- * Kept only as the shape several call sites and their tests still thread
- * through; the price SOURCE is now the hand-maintained table
- * (client/priceTable.ts), and `priceOf` ignores this argument.
+ * Kept only as the shape several call sites still thread through; the price
+ * SOURCE is the hand-maintained table (client/priceTable.ts), and the pricing
+ * functions below ignore this argument.
  */
 export type ModelPrices = Record<string, Record<string, PriceTriple>>
+
+/** The delivered book (one modelPrices snap). See {@link ModelPrices}: vestigial. */
+export interface ModelBook { prices: ModelPrices }
+
+/**
+ * One billed model's price: the matched table row's key (`mid` — the face
+ * the stats board's tooltip prints) and its rates.
+ */
+export interface PriceFace { mid: string; rate: PriceTriple }
 
 /** A USD amount in the display currency (CNY divides the fixed rate). */
 export function toCurrency(usd: number, currency: CostCurrency): number {
   return currency === 'cny' ? usd / USD_PER_CNY : usd
 }
 
-/** One rate triple at the doubled peak rate (the tooltip's `peak | off` pair). */
-export function peakOf(rate: PriceTriple): PriceTriple {
-  return {
-    hit: rate.hit * PEAK_FACTOR,
-    miss: rate.miss * PEAK_FACTOR,
-    write: rate.write * PEAK_FACTOR,
-    out: rate.out * PEAK_FACTOR,
-  }
-}
-
 /**
- * The table's rates for one folded (provider, model) bucket, or null when the
- * table has no row for it.
+ * The table's face for one billed model: the matched row key and its rates,
+ * or null when the table has no row for it.
  *
- * The provider is NOT consulted: the table keys on the model id alone, because
- * the same model reaches this code through several provider ids (an account
- * gateway, a direct endpoint) and pricing those differently would make one model
- * look like several. Matching is the fuzzy containment in `tableRateOf`.
- *
- * The `prices` argument is retained so callers and tests that thread a book keep
- * compiling; the book is no longer read.
- * @param prices - ignored; the table is the single price source.
+ * `book` and `provider` are NOT consulted: the table keys on the model id
+ * alone, because the same model reaches this code through several provider ids
+ * (an account gateway, a direct endpoint) and pricing those differently would
+ * make one model look like several. Matching is the fuzzy containment in
+ * `tableFaceOf`.
+ * @param book - ignored; the table is the single price source.
  * @param provider - ignored; see above.
  * @param model - the model id to price.
- * @returns the rates, or null when the table cannot price it.
+ * @returns the face, or null when the table cannot price it.
  */
-export function priceOf(prices: ModelPrices | null | undefined, provider: string, model: string): PriceTriple | null {
-  void prices
+export function priceFaceOf(book: ModelBook | null | undefined, provider: string, model: string): PriceFace | null {
+  void book
   void provider
-  return tableRateOf(model)
+  return tableFaceOf(model)
+}
+
+/** {@link priceFaceOf} without the face. */
+export function priceOf(book: ModelBook | null | undefined, provider: string, model: string): PriceTriple | null {
+  return priceFaceOf(book, provider, model)?.rate ?? null
 }
 
 /**
  * Price the session's cumulative billed-token totals. Cache reads bill at
  * the hit rate, uncached input at the miss rate, cache writes at the write
  * rate, output (reasoning included) at the out rate; `peak` buckets price
- * at twice the book rate for DeepSeek (the book lists that provider's
- * off-peak rates — the Host splits the period-based list at fold time).
- * Null when nothing was priced (no usage folded, no book yet, or no model
- * the book prices), so the cell can show a dash.
+ * at twice the table rate for DeepSeek (the table lists off-peak rates —
+ * the Host splits the period-based list at fold time).
+ * Null when nothing was priced (no usage folded, or no model the table
+ * prices), so the cell can show a dash.
  */
 export function estimateSessionCost(
   usage: SessionCostUsage | null | undefined,
-  prices: ModelPrices | null | undefined,
+  book: ModelBook | null | undefined,
   currency: CostCurrency,
 ): number | null {
-  if (usage === null || usage === undefined || prices === null || prices === undefined) return null
+  if (usage === null || usage === undefined || book === null || book === undefined) return null
   let total = 0
   let any = false
   for (const provider of Object.keys(usage)) {
     const models = asRecord(usage[provider])
     if (models === null) continue
     // The doubled peak period is DeepSeek's alone (shared/providers): the
-    // book lists its off-peak rates, so only the peak bucket multiplies —
-    // every other provider bills every bucket at book price.
+    // table lists its off-peak rates, so only the peak bucket multiplies —
+    // every other provider bills every bucket at table price.
     const deepseek = isDeepSeekProvider(provider)
     for (const model of Object.keys(models)) {
-      const rate = priceOf(prices, provider, model)
+      const rate = priceOf(book, provider, model)
       const periods = asRecord(models[model])
       if (rate === null || periods === null) continue
       for (const period of ['peak', 'off'] as const) {
@@ -177,7 +178,7 @@ export function formatCost(amount: number, currency: CostCurrency): string {
   return symbol + (amount >= 1 ? amount.toFixed(2) : amount.toPrecision(2))
 }
 
-/** Price-list figure: the same money format as formatCost, trailing zeros trimmed (¥3.00 → ¥3, $0.0070 → $0.007). */
+/** Price-list figure: always two decimals (the tooltip's `¥ XX.XX` rate format). */
 export function formatPriceRate(amount: number, currency: CostCurrency): string {
-  return formatCost(amount, currency).replace(/0+$/, '').replace(/\.$/, '')
+  return (currency === 'cny' ? '¥' : '$') + amount.toFixed(2)
 }

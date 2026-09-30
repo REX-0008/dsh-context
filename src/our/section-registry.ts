@@ -59,7 +59,7 @@ interface SystemPromptFace {
  */
 export function createSectionRegistry(ctx: Context): SectionRegistry {
   const observed = new Map<string, SectionOrigin>()
-  const wrapped = new WeakSet<object>()
+  const wrapped = new WeakSet()
   const restores: Array<() => void> = []
   // This plugin's own fiber name: its registrations are ours, not third-party
   // ones, and the panel derives "config" sections from the module view anyway.
@@ -73,8 +73,8 @@ export function createSectionRegistry(ctx: Context): SectionRegistry {
     wrapped.add(systemPrompt)
     const instance = systemPrompt as { section: (section: SectionArgument) => unknown }
     const wrappedSection = function (this: unknown, section: SectionArgument): unknown {
-      const name = section?.name
-      const order = section?.order
+      const name = section.name
+      const order = section.order
       if (typeof name === 'string' && typeof order === 'number') {
         // The caller's fiber names the registering package. `lastReader` is the
         // context that just read the service (the registrant), which is more

@@ -8,13 +8,13 @@
 import { act, createElement as h, type ReactElement } from 'react'
 import assert from 'node:assert/strict'
 import { createRoot } from 'react-dom/client'
-import { afterEach, beforeEach, describe, test, vi } from 'vitest'
+import { afterEach, describe, test, vi } from 'vitest'
 import { makeContextView } from '../../../src/client/components/contextView'
 import { watchHistoryFaces } from '../../../src/client/historyPage'
 import { requestContextFocus, takeContextFocus } from '../../../src/client/viewFocus'
+import { resetTimelineDetailStores } from '../../../src/client/timelineSource'
 import { createContextSettings } from '../../../src/client/settings'
 import type { SettingsScopeLike } from '../../../src/client/settings'
-import { resetModelPrices, setModelPricesLoader } from '../../../src/client/modelPrices'
 import type { UseChatLike } from '../../../src/client/services'
 import type { ContextTimeline } from '../../../src/shared/types'
 import { DICT_EN } from '../../../src/client/i18n'
@@ -30,6 +30,10 @@ const kit = makeKit()
 afterEach(() => {
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
+  // The cold-start share (timelineSource.ts) is page-lifetime per session:
+  // drop it so one test's cold read never leaks its failed/ready state into
+  // a later test that reuses the same session id.
+  resetTimelineDetailStores()
 })
 
 
@@ -135,6 +139,18 @@ describe('ContextView — projection guards', () => {
     await m3.unmount()
   })
 
+  test('a cold read that settles without data surfaces the retryable failure, not a stall', async () => {
+    vi.stubGlobal('fetch', () => Promise.resolve({ ok: false, status: 500, json: async () => null } as Response))
+    const View = makeView(new TestClientCtx())
+    const m = await mount(h(View, { sessionId: 'sv-cold-fail', useProjection: () => undefined }))
+    await until(() => text(m.container).includes(DICT_EN['detail.loadFailed']), 'the failure note never surfaced')
+    assert.ok(!text(m.container).includes(DICT_EN.loading), 'no spinner remains once failed')
+    await act(async () => {
+      buttonByText(m.container, DICT_EN['detail.loadFailed']).click()
+    })
+    await m.unmount()
+  })
+
   test('renders the full tab without a session id (the agent card anchors nothing)', async () => {
     const View = makeView(new TestClientCtx())
     const m = await mount(h(View, { useProjection: projectionsFor(timeline()) }))
@@ -227,14 +243,14 @@ describe('ContextView — baseline gate', () => {
     const View = makeView(new TestClientCtx())
     const m = await mount(h(View, {
       sessionId: 'sv-gated',
-      useProjection: projectionsFor(timeline({ unsupported: { current: '0.1.1-rc.2', minimum: '0.1.2-rc.1' } })),
+      useProjection: projectionsFor(timeline({ unsupported: { current: '0.1.1-rc.2', minimum: '0.1.5-rc.1' } })),
     }))
     // The modal pops over the tab, naming both versions.
     assert.ok(m.container.querySelector('.lc-modal-backdrop') !== null)
     const card = query(m.container, '.lc-gate-card')
     assert.ok(text(card).includes(DICT_EN['gate.title']))
     assert.ok(text(card).includes('v0.1.1-rc.2'))
-    assert.ok(text(card).includes('v0.1.2-rc.1'))
+    assert.ok(text(card).includes('v0.1.5-rc.1'))
     // The cards keep rendering the fallback's zeroed data behind it.
     assert.ok(text(m.container).includes(DICT_EN['overview.title']))
     assert.ok(text(m.container).includes(DICT_EN['trend.empty']))
@@ -457,9 +473,13 @@ describe('ContextView — interactions', () => {
     const titleText = query(card, '.lc-card-title-text')
     assert.equal(text(titleText), DICT_EN['trend.title'])
 
-    // The switch is the title text's NEXT sibling — left of the card's right-hand control cluster.
+    // The switch is the DNA toggle's NEXT sibling — the pair rides the title text's right, left of the
+    // card's right-hand control cluster.
     const toggleOf = () => buttonByText(m.container, DICT_EN['trend.adaptive'])
-    assert.equal(toggleOf().parentElement?.previousElementSibling, titleText)
+    const dnaGroupOf = () => buttonByText(m.container, DICT_EN['trend.dna']).parentElement as HTMLElement
+    assert.ok(dnaGroupOf().className.includes('lc-trend-dna'))
+    assert.equal(dnaGroupOf().previousElementSibling, titleText)
+    assert.equal(toggleOf().parentElement?.previousElementSibling, dnaGroupOf())
     assert.equal(toggleOf().parentElement?.getAttribute('title'), DICT_EN['trend.adaptiveHint'])
     assert.ok(!toggleOf().className.includes('lc-gran-on'), 'off at mount')
 
@@ -471,6 +491,42 @@ describe('ContextView — interactions', () => {
     await click(toggleOf())
     assert.ok(!toggleOf().className.includes('lc-gran-on'))
     assert.equal(text(query(m.container, '.lc-axis-top')), '420')
+    await m.unmount()
+  })
+
+  test('the trend card\'s DNA toggle fingerprints the bars and suspends the Total/Delta switch', async () => {
+    const m = await mountRich('sv-trend-dna')
+    const dnaBtn = () => buttonByText(m.container, DICT_EN['trend.dna'])
+    assert.ok(!dnaBtn().className.includes('lc-gran-on'), 'off at mount')
+    const dnaGroup = dnaBtn().parentElement as HTMLElement
+    assert.ok(dnaGroup.className.includes('lc-trend-dna'))
+    assert.equal(dnaGroup.getAttribute('title'), DICT_EN['trend.dnaTip'])
+    assert.ok((dnaGroup.nextElementSibling as HTMLElement | null)?.className.includes('lc-trend-adaptive'), 'DNA rides left of the adaptive switch')
+    assert.ok(!(buttonByText(m.container, DICT_EN['gran.delta']) as HTMLButtonElement).disabled, 'the mode switch is live at mount')
+
+    // A stale Delta state + DNA on: the bars become per-item fingerprints and the axis reads totals.
+    await click(buttonByText(m.container, DICT_EN['gran.delta']))
+    await click(dnaBtn())
+    assert.ok(dnaBtn().className.includes('lc-gran-on'))
+    assert.ok((buttonByText(m.container, DICT_EN['gran.total']) as HTMLButtonElement).disabled)
+    assert.ok((buttonByText(m.container, DICT_EN['gran.delta']) as HTMLButtonElement).disabled)
+    assert.equal(queryAll(m.container, '.lc-bar-dna').length, 3)
+    assert.equal(text(query(m.container, '.lc-axis-top')), '420')
+
+    // The strip reads in the model's read order: the tool schema leads, then the messages by seq.
+    const g = query(m.container, '.lc-bar[data-seq="4"] .lc-bar-dna').style.background
+    const amberAt = g.indexOf('color-amber-500')
+    const greenAt = g.indexOf('color-green-500')
+    const blueAt = g.indexOf('color-blue-500')
+    const tealAt = g.indexOf('color-teal-500')
+    assert.ok(amberAt >= 0 && greenAt > amberAt && blueAt > greenAt && tealAt > blueAt, g)
+
+    // DNA off: the mode switch comes back live with its Delta state intact.
+    await click(dnaBtn())
+    assert.ok(!dnaBtn().className.includes('lc-gran-on'))
+    assert.ok(!(buttonByText(m.container, DICT_EN['gran.delta']) as HTMLButtonElement).disabled)
+    assert.equal(queryAll(m.container, '.lc-bar-dna').length, 0)
+    assert.ok(queryAll(m.container, '.lc-bar-up').length > 0, 'delta arms are back')
     await m.unmount()
   })
 
@@ -1022,22 +1078,8 @@ describe('ContextView — locale and settings', () => {
   // the fixture names a model the table carries: 1M uncached input at the
   // 4.1-flash miss rate ($0.7) plus 0.5M output at its out rate ($1.4) is $1.4,
   // doubled because the bucket is a peak one.
-  //
-  // The injected registry book is retained but no longer affects the price — the
-  // table is the single source — so it must not be what makes the cell non-empty.
   const costed = timeline({
     cost: { 'deepseek-official': { 'deepseek-v4.1-flash': { peak: { uncached: 1000000, output: 500000, cacheRead: 0, cacheWrite: 0 } } } },
-  })
-
-  beforeEach(() => {
-    resetModelPrices()
-    setModelPricesLoader(() => Promise.resolve({
-      deepseek: { models: { 'deepseek-v4.1-flash': { cost: { input: 0.15, output: 0.6, cache_read: 0.003 } } } },
-    }))
-  })
-
-  afterEach(() => {
-    resetModelPrices()
   })
 
   test('cost prices in USD by default (no locale service), CNY under zh', async () => {

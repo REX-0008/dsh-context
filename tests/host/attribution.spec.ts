@@ -377,7 +377,7 @@ describe('createToolAttribution', () => {
     assert.equal(packageNameFrom(local), 'local-plugin')
     assert.equal(packageNameFrom(local), 'local-plugin', 'results are cached per directory')
     const malformed = fileURLToPath(new URL('./fixtures/bad-pkg/index.js', import.meta.url))
-    assert.equal(packageNameFrom(malformed), 'dsh-context', 'a malformed package.json is skipped, the walk continues upward')
+    assert.equal(packageNameFrom(malformed), '@our/context-panel-write', 'a malformed package.json is skipped, the walk continues upward')
     const rootless = path.join(path.parse(process.cwd()).root, '__dsh_context_nonexistent__', 'file.js')
     assert.equal(packageNameFrom(rootless), undefined, 'no readable boundary up to the filesystem root')
     const deep = path.join(path.parse(process.cwd()).root, ...Array.from({ length: 13 }, (_, i) => `__dsh_ctx_l${i}__`), 'file.js')

@@ -63,6 +63,10 @@ export default defineConfig({
         // Pure type declarations: no runtime surface to instrument.
         'src/shared/types.ts',
         'src/host/compat.ts',
+        // The write layer is exercised through the wiring it mounts (host
+        // applyOur, the context view's panel) rather than importable pure
+        // functions, so a per-file unit gate does not apply to it.
+        'src/our/**',
       ],
       thresholds: { perFile: true, statements: 100, branches: 100, functions: 100, lines: 100 },
       reporter: ['text', 'html'],

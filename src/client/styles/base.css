@@ -8,17 +8,21 @@
  */
 .lc-root { padding: 16px 20px 32px; overflow-y: auto; height: 100%; box-sizing: border-box; color: var(--dsw-alias-label-primary); font-size: 13px; }
 /*
- Right Sidebar panel (dsh 0.1.5-rc.1+): the dockkit pane body scrolls and
- its `.pane` clips overflow — so the tab root drops its own scroller and lets
- the pane own both. The body draws NO padding of its own (dockkit leaves each
- tab its own insets), so the root keeps a 12px frame on all four sides — the
- harness's own body inset — instead of the wide shared chrome. Scoped by the
- panel's own markers, which exist only inside the right column (the open panel
- and the float host that carries a tab dragged out of it); the conversation tab
- and the /context modal are unaffected.
+ Right Sidebar panel (dsh 0.1.5-rc.1+): the body draws NO padding of its own
+ (dockkit leaves each tab its own insets), so the root keeps a 12px frame on
+ all four sides — the harness's own body inset — instead of the wide shared
+ chrome. The root KEEPS its own scroller: the 0.1.5 line renders the tab
+ straight into the scrolling dockkit pane body, while the 0.1.7 line wraps it
+ in a definite-height `.tabBody` whose `overflow: hidden` would clip a grown
+ root out of reach — `height: 100%` resolves against whichever definite-height
+ host the running generation provides (and degrades to the root growing under
+ an auto-height one, where the pane scrolls instead: one scroller either way).
+ Scoped by the panel's own markers, which exist only inside the right column
+ (the open panel and the 0.1.5 float host that carries a tab dragged out of
+ it); the conversation tab and the /context modal are unaffected.
  */
 [data-sidebar-right-open] .lc-root,
-[data-sidebar-right-float-host] .lc-root { height: auto; overflow: visible; padding: 12px; }
+[data-sidebar-right-float-host] .lc-root { padding: 12px; }
 /* The Context tab chip's emblem: held at its drawn size in the title's flex
    line (dockkit's `.tabTitle`; the files chip's own titleIcon idiom). */
 .lc-title-icon { flex: none; }
@@ -66,13 +70,20 @@
 .lc-card-title-text { flex: none; white-space: nowrap; }
 .lc-gran, .lc-kinds { margin-left: auto; display: flex; gap: 2px; background: var(--dsw-alias-bg-layer-2); border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; padding: 1px; }
 /* A title carrying TWO toggle groups wraps them so the auto-margin push happens once — two bare .lc-gran siblings would split the free space and drift apart. */
-.lc-trend-ctl { margin-left: auto; display: flex; gap: 6px; align-items: center; }
-.lc-trend-ctl .lc-gran { margin-left: 0; }
-/* The trend card's adaptive switch rides the title text's right — a single-button group whose auto margin is
-   neutralized so it stays adjacent (the browser card's DNA toggle idiom). */
-.lc-trend-adaptive { margin-left: 0; flex: none; }
+.lc-trend-ctl, .lc-heat-ctl { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+.lc-trend-ctl .lc-gran, .lc-heat-ctl .lc-gran { margin-left: 0; }
+/* The heat title's hint text loses its own auto margin inside the wrapper. */
+.lc-heat-ctl .lc-card-sub { margin-left: 0; }
+/* The trend title's DNA toggle and adaptive switch ride the title text's right as an adjacent pair —
+   each single-button group's auto margin is neutralized so they stay together (the browser card's DNA
+   toggle idiom). */
+.lc-trend-dna, .lc-trend-adaptive { margin-left: 0; flex: none; }
 .lc-gran-btn { border: 0; background: transparent; color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 1; padding: 3px 8px; border-radius: 5px; cursor: pointer; font-family: inherit; transition: color var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, ease-in-out); }
 .lc-gran-btn:hover { color: var(--dsw-alias-label-primary); }
+/* Disabled chips (the Total/Delta pair while the trend card's DNA mode is on): inert and visually
+   receded, keeping the group's layout so the row does not reflow when DNA toggles. */
+.lc-gran-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.lc-gran-btn:disabled:hover { color: var(--dsw-alias-label-secondary); }
 .lc-gran-on, .lc-gran-on:hover { background: var(--dsw-alias-button-primary-fill); color: var(--dsw-alias-label-primary-foreground); }
 /* The events card's kind filters carry their per-kind event tally: a tabular
    count set off from the label, dimmed while the chip is off and inherited
@@ -97,20 +108,22 @@
 .lc-col-browser { display: flex; flex-direction: column; }
 .lc-col-browser > .lc-card { flex: 1; }
 /*
- Head band: TWO rows of two EQUAL-width cards — the session's shape beside
- the plugin card (context / plugin), then the two donut cards together
- (token / timing). The rows are `.lc-cols` flex-wrap rows and the cards ride
- the shared column idiom (`flex-1 min-w-[min(360px,100%)]` in the
- components): equal `flex: 1` halves each row exactly and the min-width
- floor is the fold — below 2 x 360px + gap of row width (a half under
- ~360px, where the donut cards' ring+legend single-line and the count grid
- both start to cramp, issue #48) the pair wraps onto full-width lines. Cards
+ Head band: TWO rows — the session's shape at a 3:1 split beside the plugin
+ card (context / plugin), then the two donut cards together (token /
+ timing). The rows are `.lc-cols` flex-wrap rows and the cards ride the
+ shared column idiom (`min-w-[min(360px,100%)]` in the components): the
+ stats card's `flex-[3]` against the plugin card's `flex-1` thirds the row,
+ and the min-width floor is the fold — below (360 + 240)px + gap of row
+ width the 3:1 pair wraps onto full-width lines, below 2 x 360px + gap the
+ equal donut pair does (~360px being where the donut cards' ring+legend
+ single-line and the count grid both start to cramp, issue #48; the plugin
+ card's 240px floor leans on its rows' ellipsis + hover recovery). Cards
  under that end of the band sit under their own lc-card reflows (stats.css:
  the ring stacks over its legend, the cell grid folds), so the two-card
  line is the trade this floor buys. Engines without container queries keep
- the wide two-across layout. The right Sidebar's panel renders only the
- donut row (it drops the context stats / plugin info row — see
- contextView.tsx); the same wrap then stacks the pair in the narrow pane.
+ the wide layout. The right Sidebar's panel renders only the donut row (it
+ drops the context stats / plugin info row — see contextView.tsx); the same
+ wrap then stacks the pair in the narrow pane.
  */
 /* The context card's cell grid stretches to the plugin card's height, so the row reads as one level band. */
 .lc-head > .lc-card:has(.lc-stats) { display: flex; flex-direction: column; }

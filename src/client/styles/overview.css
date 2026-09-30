@@ -1,14 +1,18 @@
 /*
  * The Context Insights panel: the sidebar-foot entry button (stacked above
  * Settings by the harness's own foot layout) and the frame-wide overlay
- * panel it opens — a 3:7 body of insight column (KPI 2×3 block over the
- * activity heatmap) beside the session column (search, chips, card grid).
+ * panel it opens — the first row (a 1:1 pair: the KPI metrics band, the
+ * range's six figures three per row, beside the last-7-days usage chart's
+ * token/cost bar columns) over the aggregate stats row (Token Stats |
+ * Timing Stats, the range's sessions folded into the per-session tab's two
+ * donut cards) over a 3:7 body of insight column (the activity heatmap,
+ * then the preferences entry row) beside the session column (search, chips,
+ * card grid).
  * The backdrop is the `lc-ov` query container (it spans the viewport, and
  * the card sizes off the viewport too), so the column fold keys off the
- * viewport width; on the folded width the card itself scrolls in normal
- * flow. Inline-size containment is safe here: the backdrop IS the viewport
- * rectangle, so the heat cells' fixed-position Tooltip bubbles keep their
- * viewport coordinates.
+ * viewport width. Inline-size containment is safe here: the backdrop IS the
+ * viewport rectangle, so the heat cells' fixed-position Tooltip bubbles
+ * keep their viewport coordinates.
  */
 
 /* ---- the sidebar-foot entry ---- */
@@ -27,65 +31,158 @@
    so queries against it track the card's own sizing basis (the card is
    min(1120px, 100vw - 32px)) without making the card unable to query itself. */
 .lc-ov-backdrop { position: fixed; inset: 0; z-index: 200; background: var(--dsw-alias-bg-mask-1, rgba(0, 0, 0, 0.45)); display: flex; align-items: center; justify-content: center; container: lc-ov / inline-size; }
-/* The card is a flex column capped at its max-height: the body fills the
-   rest and each column scrolls its own overflow, so browsing sessions never
-   scrolls the insight column out of view. On the folded width the card
-   scrolls whole (see the container query at the body). */
-.lc-ov-card { display: flex; flex-direction: column; width: min(1120px, calc(100vw - 32px)); max-height: min(86vh, 900px); overflow: hidden; box-sizing: border-box; background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; box-shadow: var(--dsw-shadow-lv3, 0 12px 32px rgba(0, 0, 0, 0.4)); padding: 16px 18px 18px; color: var(--dsw-alias-label-primary); font-size: 13px; }
+/* The card is a flex column at a FIXED height: the viewport minus a 40px
+   band top and bottom (the width keeps its 16px side frame), so the panel's
+   footprint never wobbles with the content. The backdrop is a definite-
+   height flex box, so the percentage resolves without viewport units. The
+   head stays put; the scroll region fills the rest and is the panel's one
+   scroller — the KPI band, the stats row, and the body scroll as one. */
+.lc-ov-card { display: flex; flex-direction: column; width: min(1120px, calc(100vw - 32px)); height: calc(100% - 80px); overflow: hidden; box-sizing: border-box; background: var(--dsw-alias-bg-layer-1); border: 1px solid var(--dsw-alias-border-l2); border-radius: 12px; box-shadow: var(--dsw-shadow-lv3, 0 12px 32px rgba(0, 0, 0, 0.4)); padding: 16px 18px 18px; color: var(--dsw-alias-label-primary); font-size: 13px; }
 .lc-ov-head { flex: none; display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
 .lc-ov-head-icon { flex: none; }
 .lc-ov-title { font-weight: 600; font-size: 15px; white-space: nowrap; }
+/* The DeepSeek balance pill (balanceCapsule.tsx): a quiet chip between the
+   title and the range group, one link to the platform's usage console —
+   flex: none keeps the figure intact and the head's own wrap carries it to
+   the next row under pressure. */
+.lc-ov-balance { flex: none; display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 2px 10px; border-radius: 999px; background: var(--dsw-alias-bg-layer-2); border: 1px solid var(--dsw-alias-border-l2); font-size: 12px; line-height: 18px; text-decoration: none; color: inherit; }
+.lc-ov-balance:hover .lc-ov-balance-value { text-decoration: underline; }
+.lc-ov-balance-label { color: var(--dsw-alias-label-secondary); white-space: nowrap; }
+.lc-ov-balance-value { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
 .lc-ov-head .lc-modal-close { margin-left: 0; flex: none; }
 
-/* ---- the body: a 3:7 column pair — the insight column (KPI 2×3 over the
-   heat) beside the session column; under width pressure it folds to one
-   full-width column and the whole card scrolls in normal flow (no capped
-   inner scrollers to overlap). ---- */
-.lc-ov-body { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 7fr); gap: 10px; }
-/* Each column owns its scrollbar (the harness 8px bar): `scrollbar-gutter:
-   stable` holds the bar's track so cards never reflow by its width when a
-   column gains or loses it, and the right padding keeps the thumb clear of
-   the card edges instead of riding on them. */
-.lc-ov-left { min-height: 0; overflow-y: auto; scrollbar-gutter: stable; padding-right: 8px; display: flex; flex-direction: column; gap: 10px; }
-.lc-ov-right { min-height: 0; overflow-y: auto; scrollbar-gutter: stable; padding-right: 8px; }
+/* The panel's one scroller: everything under the head. It inherits the
+   scrollbar discipline the columns used to own — the harness 8px bar with a
+   stable gutter, so cards never reflow by the bar's width, and the right
+   padding keeps the thumb clear of the card edges instead of riding on
+   them. */
+.lc-ov-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; padding-right: 8px; }
+
+/* ---- the panel's first row: a 1:1 column pair — the KPI metrics band
+   (the range's six figures, three per row — the row pair is the tallened
+   first row) beside the last-7-days usage chart, whose card
+   stretches to the same height. The pair folds to one full-width column at
+   932px of container (the body's own fold point, below which a half-width
+   chart's seven day groups would crush); the KPI grid then spreads the
+   full width, and drops to 2×3 at 640px (phone), so no cell ever
+   ellipsizes its figure. ---- */
+.lc-ov-first { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 10px; }
+.lc-ov-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.lc-ov-kpi { align-items: center; padding: 8px; }
+.lc-ov-kpi .lc-stat-value { font-size: 20px; }
 @container lc-ov (max-width: 932px) {
-  .lc-ov-card { overflow-y: auto; }
+  .lc-ov-first { grid-template-columns: minmax(0, 1fr); }
+}
+@container lc-ov (max-width: 640px) {
+  .lc-ov-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ---- the first row's usage chart: seven day columns, each pairing a
+   billed-tokens bar (the heatmap's blue) over a priced-cost bar (green),
+   both folded off the merged daily ledger. The bars scale on their OWN
+   window maxima — a $2 week must not flatten under a 169M-token week — and
+   the plot is the card's flex remainder, so the card fills its half of the
+   first row whatever the KPI grid's wrapped height. A 4% floor keeps a
+   tiny day visible; a 0/unpriced figure draws no bar at all. Hairline
+   gridlines run at 0/25/50/75/100% of the peak, the 0 line solid as the
+   baseline, and each side carries a tick rail computed off the same maxima
+   (tokens left, cost right — the cost rail reads '—' while nothing
+   prices). ---- */
+.lc-ov-usage { flex: 1 1 auto; display: flex; flex-direction: column; margin-bottom: 0; min-width: 0; box-sizing: border-box; }
+.lc-ov-usage .lc-card-title { margin-bottom: 4px; }
+.lc-ov-usage-plot { flex: 1 1 auto; display: flex; align-items: stretch; gap: 6px; min-height: 0; }
+/* The rails hold absolutely-positioned ticks (top = 100% peak, bottom = 0);
+   a fixed width keeps both sides symmetric and the columns' geometry stable
+   across tick widths ("169.2M" vs "$0.0075"). */
+.lc-ov-usage-rail { position: relative; flex: none; width: 42px; font-size: 9px; line-height: 1.2; color: var(--dsw-alias-label-secondary); font-variant-numeric: tabular-nums; }
+.lc-ov-usage-rail-l .lc-ov-usage-tick { right: 0; }
+.lc-ov-usage-rail-r .lc-ov-usage-tick { left: 0; }
+.lc-ov-usage-tick { position: absolute; transform: translateY(-50%); white-space: nowrap; }
+/* The grid spans the bars' region only — the day strip renders as its own
+   row below, so the gridlines never cross the labels. The min-height floor
+   keeps percentage-height bars alive on the folded single-column row, where
+   the card sizes to its own content. */
+.lc-ov-usage-grid { position: relative; flex: 1 1 auto; min-width: 0; min-height: 56px; display: flex; }
+.lc-ov-usage-line { position: absolute; left: 0; right: 0; height: 1px; background: color-mix(in srgb, var(--dsw-alias-border-l2) 70%, transparent); }
+.lc-ov-usage-line-0 { background: var(--dsw-alias-border-l2); }
+.lc-ov-usage-cols { position: relative; flex: 1 1 auto; min-width: 0; display: flex; align-items: stretch; gap: 6px; }
+.lc-ov-usage-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
+.lc-ov-usage-bars { flex: 1 1 auto; width: 100%; display: flex; align-items: flex-end; justify-content: center; gap: 3px; }
+.lc-ov-usage-bar { flex: none; width: 10px; border-radius: 3px 3px 0 0; }
+.lc-ov-usage-tokens { background: color-mix(in srgb, var(--color-blue-500) 72%, transparent); }
+.lc-ov-usage-cost { background: color-mix(in srgb, var(--color-green-500) 72%, transparent); }
+/* Same flex geometry as .lc-ov-usage-cols, so every label centers under its
+   own column. */
+.lc-ov-usage-days { flex: none; display: flex; gap: 6px; padding-top: 3px; }
+.lc-ov-usage-day { flex: 1 1 0; min-width: 0; text-align: center; font-size: 9px; line-height: 1.2; color: var(--dsw-alias-label-secondary); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.lc-ov-usage-key { flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 5px; padding-top: 5px; }
+.lc-ov-usage-swatch { flex: none; width: 10px; height: 8px; border-radius: 2px; }
+.lc-ov-usage-key-label { font-size: 9px; color: var(--dsw-alias-label-secondary); }
+
+/* ---- the aggregate stats row: Token Stats beside Timing Stats between the
+   KPI band and the 3:7 body. Two half-width cards; the pair folds to one
+   column at 700px of container — below the body's own 932px fold, where
+   a half (~340px) still fits the donut + one legend column, but narrower
+   halves would wrap the legend rows into slivers. ---- */
+.lc-ov-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 10px; }
+/* The row's cards zero the .lc-card margin like the column's own, and take
+   the same border-box (the base .lc-card is content-box; the padding would
+   otherwise widen both tracks past the card). */
+.lc-ov-stats > .lc-card { margin-bottom: 0; min-width: 0; box-sizing: border-box; }
+@container lc-ov (max-width: 700px) {
+  .lc-ov-stats { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ---- the body: a 3:7 column pair — the insight column (the heat over the
+   preferences entry) beside the session column. Neither column scrolls on
+   its own — the panel's `.lc-ov-scroll` owns the one bar — and `align-items:
+   start` keeps each column at its natural height, so the heat card never
+   stretches to the paged grid's height. Under width pressure the pair folds
+   to one full-width column. ---- */
+.lc-ov-body { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 7fr); gap: 10px; align-items: start; }
+.lc-ov-left { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.lc-ov-right { min-width: 0; }
+@container lc-ov (max-width: 932px) {
   .lc-ov-body { display: block; }
   .lc-ov-left { margin-bottom: 12px; }
-  .lc-ov-left, .lc-ov-right { overflow: visible; min-height: auto; padding-right: 0; }
-  .lc-ov-heat-card { flex: none; }
 }
 /* border-box keeps the card tracks true outer widths: under the harness's
    content-box default the padding quietly adds ~30px per card. */
 .lc-ov-left > .lc-card { margin-bottom: 0; min-width: 0; box-sizing: border-box; }
-.lc-ov-kpis { flex: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(3, 1fr); gap: 10px; }
-.lc-ov-kpi { align-items: center; padding: 10px 8px; }
-.lc-ov-kpi .lc-stat-value { font-size: 20px; }
-/* The heat card absorbs the insight column's leftover height (the grid
-   centers inside it) but never shrinks below its own grid. */
-.lc-ov-heat-card { flex: 1 0 auto; display: flex; flex-direction: column; }
+.lc-ov-heat-card { display: flex; flex-direction: column; }
+/* The preferences entry: one row under the activity card, framed like the
+   column's other cards (the session-card hover: border darkens, layer-2
+   fill); the hint pulls to the right edge and ellipsizes under width
+   pressure so the label always reads. */
+.lc-ov-settings { flex: none; display: flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box; border: 1px solid var(--dsw-alias-border-l2); background: var(--dsw-alias-bg-layer-1); border-radius: 10px; padding: 9px 12px; font: inherit; font-size: 12px; color: var(--dsw-alias-label-secondary); cursor: pointer; transition: border-color var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, ease-in-out), background-color var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, ease-in-out), color var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, ease-in-out); }
+.lc-ov-settings:hover { border-color: var(--dsw-alias-label-secondary); background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
+.lc-ov-settings-label { flex: none; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.lc-ov-settings-hint { flex: 1 1 auto; min-width: 0; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /*
  * The activity heatmap: fixed-size square cells (8 week columns ≈ a 200px
  * block) centered in the card, so the card's height follows the 7 cell rows
- * instead of the cells stretching to the card's width — the compact
- * GitHub-widget read. Monday-first, four depth steps, a month label over
- * the column where each month begins.
+ * plus the legend line instead of the cells stretching to the card's width —
+ * the compact GitHub-widget read. Sunday-first, four depth steps, a month
+ * label over the column where each month begins.
  */
-.lc-heat { display: flex; gap: 4px; flex: 1; align-items: center; justify-content: center; }
-/* Each column and the weekday gutter reserve the same 13px line above their
+.lc-heat-wrap { display: flex; flex-direction: column; flex: 1; }
+.lc-heat { display: flex; gap: 8px; flex: 1; align-items: center; justify-content: center; }
+/* Each column and the weekday gutter reserve the same 18px line above their
    cells — the month labels' line — so the centered cell rows stay aligned. */
-.lc-heat-wds, .lc-heat-col { padding-top: 13px; }
+.lc-heat-wds, .lc-heat-col { padding-top: 18px; }
 .lc-heat-wds { display: flex; flex-direction: column; gap: 3px; }
-.lc-heat-wd { flex: none; width: 10px; height: 20px; display: flex; align-items: center; justify-content: center; font-size: 9px; color: var(--dsw-alias-label-secondary); text-align: center; }
+/* The gutter self-sizes to its widest label (星期一 vs Mon differ), the spans
+   stretch to share it; nowrap keeps a full name on one line. */
+.lc-heat-wd { flex: none; height: 20px; display: flex; align-items: center; justify-content: center; font-size: 9px; color: var(--dsw-alias-label-secondary); text-align: center; white-space: nowrap; }
 .lc-heat-cols { display: flex; gap: 3px; }
 /* relative anchors the label; absolute keeps its width off the 20px column
    (a wider in-flow label would widen just the labeled columns and skew the
-   grid). top:0 rides the column's own 13px padding band, clear of the cells.
+   grid). top:0 rides the column's own 18px padding band, clear of the cells.
    Labels only sit at month opens, ≥4 columns apart, so the nowrap overflow
    past a 20px column never meets the next label. */
 .lc-heat-col { position: relative; display: flex; flex-direction: column; gap: 3px; }
-.lc-heat-mon { position: absolute; top: 0; left: 0; font-size: 9px; line-height: 13px; color: var(--dsw-alias-label-secondary); white-space: nowrap; }
+.lc-heat-mon { position: absolute; top: 0; left: 0; font-size: 9px; line-height: 18px; color: var(--dsw-alias-label-secondary); white-space: nowrap; }
 .lc-heat-cell { width: 20px; height: 20px; box-sizing: border-box; border: 0; border-radius: 20%; padding: 0; background: var(--dsw-alias-bg-layer-2); cursor: default; }
 button.lc-heat-cell { cursor: pointer; }
 button.lc-heat-cell:hover { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--color-blue-500) 70%, transparent); }
@@ -98,6 +195,11 @@ button.lc-heat-cell:hover { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--col
 .lc-heat-4 { background: color-mix(in srgb, var(--color-blue-500) 92%, transparent); }
 /* The pinned day (the grid filter's source) keeps a solid ring in both themes. */
 .lc-heat-on { box-shadow: 0 0 0 1.5px var(--color-blue-500); }
+/* GitHub's Less→More key: right-aligned under the grid; the swatches reuse
+   the grid's own depth classes, so the key can never drift from the cells it
+   explains. Labels share the month label's secondary type. */
+.lc-heat-legend { display: flex; align-items: center; justify-content: flex-end; gap: 3px; padding-top: 6px; }
+.lc-heat-key { font-size: 9px; color: var(--dsw-alias-label-secondary); }
 
 /* ---- the session list head: title, count, day chip, search, sort ---- */
 .lc-ov-list-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }

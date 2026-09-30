@@ -85,9 +85,9 @@ export function ensureHostDeps(baseline: Baseline): void {
   if (run.status !== 0) throw new Error(`npm install ${JSON.stringify(deps)} failed: ${(run.stderr ?? '').trim().slice(0, 300)}`)
 }
 
-/** The namespace pattern the tag's settings module enforces (module-private on every baseline). */
-export function namespacePatternOf(baseline: Baseline): RegExp | null {
-  const source = dshShow(baseline.tag, 'packages/settings/settings/src/index.ts')
+/** The tag's settings namespace pattern, read off the file the baseline names (null when absent). */
+export function namespacePatternOf(baseline: Baseline, file: string): RegExp | null {
+  const source = dshShow(baseline.tag, file)
   const match = /^const NAMESPACE_PATTERN = \/(.+)\/([gimsuy]*)$/m.exec(source)
   return match === null ? null : new RegExp(match[1], match[2])
 }
@@ -137,16 +137,17 @@ const drive = (context, target, events) => {
 }
 const log = [
   ev(0, 'session/created'),
-  ev(1, 'request/header', { header: { system: 'You are an agent.', tools: [{ name: 'bash', description: 'run' }], config: { model: 'deepseek-v4-flash', provider: 'deepseek' } }, reason: 'initial' }),
-  ev(2, 'request/context', { contextWindow: 128000 }),
-  ev(3, 'step/start'),
-  ev(4, 'user/message', { content: [{ type: 'text', text: 'hello' }] }),
-  ev(5, 'assistant/message', { message: { content: [{ type: 'text', text: 'hi' }] } }),
-  ev(6, 'tool/call', { callId: 'c1', name: 'bash', arguments: '{}' }),
-  ev(7, 'tool/result', { message: { source: { callId: 'c1' }, content: [{ type: 'text', text: 'ok' }] } }),
-  ev(8, 'step/end'),
-  ev(9, 'plan/mode', { active: true }),
-  ev(10, 'compaction/summary', { summary: [{ type: 'text', text: 'so far' }], shadowedSeqs: [4] }),
+  ev(1, 'request/header', { header: { tools: [{ name: 'bash', description: 'run' }], config: { model: 'deepseek-v4-flash', provider: 'deepseek' } }, reason: 'initial' }),
+  ev(2, 'system/message', { turn: 0, step: 0, message: { content: [{ type: 'text', text: 'You are an agent.' }] } }),
+  ev(3, 'request/context', { contextWindow: 128000 }),
+  ev(4, 'step/start'),
+  ev(5, 'user/message', { content: [{ type: 'text', text: 'hello' }] }),
+  ev(6, 'assistant/message', { message: { content: [{ type: 'text', text: 'hi' }] } }),
+  ev(7, 'tool/call', { callId: 'c1', name: 'bash', arguments: '{}' }),
+  ev(8, 'tool/result', { message: { source: { callId: 'c1' }, content: [{ type: 'text', text: 'ok' }] } }),
+  ev(9, 'step/end'),
+  ev(10, 'plan/mode', { active: true }),
+  ev(11, 'compaction/summary', { summary: [{ type: 'text', text: 'so far' }], shadowedSeqs: [5] }),
 ]
 drive(ctx, session, log)
 const snapshot = registry.snapshot(session)
@@ -160,17 +161,17 @@ const cold = registry.restore({}, log, 0, session.header)
 // plugin's served values must stay schema-valid through the registry's own
 // strict parse on every later delivery.
 const hostile = [
-  ev(11, 'step/start'),
-  ev(12, 'assistant/message', { turn: 1, step: 2, message: { content: [{ type: 'text', text: 'h1' }] }, usage: { inputTokens: -80, cacheReadTokens: 150.7, cacheWriteTokens: '10', outputTokens: 22.4 } }),
-  ev(13, 'assistant/message', { turn: 1, step: 3, message: { content: [] }, usage: { inputTokens: NaN, outputTokens: null } }),
-]
+  ev(12, 'step/start'),
+  ev(13, 'assistant/message', { turn: 1, step: 2, message: { content: [{ type: 'text', text: 'h1' }] }, usage: { inputTokens: -80, cacheReadTokens: 150.7, cacheWriteTokens: '10', outputTokens: 22.4 } }),
+  ev(14, 'assistant/message', { turn: 1, step: 3, message: { content: [] }, usage: { inputTokens: NaN, outputTokens: null } },
+)]
 drive(ctx, session, hostile)
 let hostileSnapshotOk = true
 let hostilePrompt = null
 let hostileCacheRead = null
 try {
   const hostileSnap = registry.snapshot(session)
-  const rec = hostileSnap.values.contextTimeline.requests.find(r => r.seq === 12)
+  const rec = hostileSnap.values.contextTimeline.requests.find(r => r.seq === 13)
   hostilePrompt = rec ? rec.prompt : null
   hostileCacheRead = rec ? rec.cacheRead : null
 } catch {
@@ -206,7 +207,7 @@ ctxB.emit('session/created', sessionB)
 const notified = []
 registryB.onChanged((s, key) => { if (s === sessionB && key === 'contextTimeline') notified.push(key) })
 const poisonLog = [
-  ev(0, 'request/header', { header: { system: 's', tools: [], config: { model: 'deepseek-v4-flash', provider: 'p' } }, reason: 'initial' }),
+  ev(0, 'request/header', { header: { tools: [], config: { model: 'deepseek-v4-flash', provider: 'p' } }, reason: 'initial' }),
   ev(1, 'assistant/message', { turn: 1, step: 1, message: { content: [{ type: 'text', text: 'ok' }] }, usage: { inputTokens: 10, cacheReadTokens: 20, outputTokens: 5 } }),
 ]
 drive(ctxB, sessionB, poisonLog)
@@ -260,28 +261,49 @@ export function bundleRequires(): string[] {
   return [...new Set([...source.matchAll(/require\("([^"]+)"\)/g)].map(m => m[1]))]
 }
 
-/** The slot registrations the client half mounts (identical on every baseline). */
+/**
+ * The slot registrations the client half mounts on EVERY baseline (identical
+ * spellings in each generation's sources). The preferences card seat and the
+ * settings transport are asserted separately, per generation — the matrix
+ * spec pins them to the baseline's `settings` seam (`settings.plugin.item` +
+ * `settingsScope` through V3, the Plugins page's `plugins.bundle.config` +
+ * `configForms` from the Config-form generation on).
+ */
 export const SLOT_SEAMS = [
   'conversation.view',
   'conversation.chat.assistant-actions',
   'conversation.input.overlay',
-  'settings.plugin.item',
+] as const
+
+/**
+ * The ui-primitives icon seams the client bundle renders, as [modern, legacy]
+ * name pairs: the vocabulary renamed across the range (`…Outline16`/`…14`
+ * through 0.1.5, `…OutlineRegular`/`…OutlineMedium` from 0.1.6), and a
+ * missing name is `undefined` at the browser's runtime — React error #130.
+ * `src/client/primitives.ts` resolves whichever spelling the running
+ * generation serves; each pair must exist in at least one spelling per tag.
+ */
+export const ICON_SEAMS = [
+  ['IconBranchOutlineRegular', 'IconBranchOutline16'],
+  ['IconPlusOutlineRegular', 'IconPlusOutline16'],
+  ['IconCheckOutlineRegular', 'IconCheckOutline16'],
+  ['IconCopyOutlineRegular', 'IconCopyOutline16'],
+  ['IconCloseOutlineRegular', 'IconCloseOutline16'],
+  ['IconSettingsOutlineMedium', 'IconSettingsOutline14'],
+  ['IconChevronDownOutlineMedium', 'IconChevronDownOutline14'],
 ] as const
 
 /**
  * The event families the host fold switches on (src/host/fold.ts) — the UNION
- * over every supported generation. No single harness line carries them all
- * (`assistant/chunk` and `tool/code-dispatch` are V0/V2-only; `system/message`
- * and `tool/ptc-dispatch` are V3-only), so the per-baseline probe asserts the
- * baseline's own `foldEventTypes` subset, and a matrix test asserts this union
- * equals the baselines' union — a fold case added without a baseline list
- * fails loudly instead of going unprobed.
+ * over every supported generation (V3 and V4 carry the same families). The
+ * per-baseline probe asserts the baseline's own `foldEventTypes` subset, and
+ * a matrix test asserts this union equals the baselines' union — a fold case
+ * added without a baseline list fails loudly instead of going unprobed.
  */
 export const FOLD_EVENT_TYPES = [
   'request/header', 'request/context', 'step/start', 'step/end',
   'user/message', 'tool/call', 'tool/result', 'assistant/message',
-  'assistant/chunk', 'assistant/attempt',
-  'tool/code-dispatch', 'tool/ptc-dispatch',
+  'assistant/attempt', 'tool/ptc-dispatch',
   'plan/mode', 'compaction/summary', 'compaction/prune', 'system/message',
 ] as const
 

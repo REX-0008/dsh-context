@@ -69,8 +69,7 @@ export type Category = 'user' | 'inject' | 'skill' | 'assistant' | 'tool'
 /**
  * One live system-prompt node (Snapshot.systems) — the harness models the
  * system prompt as a surface node, so its TEXT is fetched on demand from the
- * event at `seq`: a V3 `system/message` event, or the V0/V2 `request/header`
- * whose envelope carried `header.system`. `tokens` is the node's heuristic
+ * `system/message` event at `seq`. `tokens` is the node's heuristic
  * price (0 for a dormant empty node, which the harness reads as "no system
  * prompt"); the effective figure is the LAST node with `tokens > 0`.
  */
@@ -117,6 +116,16 @@ export interface ActivityDay {
   tokens: number
   /** Completed model calls (assistant settlements) that day. */
   requests: number
+  /**
+   * The day's billed buckets keyed provider → model → pricing period — the
+   * same SessionCostUsage raw material the timeline's session-cost totals
+   * carry, scoped to the day the requests INITIATED in, so the client prices
+   * each day off the same model-price book as the KPI band. ADDITIVE-OPTIONAL:
+   * absent on rows folded before the field existed (older plugin builds), on
+   * days whose settlements predate any model header, and on settlements the
+   * provider left unmetered — the usage chart degrades to tokens-only bars.
+   */
+  cost?: SessionCostUsage
 }
 
 /**
@@ -140,6 +149,9 @@ export type DefaultGranularity = 'step' | 'turn'
 
 export type DefaultTrendMode = 'total' | 'delta'
 
+/** The browser delta baseline: against the immediately preceding record, or the previous turn's last step. */
+export type DefaultDeltaBase = 'step' | 'turn'
+
 /** File Activity row order: most operations first, most-recently-touched first, or path ascending. */
 export type DefaultFileSort = 'count' | 'latest' | 'path'
 
@@ -156,6 +168,7 @@ export interface PluginSettings {
   defaultPlacement: DefaultPlacement
   defaultGranularity: DefaultGranularity
   defaultTrendMode: DefaultTrendMode
+  defaultDeltaBase: DefaultDeltaBase
   defaultToolSort: DefaultToolSort
   defaultFileSort: DefaultFileSort
   insightsEntry: InsightsEntry
@@ -252,9 +265,9 @@ export interface Snapshot {
   timing?: TimingTotals
   /**
    * The live system-prompt nodes, oldest first — the browser's per-step source
-   * for the System section. Absent when the log carried no system prompt, and
-   * on older plugin builds (the client then falls back to the header epoch's
-   * own `systemTokens`, the pre-V3 shape).
+   * for the System section. Absent on rows folded before this field existed
+   * (older plugin builds; the client then falls back to the header epoch's
+   * own `systemTokens`, the legacy wire shape those builds served).
    */
   systems?: SystemPromptNode[]
   /**
@@ -338,7 +351,7 @@ export interface ContextTimelineDetail {
  * One executed file operation (a settled file-tool call with a resolved
  * target), folded host-side from the durable tool lifecycle: the call's
  * name+arguments (`tool/call`), the result's presentation meta and error
- * (`tool/result`), or a nested Code-Mode settle (`tool/code-dispatch`,
+ * (`tool/result`), or a nested Code-Mode settle (`tool/ptc-dispatch`,
  * located on its parent run_code result via `parent` + `program`).
  *
  * `gone` is NOT host-stamped: the client joins it from the detail's archive
@@ -460,10 +473,9 @@ export interface ToolTimingTotals {
  * Whole-session timing totals, host-folded from the durable `step/start` /
  * `step/end` / `tool/call` / `tool/result` lifecycle plus the model call's
  * first token (running totals over the COMPLETE session log — the same
- * never-trimmed framing as `cost`). The first token comes from a V0
- * `assistant/chunk` delta or from the call's own embedded stream
- * (`assistant/message.data.stream` / `assistant/attempt.data.stream`, the
- * V2+ settlement) — whichever the log carries, matching the harness's own
+ * never-trimmed framing as `cost`). The first token comes from the call's
+ * own embedded stream (`assistant/message.data.stream` /
+ * `assistant/attempt.data.stream`), matching the harness's own
  * session-stats fold. Durations are wall-clock milliseconds: `wallMs` sums
  * whole steps, `ttftMs` the step-start → first-token slice (the model wait)
  * and `genMs` the first-token → assistant-message slice (the generation) —
@@ -492,10 +504,33 @@ export interface TimingTotals {
   genMs: number
   /** Reasoning-decode slice of `genMs` (the model's thinking). */
   reasoningMs?: number
+  /** Counted reasoning-decode blocks (the Thinking slice's tally). */
+  reasoningBlocks?: number
   /** Answer-text decode slice of `genMs`. */
   textMs?: number
+  /** Counted answer-text decode blocks (the Answer slice's tally). */
+  textBlocks?: number
   /** Tool-call-argument decode slice of `genMs`. */
   toolArgMs?: number
+  /**
+   * Counted tool-call-argument decode blocks — one per tool call whose
+   * arguments the stream decoded (the Tool args slice's tally). The counts are
+   * ADDITIVE-OPTIONAL like their spans: a row cached before they existed (or a
+   * call whose stream framed no blocks) carries none, and the card qualifies
+   * only what was actually counted.
+   */
+  toolArgBlocks?: number
+  /**
+   * The decode-throughput seat, paired exactly as the harness's own
+   * session-stats fold pairs them: `speedTokens` sums provider-reported
+   * output tokens and `speedMs` the first-token → assistant-message
+   * windows, over the calls that carried BOTH a first-token stamp and a
+   * usage report — a subset of `genMs`, which counts every token-stamped
+   * call regardless of usage. Additive-optional: cached rows written before
+   * the seat existed lack them, and the card falls back to no chip.
+   */
+  speedTokens?: number
+  speedMs?: number
   /** Completed model calls (assistant messages folded). */
   calls: number
   /** Summed per-call durations of completed tool calls. */
@@ -521,8 +556,8 @@ export interface CostModelUsage {
  * The session-cost estimate's raw material: cumulative provider-reported
  * billed-token totals, keyed by the request envelope's DSH provider id (''
  * when a log carries none) and then by its model id — the exact (provider,
- * model) faces the Client's model-price book resolves (the models.dev
- * registry, client/modelPrices.ts). Running totals per key; absent until a
+ * model) keys the Client's price table resolves (client/priceTable.ts,
+ * fuzzily by model id). Running totals per key; absent until a
  * request with a known model reports usage.
  */
 export interface SessionCostUsage {
@@ -685,4 +720,31 @@ export interface HeaderEpochContent {
     /** The raw JSON schema object the model received (plain JSON). */
     schema?: unknown
   }>
+}
+
+/** One currency's DeepSeek open-platform balance figures. */
+export interface PlatformBalanceEntry {
+  /** The ISO code the platform reported (`CNY` / `USD`). */
+  currency: string
+  /** Total available funds: `granted` + `toppedUp`. Derived here rather than read
+   * from the platform's own `total_balance`, which rounds independently of its
+   * parts and can land a cent away from what the breakdown beside it shows. */
+  total: number
+  /** The not-expired granted (gift) balance. */
+  granted: number
+  /** The topped-up balance. */
+  toppedUp: number
+}
+
+/**
+ * The DeepSeek open-platform balance, served by the plugin's
+ * `/api/dsh-context/balance` fetch route (host/balance.ts). `null` on the
+ * wire — and nothing rendered client-side — whenever the platform is not
+ * configured or the read fails: the capsule only ever shows a live figure.
+ */
+export interface PlatformBalance {
+  /** Whether the platform reports the balance sufficient for API calls. */
+  isAvailable: boolean
+  /** One entry per currency the account holds; at least one. */
+  balances: PlatformBalanceEntry[]
 }

@@ -56,7 +56,7 @@ function messageTextOf(message: unknown): string {
   if (!Array.isArray(content)) return ''
   const parts: string[] = []
   for (const block of content) {
-    const text = (block as { text?: unknown })?.text
+    const text = (block as { text?: unknown }).text
     if (typeof text === 'string' && text !== '') parts.push(text)
   }
   return parts.join('\n').trim()
@@ -94,8 +94,6 @@ export function sessionIdVariants(sessionId: string): string[] {
 import {
   AGENT_INSTRUCTIONS_ID,
   AGENT_INSTRUCTIONS_NAME,
-  CONTEXT_PLUGIN_ID,
-  CONTEXT_PLUGIN_NAME,
   SKILL_FS_ID,
   SKILL_FS_NAME,
   syncToPresetFile,
@@ -173,8 +171,7 @@ function applyPatches(def: ModuleDefinition, ...patches: Array<PromptModulePatch
 function compileRestrictions(restrictions: Record<string, { allow?: string[]; deny?: string[] }>): { allow?: string[]; deny?: string[] } {
   const allow = new Set<string>()
   const deny = new Set<string>()
-  for (const [tool, filter] of Object.entries(restrictions)) {
-    if (filter === undefined) continue
+  for (const filter of Object.values(restrictions)) {
     if (filter.deny?.length !== undefined && filter.deny.length > 0) {
       for (const name of filter.deny) deny.add(name)
     } else if (filter.allow?.length !== undefined && filter.allow.length > 0) {
@@ -305,11 +302,12 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
   /** @inheritdoc */
   registerForAgent(agent: Agent): void {
     this.agentBySession.set(agent.id, agent)
-    const entry = this.registered.get(agent.id)
+    let entry = this.registered.get(agent.id)
     if (entry === undefined) {
-      this.registered.set(agent.id, { disposers: new Map(), toolRestrictionsDisposers: [], snapshotDigest: '', pending: false })
+      entry = { disposers: new Map(), toolRestrictionsDisposers: [], snapshotDigest: '', pending: false }
+      this.registered.set(agent.id, entry)
     }
-    const current = this.registered.get(agent.id)!
+    const current = entry
     // The assemble waterfall is where "read → intercept → rewrite → send" happens
     // (packages/core/system-prompt: the waterfall hands every listener the
     // sectioned assembly, and the returned value is what the loop renders).
@@ -396,10 +394,10 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
     if (compiled.allow !== undefined || compiled.deny !== undefined) {
       try {
         // Structural access: see the import note above (no dsh-tools types).
-      const tools = (agent.ctx as unknown as {
-        tools: { restrict(filter: { allow?: readonly string[]; deny?: readonly string[] }): () => void }
-      }).tools
-      entry.toolRestrictionsDisposers = [tools.restrict(compiled)]
+        const tools = (agent.ctx as unknown as {
+          tools: { restrict(filter: { allow?: readonly string[]; deny?: readonly string[] }): () => void }
+        }).tools
+        entry.toolRestrictionsDisposers = [tools.restrict(compiled)]
       } catch { /* an invalid restriction (an empty filter / an unknown tool) makes tools throw, and the prior state is kept silently */ }
     }
 
@@ -528,7 +526,7 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
         // `assembleContext`); the agent's own context node would resolve the
         // global layer only and report a fraction of the registered sections.
         agent,
-        (layer: unknown) => (layer as Record<string, unknown>)?.[table],
+        (layer: unknown) => (layer as Record<string, unknown>)[table],
       )
       if (!(effective instanceof Map)) return undefined
       const out = new Map<string, number>()
@@ -634,7 +632,7 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
         if (event?.type === 'assistant/message') {
           const content = (event.data as { message?: { content?: unknown } } | undefined)?.message?.content
           return Array.isArray(content)
-            ? content.filter((block: { type?: unknown }) => block?.type === 'tool-call').length
+            ? content.filter((block: { type?: unknown }) => block.type === 'tool-call').length
             : 0
         }
         return event?.type === 'tool/result' ? -1 : 0
@@ -659,7 +657,7 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
         open += delta(end)
       }
       if (open !== 0 || !balancedBefore(start)) return undefined
-      return { start: (nodes as number[])[start] as number, end: (nodes as number[])[end] as number }
+      return { start: (nodes as number[])[start], end: (nodes as number[])[end] }
     } catch {
       return undefined
     }
@@ -715,7 +713,7 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
         const event = eventAt.call(session, seq)
         if (event?.type !== 'user/message') continue
         const source = (event.data as { message?: { source?: { kind?: unknown; plugin?: unknown } } } | undefined)?.message?.source
-        if (source?.kind === 'plugin' && source?.plugin === '@deepseek-ai/dsh-system-prompt') out.push(seq)
+        if (source?.kind === 'plugin' && source.plugin === '@deepseek-ai/dsh-system-prompt') out.push(seq)
       }
       return out
     } catch {
@@ -848,7 +846,7 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
     let assemblySections: Array<{ name: string; text: string }> | undefined
     try {
       const assembly = await agent.ctx.systemPrompt.assemble(this.assembleContext(agent))
-      assemblySections = assembly.sections.map((section) => ({ name: section.name, text: section.text }))
+      assemblySections = assembly.sections.map(section => ({ name: section.name, text: section.text }))
     } catch {
       assemblySections = undefined
     }
@@ -917,18 +915,18 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
       ...(config.conversationDisabledSections?.[agentId] ?? []),
       ...(presetId === undefined ? [] : (config.presetDisabledSections?.[presetId] ?? [])),
     ])
-    const overrides = config.sectionOverrides?.[agentId] ?? {}
-    const weights = config.sectionWeights?.[agentId] ?? {}
+    const overrides: Record<string, string | undefined> = config.sectionOverrides?.[agentId] ?? {}
+    const weights: Record<string, number | undefined> = config.sectionWeights?.[agentId] ?? {}
     const contextsDisabled = new Set([
       ...(config.conversationDisabledContexts?.[agentId] ?? []),
       ...(presetId === undefined ? [] : (config.presetDisabledContexts?.[presetId] ?? [])),
     ])
-    const contextOverrides = config.contextOverrides?.[agentId] ?? {}
+    const contextOverrides: Record<string, string | undefined> = config.contextOverrides?.[agentId] ?? {}
     if (disabled.size === 0 && Object.keys(overrides).length === 0 && Object.keys(weights).length === 0
       && contextsDisabled.size === 0 && Object.keys(contextOverrides).length === 0) return assembly
     const sections = assembly.sections
       .filter(section => !disabled.has(section.name))
-      .map(section => {
+      .map((section) => {
         const override = overrides[section.name]
         return override === undefined ? section : { ...section, text: override }
       })
@@ -938,7 +936,7 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
     // section to one end and silently rewrite the prompt).
     const weighted = sections.filter(section => weights[section.name] !== undefined)
     if (weighted.length > 1) {
-      const ordered = [...weighted].sort((a, b) => (weights[a.name] as number) - (weights[b.name] as number))
+      const ordered = [...weighted].sort((a, b) => (weights[a.name] ?? 0) - (weights[b.name] ?? 0))
       let next = 0
       for (let i = 0; i < sections.length; i += 1) {
         if (weights[sections[i].name] === undefined) continue
@@ -952,7 +950,7 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
       ? undefined
       : assembly.contexts
         .filter(context => !contextsDisabled.has(context.name))
-        .map(context => {
+        .map((context) => {
           const override = contextOverrides[context.name]
           return override === undefined ? context : { ...context, text: override }
         })

@@ -13,7 +13,7 @@ import { createElement as h } from 'react'
 import assert from 'node:assert/strict'
 import { describe, test, vi } from 'vitest'
 import { BASELINES } from '../../baselines'
-import { conversationNodesOf, imageLoaderOf, openResourceVia } from '../../../src/client/services'
+import { conversationNodesOf, imageLoaderOf, openResourceVia, openSessionVia } from '../../../src/client/services'
 import type { SessionStandardProps } from '../../../src/client/services'
 import { makeContentFetcher, watchHistoryFaces } from '../../../src/client/historyPage'
 import { makeRichText } from '../../../src/client/components/richText'
@@ -39,9 +39,11 @@ vi.mock('@deepseek-ai/dsh-client-ui-primitives', async () => {
       captured.markdownProps = props
       return React.createElement('div', null, String(props.text ?? ''))
     },
-    // The rich-text copy control's glyphs and clipboard writer.
+    // The rich-text copy control's glyphs and clipboard writer; the
+    // Plugin Info card's settings gear.
     IconCopyOutline16: () => React.createElement('span', null),
     IconCheckOutline16: () => React.createElement('span', null),
+    IconSettingsOutline14: () => React.createElement('span', null),
     writeClipboard: async () => true,
   }
 })
@@ -103,6 +105,23 @@ for (const baseline of BASELINES) {
       assert.equal(makeContentFetcher('s-face'), undefined, 'the unloaded slot leaves no face behind')
     })
 
+    test('the session jump rides this generation\'s navigation seam (issue #90)', () => {
+      // The composition this line actually serves: the view-owner face always
+      // (the sidebar row click's own verb), the retired sessions-service verb
+      // only where the line still declares it — on the V4+ line the service
+      // carries NO selection at all, the exact composition issue #90 died on.
+      const { ctx } = baselineCtx()
+      const nav = baseline.client.sessionNav
+      const jumped: string[] = []
+      ctx.setService('uiWorkspace', { openSession: (id: string) => { jumped.push(id) } })
+      ctx.setService('sessions', nav.sessionsOpen
+        ? { open: (id: string) => { jumped.push(`legacy:${id}`) } }
+        : { list: { getSnapshot: () => ({}) } })
+      openSessionVia(asClientCtx(ctx), 's-jump')
+      assert.deepEqual(jumped, ['s-jump'], 'the jump landed through the view owner')
+      ctx.dispose()
+    })
+
     test('a failed history rpc rejects (retryable), never resolving to a fake absence', async () => {
       const { ctx } = baselineCtx()
       // The inject resolves the page off the `remote` facade — fail it there.
@@ -138,24 +157,22 @@ for (const baseline of BASELINES) {
       const { ctx } = baselineCtx()
       const settings = createContextSettings()
       const View = makeContextView(asClientCtx(ctx), kit, settings)
-      // Without the registry (every line older than the right Sidebar), the
-      // deferred inject never fires: no tab, no body seat, no throw.
+      // Without the registry (a below-baseline gated host, say), the deferred
+      // inject never fires: no tab, no body seat, no throw.
       assert.doesNotThrow(() => {
         watchSidebarContextTab(asClientCtx(ctx), View, kit.t, 'dsh-context')
       })
       assert.deepEqual(ctx.slots.of('sidebar.right.pane.tab'), [])
-      if (baseline.client.sidebar !== undefined) {
-        const definitions: unknown[] = []
-        ctx.setService('sidebarRightTabs', {
-          register: (definition: unknown) => {
-            definitions.push(definition)
-            return () => {}
-          },
-        })
-        assert.equal(definitions.length, 1, 'the generation with the seam gets the tab')
-        assert.equal(ctx.slots.of('sidebar.right.pane.tab').length, 1)
-        assert.equal(ctx.slots.of('sidebar.right.pane.tab.title').length, 1, 'the chip-title seat is registered on this generation')
-      }
+      const definitions: unknown[] = []
+      ctx.setService('sidebarRightTabs', {
+        register: (definition: unknown) => {
+          definitions.push(definition)
+          return () => {}
+        },
+      })
+      assert.equal(definitions.length, 1, 'the generation with the seam gets the tab')
+      assert.equal(ctx.slots.of('sidebar.right.pane.tab').length, 1)
+      assert.equal(ctx.slots.of('sidebar.right.pane.tab.title').length, 1, 'the chip-title seat is registered on this generation')
       ctx.dispose()
     })
 
@@ -163,14 +180,12 @@ for (const baseline of BASELINES) {
       const { ctx } = baselineCtx()
       // No column on this generation: the file names keep their system-open only.
       assert.equal(openResourceVia(asClientCtx(ctx)), undefined, 'no navigation face = no preview opener')
-      if (baseline.client.sidebar !== undefined) {
-        const opened: string[] = []
-        ctx.setService('sidebarRight', { openResource: (address: string) => { opened.push(address) } })
-        const open = openResourceVia(asClientCtx(ctx))
-        assert.ok(open !== undefined, 'the generation with the column serves the opener')
-        assert.equal(open('dsh-resource://file/session/s/a.ts'), true)
-        assert.deepEqual(opened, ['dsh-resource://file/session/s/a.ts'])
-      }
+      const opened: string[] = []
+      ctx.setService('sidebarRight', { openResource: (address: string) => { opened.push(address) } })
+      const open = openResourceVia(asClientCtx(ctx))
+      assert.ok(open !== undefined, 'the generation with the column serves the opener')
+      assert.equal(open('dsh-resource://file/session/s/a.ts'), true)
+      assert.deepEqual(opened, ['dsh-resource://file/session/s/a.ts'])
       ctx.dispose()
     })
 

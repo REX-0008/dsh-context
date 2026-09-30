@@ -9,12 +9,20 @@
 **The best [DeepSeek Harness plugin](https://www.deepseek.com/harness/) for Agent's context insights and management.**
 
 [`dsh-context`](https://www.npmjs.com/package/dsh-context) provides full context lifecycle management features.
-- **Context Dashboard** — the cross-session overview above Settings on the sidebar foot: KPI band, activity heatmap, aggregate composition ring, and filterable session cards that jump straight into any session.
+- **Context Dashboard** — the cross-session overview above Settings on the sidebar foot: KPI band with a 7-day token/cost usage chart, activity heatmap, aggregate composition ring, and filterable session cards that jump straight into any session.
 - **Context tab** — an UI context dashboard for DeepSeek Harness's context stats, composition, trend, events, and messages.
 - **Context panel** — the same dashboard as a right-sidebar tab (dsh 0.1.5-rc.1+): pick **Context** on the sidebar's guide page and the panel opens beside the chat.
 - **`/context` command** — the slash command shows the context model for current context composition and recent context evolution.
 
 ## Install / Update
+
+### Install on DeekSeek Harness web or desktop
+
+Fill `dsh-context` in the **Add plugin** wizard's search box, and click **Install**:
+
+![Add_plugin_wizard](https://raw.githubusercontent.com/bowenliang123/dsh-context/main/docs/add-plugin-wizard.png)
+
+### Install with `dsh` cli
 
 Install [`dsh-context`](https://www.npmjs.com/package/dsh-context) plugin from [DeepSeek Harness](https://www.npmjs.com/package/@deepseek-ai/dsh):
 
@@ -39,7 +47,7 @@ Four surfaces, one story — what your agent is carrying, how it got there, and 
 | **Context Dashboard** | Every session at a glance: usage, cost, cache hit, daily activity, and per-session context profiles — filtered by range, day, group, or search, one click to jump in. |
 | **Context tab** | The full dashboard: stats, composition, per-request trend, events, file activity, and the agent network — in every session. |
 | **`/context` command** | A centered modal with the same composition and context browser, without leaving the chat. |
-| **Settings → Plugin configuration** | Per-user defaults: trend granularity & mode, File Activity sort. |
+| **Preferences card** | Per-user defaults: view placement, trend granularity & mode, File Activity sort, and more. |
 
 ## 🗂️ The Context Dashboard
 
@@ -50,7 +58,9 @@ Click **Context Dashboard / 上下文仪表盘** at the bottom-left of the sideb
 | Section | The question it answers |
 | --- | --- |
 | **KPI band** | How much am I using — sessions, billed tokens, estimated cost, and cache-hit rate over the picked range (7d / 30d / all). |
+| **7-day usage chart** | When did I spend what — each of the last 7 days' billed tokens and estimated cost as a bar pair, folded per turn off the sessions' own request times (not the session's last-active day). |
 | **Activity heatmap** | When do I actually work — the last 8 weeks of daily billed tokens; click a day to filter the sessions that were active on it. |
+| **Settings entry** | One row under the heatmap — the same guarded jump to this plugin's preferences as the Context tab's Plugin Info card. |
 | **Context Composition** | Where the context windows went, summed over the range's sessions. |
 | **Session cards** | Each session's profile: composition ring, billed tokens, turns, cost, and its workspace-group / project breadcrumb — sorted by recency, tokens, or context size, searchable, grouped by workspace. A card click opens the session. |
 
@@ -113,6 +123,10 @@ Pick **Live (next request)** or any retained step, and browse what that request 
 
 ![Tool schemas with source chips, filter, and sort](https://raw.githubusercontent.com/bowenliang123/dsh-context/main/docs/context-browser-tools.png)
 
+- **Filter assistant replies by kind** — the assistant category's search box carries **Thinking / Tools / Answer** chips, each with the shown step's message count (one reply can carry several); click one to keep only the matching replies, click again to clear:
+
+![Assistant replies with kind filter chips](https://raw.githubusercontent.com/bowenliang123/dsh-context/main/docs/context-browser-assistant-kinds.png)
+
 - **Tool results open into the full call** — the tool name and arguments with its **OK/error** status, the result body with line count and a **Raw / Markdown** toggle:
 
 ![A tool result expanded with Raw/Markdown toggle](https://raw.githubusercontent.com/bowenliang123/dsh-context/main/docs/context-browser-tool-result.png)
@@ -160,14 +174,19 @@ A centered dialog opens with the **Current Composition** card and the **Context 
 
 ## ⚙️ Settings
 
-In **Settings → Plugins → Plugin configuration**, the **Context** card holds this plugin's per-user preferences — default trend granularity (Step/Turn), default trend mode (Total/Delta), and the File Activity default sort. In-chart and in-card toggles stay per-view and never overwrite the stored preference.
+The **Context** preferences card holds this plugin's per-user settings — default placement, trend granularity (Step/Turn), trend mode (Total/Delta), tool and File Activity sort, and the sidebar insights entry. Where it lives depends on your dsh release:
+
+- **dsh 0.1.7+** — the sidebar **Plugins** entry → the **dsh-context** bundle's page → its **Configuration** section (the card is served by the entry's live Config form).
+- **older releases** — **Settings → Plugins → Plugin configuration** → the **Context** card.
+
+In-chart and in-card toggles stay per-view and never overwrite the stored preference.
 
 ![The Context settings card](https://raw.githubusercontent.com/bowenliang123/dsh-context/main/docs/settings.png)
 
 ## Good to know
 
 - **Estimates vs actuals** — category figures use dsh's own fixed-density heuristic (the same one as its built-in token meter); the pinned trend details show provider-reported actuals next to them, and the Token card pairs its ≈-estimated composition shares with the provider-exact billed total.
-- **Compatibility** — works on `@deepseek-ai/dsh` **0.1.2-rc1+**, across the V0 (0.1.2-rc.x), V2 (0.1.3-alpha.x), and V3 (0.1.5-alpha.x+) session-log generations. The per-release matrix and how it is verified: [docs/compatibility.md](docs/compatibility.md).
+- **Compatibility** — works on `@deepseek-ai/dsh` **0.1.5-rc.1+** (the `0.1.5` line from rc.1, the `0.1.7` line from rc.2, the `0.2.0` line from rc.2), across the V3 (`0.1.5-alpha.x+`) and V4 (`0.1.6/0.1.7/0.2.0+`) session-log generations, from one shape-driven code path. The per-release matrix and how it is verified: [docs/compatibility.md](docs/compatibility.md).
 - **I18n** — UI in English and 简体中文.
 
 ## Like it?

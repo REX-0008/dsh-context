@@ -84,7 +84,7 @@ export function normalizeModel(id: string): string {
  * @param model - the model id as the log spells it.
  * @returns the rates, or null when the table has no row for it.
  */
-export function tableRateOf(model: string): PriceTriple | null {
+export function tableFaceOf(model: string): { mid: string; rate: PriceTriple } | null {
   const target = normalizeModel(model)
   if (target === '') return null
   let best: TableRow | null = null
@@ -93,7 +93,11 @@ export function tableRateOf(model: string): PriceTriple | null {
     if (key === '' || !target.includes(key)) continue
     if (best === null || key.length > normalizeModel(best.key).length) best = candidate
   }
-  return best === null ? null : best.row
+  return best === null ? null : { mid: best.key, rate: best.row }
+}
+
+export function tableRateOf(model: string): PriceTriple | null {
+  return tableFaceOf(model)?.rate ?? null
 }
 
 /** The keys this table carries, longest first (useful when a model is unpriced). */
