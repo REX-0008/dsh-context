@@ -100,7 +100,7 @@ export function apply(ctx: Context, config: Config): void {
   // attribution this plugin already resolves, so a tool-guidance prompt section
   // (`tool:<name>`) is labelled with its real owning package instead of being
   // attributed from scratch and coming up empty.
-  applyOur(ctx, { toolOwnerOf: attribution.ownerOf.bind(attribution) })
+  applyOur(ctx, config, { toolOwnerOf: attribution.ownerOf.bind(attribution) })
 }
 
 // ---- public type surface (stable for downstream consumers) -------------------

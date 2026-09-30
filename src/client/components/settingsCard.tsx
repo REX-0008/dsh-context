@@ -274,7 +274,6 @@ export function makeSettingsCard(kit: ViewKit): (props: SettingsCardProps) => Re
 
               <PreferenceRows t={t} state={state} set={props.set} />
               <BillingBlock t={t} currencyOf={props.currencyOf} useSessions={props.useSessions} />
-              <BillingBlock t={t} currencyOf={props.currencyOf} useSessions={props.useSessions} />
 
             </div>
           )

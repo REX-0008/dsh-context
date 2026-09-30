@@ -2,12 +2,23 @@
  * The settings face the write layer reads/writes, unified across the harness
  * generations.
  *
- * 0.1.x registers a dedicated namespace (`settings.register`) and hands back a
- * live scope; 0.2.x removed that face — the entry's `Config` schema IS the
- * settings surface now (host/config.ts carries our tree under `panel`, marked
- * volatile), served through `describe`/`update`. Both faces reduce to the two
- * operations this layer needs: a synchronous read of the merged settings and
- * an asynchronous merge write.
+ * 0.2.x made the entry's own Config the settings surface: host/config.ts carries
+ * our tree under `panel`, marked volatile, and the Loader keeps that field's
+ * reference live. The official contract is that a business plugin reads its own
+ * Config reference directly (`docs/subsystems/settings.md`: "Business consumers
+ * read `.get()` on their own Config references"; `dsh-settings` README: "Business
+ * plugins read their Config references directly"). The reference is O(1) and the
+ * Loader commits new values into it on a volatile update.
+ *
+ * The Settings service is NOT a read path here. `settings.describe()` projects
+ * every entry's form schema for the management page: it walks the whole profile,
+ * serializes each schema, and emits `settings/document-updated`. Calling it per
+ * read made the hot path (one `system-prompt/assemble` + `agent/pre-step` per
+ * model request) pay that cost. Only the WRITE goes through the service, via
+ * `update(ns, patch)`, which is the contract's own write operation.
+ *
+ * 0.1.x has neither face: it registers a dedicated namespace
+ * (`settings.register`) and hands back a live scope.
  * @module @our/context-panel/panel/scope
  */
 import type { ContextPanelSettings } from '../types'
@@ -32,11 +43,18 @@ export interface LegacySettingsFace {
   register(ns: string, schema: unknown, options?: { base?: unknown; applies?: string }): unknown
 }
 
-/** The 0.2.x settings service face (profile-entry config forms). */
+/** The 0.2.x settings service face, as far as the write path consumes it. */
 export interface SettingsFormsFace {
   configure?(presentation: { auto?: boolean }, owner?: unknown): () => void
-  describe(): unknown
   update(ns: string, patch: object, expectedRevision?: number): Promise<void>
+}
+
+/**
+ * The volatile reference the Loader commits values into. `get()` returns the
+ * current plain value; the Loader swaps it on `loader/volatile-update`.
+ */
+export interface VolatileRef<T> {
+  get(): T
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -60,42 +78,39 @@ export function wrapLegacyScope(scope: LegacySettingsScope): PanelScope {
 }
 
 /**
- * Build the 0.2.x face over the profile-entry settings service: our tree is
- * read from the entry's live config projection and written as a merge patch
- * under the same `panel` key host/config.ts declares.
+ * Build the 0.2.x face over the entry's own resolved Config reference.
+ *
+ * @param ref - the resolved `config.panel` volatile reference (see host/config.ts).
+ *              `undefined` on a composition whose schema lacks the field, which
+ *              degrades to the defaults.
+ * @param settings - the Settings service, used only for the merge WRITE.
+ * @param ns - the profile entry id the write addresses (host/cordis.patch.yml's
+ *             row id for this plugin).
+ * @returns the read/write face; reads never touch the Settings service.
  */
-export function createProfileScope(settings: SettingsFormsFace): PanelScope {
-  // Locate the descriptor that carries our tree: the entry named after our
-  // namespace when the profile keeps the 0.1.x name, else the unique entry
-  // whose form declares our keys (the `panel` carrier).
-  const findOurRow = (): { ns: string; panel: Record<string, unknown> | undefined } | undefined => {
-    const rows = settings.describe()
-    if (!Array.isArray(rows)) return undefined
-    for (const raw of rows) {
-      const row = asRecord(raw)
-      if (row === undefined || typeof row.ns !== 'string') continue
-      if (row.ns !== CONTEXT_PANEL_NS && !row.ns.includes('context-panel-write')) continue
-      return { ns: row.ns, panel: asRecord(asRecord(row.value)?.panel) }
+export function createEntryScope(
+  ref: VolatileRef<ContextPanelSettings> | undefined,
+  settings: SettingsFormsFace,
+  ns: string,
+): PanelScope {
+  const read = (): Record<string, unknown> | undefined => {
+    try {
+      return asRecord(ref?.get())
+    } catch {
+      // A Loader that has not committed the field yet leaves the defaults.
+      return undefined
     }
-    for (const raw of rows) {
-      const row = asRecord(raw)
-      if (row === undefined) continue
-      const form = JSON.stringify(row.schema ?? '')
-      if (!form.includes('"panel"') || !form.includes('"conversationOverrides"')) continue
-      return { ns: typeof row.ns === 'string' ? row.ns : CONTEXT_PANEL_NS, panel: asRecord(asRecord(row.value)?.panel) }
-    }
-    return undefined
   }
   return {
-    get: () => {
-      const row = findOurRow()
-      if (row === undefined || row.panel === undefined) return { ...DEFAULT_SETTINGS }
-      return deepMerge({ ...DEFAULT_SETTINGS }, row.panel) as unknown as ContextPanelSettings
-    },
+    get: () => deepMerge({ ...DEFAULT_SETTINGS }, read() ?? {}) as unknown as ContextPanelSettings,
     update: async (patch) => {
-      const row = findOurRow()
-      if (row === undefined) throw new Error('the context-panel settings entry is not configurable on this harness')
-      await settings.update(row.ns, { panel: patch })
+      await settings.update(ns, { panel: patch })
     },
   }
 }
+
+/**
+ * The 0.1.x-only namespace name, kept for the register face. On 0.2.x the
+ * settings surface is the entry config, so nothing registers this namespace.
+ */
+export { CONTEXT_PANEL_NS }

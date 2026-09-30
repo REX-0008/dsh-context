@@ -26,7 +26,7 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 // not resolvable from every install, so the `compaction/summary` guard below
 // compares by string instead of relying on the merged event table.
 import { CONTEXT_PANEL_NS, CONTEXT_PANEL_SCHEMA, DEFAULT_SETTINGS } from './panel/settings'
-import { createProfileScope, wrapLegacyScope, type LegacySettingsFace, type LegacySettingsScope, type PanelScope, type SettingsFormsFace } from './panel/scope'
+import { createEntryScope, wrapLegacyScope, type LegacySettingsFace, type LegacySettingsScope, type PanelScope, type SettingsFormsFace, type VolatileRef } from './panel/scope'
 import { createPanelService, type ContextPanelService } from './panel/panel-service'
 import type { ContextAssemblerService } from './assembler/service'
 import { ContextAssemblerEngine } from './assembler/engine'
@@ -36,6 +36,25 @@ import { KNOWN_INJECTORS } from './known-injectors'
 import { presetEntryForSection } from './preset/section-entries'
 import { SEED_MODULES } from './preset/seeds'
 import type { ContextPanelSettings } from './types'
+import type { Config } from '../host/config'
+
+/**
+ * Read the resolved entry config's live `panel` reference.
+ *
+ * cordis resolves the entry Config before `apply`, so the value handed here
+ * already carries `panel` as the Volatile reference the Loader commits into
+ * (0.2.x). A composition whose schema lacks the field, or an older line whose
+ * schemastery has no `.volatile()`, yields a plain object — the reference face
+ * is read structurally either way.
+ * @param config - the resolved entry config.
+ * @returns the live reference, or undefined when the field resolved to nothing.
+ */
+function panelRefOf(config: Config | undefined): VolatileRef<ContextPanelSettings> | undefined {
+  const panel = (config as { panel?: unknown } | undefined)?.panel
+  if (panel === null || typeof panel !== 'object') return undefined
+  const get = (panel as { get?: unknown }).get
+  return typeof get === 'function' ? panel as VolatileRef<ContextPanelSettings> : undefined
+}
 
 /** Wiring refs the routes read lazily (settings/webServer inject asynchronously). */
 interface Wiring {
@@ -578,17 +597,19 @@ export interface OurHostBridge {
  * @param ctx - the host plugin context.
  * @param bridge - host capabilities this layer reuses (optional).
  */
-export function applyOur(ctx: Context, bridge?: OurHostBridge): void {
+export function applyOur(ctx: Context, config: Config | undefined, bridge?: OurHostBridge): void {
   ctx.effect(() => {
     const wiring: Wiring = bridge === undefined ? {} : { bridge }
     const disposeCore = ctx.inject(['settings', 'sessionProjections'], (sctx) => {
-      // Two harness generations: 0.1.x registers a live namespace scope; 0.2.x
-      // made the entry config the settings surface (host/config.ts nests our
-      // tree under `panel`) and serves it through describe/update instead.
+      // Two harness generations. 0.1.x registers a live namespace scope. 0.2.x
+      // made the entry config the settings surface (host/config.ts nests our tree
+      // under `panel`, marked volatile): the READ is the entry's own resolved
+      // Config reference — the contract's business-plugin path — and only the
+      // write goes through the Settings service.
       const settings = sctx.settings as unknown as Partial<LegacySettingsFace & SettingsFormsFace>
       const scope: PanelScope = typeof settings.register === 'function'
         ? wrapLegacyScope(settings.register(CONTEXT_PANEL_NS, CONTEXT_PANEL_SCHEMA, { base: DEFAULT_SETTINGS, applies: 'live' }) as LegacySettingsScope)
-        : createProfileScope(settings as SettingsFormsFace)
+        : createEntryScope(panelRefOf(config), settings as SettingsFormsFace, CONTEXT_PANEL_NS)
       // The raw entry-config form would duplicate our panel UI; keep the entry
       // out of the auto-generated settings pages (a no-op on the register face).
       settings.configure?.({ auto: false }, ctx.fiber)

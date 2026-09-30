@@ -129,7 +129,9 @@ describe.skipIf(staging.artifactsMissing())('bundle smoke — the built lib/clie
   })
 
   test('registrations: bilingual dictionaries, five slots, the /context trigger source', () => {
-    assert.ok(state.dicts.get('dsh-context')?.zh && state.dicts.get('dsh-context')?.en, 'bilingual dictionaries registered')
+    // The locale namespace is the BUNDLE PACKAGE NAME on this fork (upstream's
+    // package, entry id and namespace were all 'dsh-context').
+    assert.ok(state.dicts.get('@our/context-panel-write')?.zh && state.dicts.get('@our/context-panel-write')?.en, 'bilingual dictionaries registered')
     assert.equal(state.slots.length, 5, 'view tab + assistant action + input overlay + dashboard entry and overlay slots')
     assert.equal(state.slots[0]?.[0], 'conversation.view')
     assert.equal(state.slots[0]?.[1].order, 20)

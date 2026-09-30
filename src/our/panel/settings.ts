@@ -1,18 +1,25 @@
 /**
- * The context-panel settings namespace: schema + defaults + registration.
+ * The context-panel settings schema + defaults, and the two roots the two
+ * harness generations register them through.
  *
- * Difference from the design document: this uses settings.register directly
- * (rather than installSettingsSection) — installSettingsSection exposes reads
- * only (setSource/onChange), while this plugin needs scope.update() for its
- * write paths (updateModule/syncConversationToAgent), and the scope that register
- * returns provides get/watch/update together.
+ * The field set is declared once (`FIELDS`) and built into two SEPARATE roots:
+ * 0.1.x registers `CONTEXT_PANEL_SCHEMA` on its own settings namespace, while
+ * 0.2.x nests `CONTEXT_PANEL_ENTRY_SCHEMA` under the entry config's `panel`
+ * field, marked volatile (host/config.ts). Separate roots because `.volatile()`
+ * mutates the node it is applied to, and the 0.1.x registration must keep
+ * resolving plain values.
  * @module @our/context-panel/settings
  */
 import z from '@deepseek-ai/schemastery'
 import type { ContextPanelSettings, PromptModulePatch } from '../types'
 import { SEED_MODULES } from '../preset/seeds'
 
-/** Our own namespace, distinct from upstream dsh-context's. */
+/**
+ * Our own settings namespace, distinct from upstream dsh-context's. It doubles
+ * as the 0.2.x write address: the Settings service keys forms by the HOST
+ * LOADER ENTRY ID (`configForms.get` is documented as "Unique Host plugin entry
+ * id"), which this package's cordis.patch.yml declares as `context-panel-write`.
+ */
 export const CONTEXT_PANEL_NS = 'context-panel-write'
 
 /** Module patch schema (every field optional; source stays a loose object so it can be extended). */

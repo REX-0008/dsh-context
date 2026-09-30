@@ -5,6 +5,7 @@
 
 import { createElement as h, type ReactElement } from 'react'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { describe, test } from 'vitest'
 import { DICT_EN, DICT_ZH } from '../../src/client/i18n'
 import { modalStoreOf, type ModalStore } from '../../src/client/modalStore'
@@ -43,6 +44,30 @@ function makeScope(snapshot: { status: string; value: unknown; writable: boolean
   return rec
 }
 
+/** A configForms stand-in capturing the whileServed registration. */
+function fakeConfigForms(form: SettingsScopeLike): {
+  gets: string[]
+  whileServedCalls: string[][]
+  register: () => () => void
+  whileServed(namespaces: readonly string[], register: () => () => void): () => void
+} {
+  const rec = {
+    gets: [] as string[],
+    whileServedCalls: [] as string[][],
+    register: (): (() => void) => () => {},
+    get(namespace: string): SettingsScopeLike {
+      rec.gets.push(namespace)
+      return form
+    },
+    whileServed(namespaces: string[], register: () => () => void): () => void {
+      rec.whileServedCalls.push(namespaces)
+      rec.register = register
+      return () => {}
+    },
+  }
+  return rec
+}
+
 describe('client entry: constants', () => {
   test('name and inject declare the plugin identity and hard dependencies', () => {
     assert.equal(name, 'dsh-context')
@@ -50,24 +75,63 @@ describe('client entry: constants', () => {
   })
 })
 
+// The registration keys name different things and must not be collapsed into
+// one string again: the browser reads the locale/slot key against the BUNDLE
+// PACKAGE NAME (the Plugins page renders the keyed `plugins.bundle.config`
+// seat with `entryKey: pkg.name`), while the settings transport addresses the
+// HOST LOADER ENTRY ID (`configForms.get` is documented as "Unique Host plugin
+// entry id"). Upstream could reuse one string because its package, entry id and
+// namespace were all `dsh-context`; this fork renamed the first two, which is
+// exactly why the settings card stopped appearing on the Plugins page.
+describe('client entry: the two registration keys', () => {
+  // Read the real identities rather than restating them: the bundle package name
+  // comes from package.json, the Host entry id from this package's own
+  // cordis.patch.yml row. A rename that updates one but not the other fails here
+  // instead of silently dropping the settings card from the Plugins page.
+  const BUNDLE: string = JSON.parse(readFileSync('package.json', 'utf8')).name
+  const ENTRY: string = /^\s*- id:\s*(\S+)/m.exec(readFileSync('cordis.patch.yml', 'utf8'))?.[1] ?? ''
+
+  test('the bundle package name and the loader entry id are distinct', () => {
+    assert.equal(BUNDLE, '@our/context-panel-write')
+    assert.equal(ENTRY, 'context-panel-write')
+  })
+
+  test('the locale namespace and the Plugins-page slot key the bundle package name', () => {
+    const ctx = new TestClientCtx()
+    applyTo(ctx)
+    assert.ok(ctx.locale.namespaces.has(BUNDLE), 'the dictionary registers under the bundle package name')
+    ctx.dispose()
+  })
+
+  test('the settings transport keys the Host loader entry id', () => {
+    const ctx = new TestClientCtx()
+    const forms = fakeConfigForms(makeScope({ status: 'ready', value: {}, writable: true }))
+    ctx.setService('configForms', forms)
+    applyTo(ctx)
+    assert.deepEqual(forms.gets, [ENTRY])
+    assert.deepEqual(forms.whileServedCalls, [[ENTRY]])
+    ctx.dispose()
+  })
+})
+
 describe('client entry: dictionaries', () => {
   test('apply registers the real zh/en dicts; dispose removes them', () => {
     const ctx = new TestClientCtx()
     applyTo(ctx)
-    const dicts = ctx.locale.namespaces.get('dsh-context')
+    const dicts = ctx.locale.namespaces.get('@our/context-panel-write')
     assert.ok(dicts)
     assert.equal(dicts.zh, DICT_ZH)
     assert.equal(dicts.en, DICT_EN)
     // The bound translate resolves through the active-locale → en chain.
-    assert.equal(ctx.locale.bind('dsh-context')('tab'), 'Context')
+    assert.equal(ctx.locale.bind('@our/context-panel-write')('tab'), 'Context')
     ctx.dispose()
-    assert.equal(ctx.locale.namespaces.has('dsh-context'), false)
+    assert.equal(ctx.locale.namespaces.has('@our/context-panel-write'), false)
   })
 
   test('the zh active locale binds the zh dictionary arm', () => {
     const ctx = new TestClientCtx({ locale: 'zh' })
     applyTo(ctx)
-    assert.equal(ctx.locale.bind('dsh-context')('tab'), '上下文')
+    assert.equal(ctx.locale.bind('@our/context-panel-write')('tab'), '上下文')
     ctx.dispose()
   })
 })
@@ -82,7 +146,7 @@ describe('client entry: conversation.view slot', () => {
     assert.equal(registration.name, 'conversation.view')
     assert.equal(registration.id, 'context')
     assert.equal(registration.order, 20)
-    assert.equal(registration.locale, 'dsh-context')
+    assert.equal(registration.locale, '@our/context-panel-write')
     assert.equal(registration.label?.(), 'Context')
 
     const el = component({ sessionId: 's1', useProjection: () => undefined }) as ReactElement
@@ -112,7 +176,7 @@ describe('client entry: assistant-actions seat', () => {
     assert.equal(registration.name, 'conversation.chat.assistant-actions')
     assert.equal(registration.id, 'context-jump')
     assert.equal(registration.order, 20, 'right of the shipped feedback entry')
-    assert.equal(registration.locale, 'dsh-context')
+    assert.equal(registration.locale, '@our/context-panel-write')
 
     const el = component({ messageId: 'm1' }) as ReactElement
     const m = await mount(el)
@@ -180,7 +244,7 @@ describe('client entry: conversation.input.overlay slot', () => {
     assert.equal(registration.name, 'conversation.input.overlay')
     assert.equal(registration.id, 'context-modal')
     assert.equal(registration.order, 10)
-    assert.equal(registration.locale, 'dsh-context')
+    assert.equal(registration.locale, '@our/context-panel-write')
 
     const face = registration.inject?.('sess-1') as { hooks: { contextModal: ModalStore } }
     assert.equal(face.hooks.contextModal, modalStoreOf('sess-1'))
@@ -207,7 +271,7 @@ describe('client entry: Context Dashboard seats', () => {
     assert.equal(actions.length, 1)
     assert.equal(actions[0].registration.name, 'sidebar.footer.action')
     assert.equal(actions[0].registration.id, 'context-overview')
-    assert.equal(actions[0].registration.locale, 'dsh-context')
+    assert.equal(actions[0].registration.locale, '@our/context-panel-write')
     const actionEl = actions[0].component({ wide: true }) as ReactElement
     assert.equal((actionEl.type as { name: string }).name, 'OverviewButton')
     const actionMount = await mount(actionEl)
@@ -218,7 +282,7 @@ describe('client entry: Context Dashboard seats', () => {
     assert.equal(overlays.length, 1)
     assert.equal(overlays[0].registration.name, 'shell.overlay')
     assert.equal(overlays[0].registration.id, 'context-overview')
-    assert.equal(overlays[0].registration.locale, 'dsh-context')
+    assert.equal(overlays[0].registration.locale, '@our/context-panel-write')
     const overlayEl = overlays[0].component({}) as ReactElement
     assert.equal((overlayEl.type as { name: string }).name, 'OverviewPanel')
     const overlayMount = await mount(overlayEl)
@@ -264,7 +328,7 @@ describe('client entry: settingsScope inject', () => {
         return scope
       },
     })
-    assert.deepEqual(specs, [{ namespace: 'dsh-context' }])
+    assert.deepEqual(specs, [{ namespace: 'context-panel-write' }])
     assert.equal(scope.subscribes, 1)
     assert.equal(ctx.slots.of('settings.plugin.item').length, 1)
     ctx.dispose()
@@ -280,30 +344,6 @@ describe('client entry: settingsScope inject', () => {
 })
 
 describe('client entry: configForms inject (the Config-form generation)', () => {
-  /** A configForms stand-in capturing the whileServed registration. */
-  function fakeConfigForms(form: SettingsScopeLike): {
-    gets: string[]
-    whileServedCalls: string[][]
-    register: () => () => void
-    whileServed(namespaces: readonly string[], register: () => () => void): () => void
-  } {
-    const rec = {
-      gets: [] as string[],
-      whileServedCalls: [] as string[][],
-      register: (): (() => void) => () => {},
-      get(namespace: string): SettingsScopeLike {
-        rec.gets.push(namespace)
-        return form
-      },
-      whileServed(namespaces: string[], register: () => () => void): () => void {
-        rec.whileServedCalls.push(namespaces)
-        rec.register = register
-        return () => {}
-      },
-    }
-    return rec
-  }
-
   test('absent at apply time: the inject stays pending — no plugins.bundle.config slot', () => {
     const ctx = new TestClientCtx()
     applyTo(ctx)
@@ -331,9 +371,9 @@ describe('client entry: configForms inject (the Config-form generation)', () => 
     const forms = fakeConfigForms(scope)
     ctx.setService('configForms', forms)
     // The namespace follows the settingsScope generation's join key.
-    assert.deepEqual(forms.gets, ['dsh-context'])
+    assert.deepEqual(forms.gets, ['context-panel-write'])
     assert.equal(scope.subscribes, 1, 'the settings store attached to the form')
-    assert.deepEqual(forms.whileServedCalls, [['dsh-context']])
+    assert.deepEqual(forms.whileServedCalls, [['context-panel-write']])
     // Nothing registers until the Host serves the namespace.
     assert.equal(ctx.slots.of('plugins.bundle.config').length, 0)
     // The Host serves: the register claims the keyed seat.
@@ -347,8 +387,8 @@ describe('client entry: configForms inject (the Config-form generation)', () => 
       inject?: () => unknown
     }
     assert.equal(registration.name, 'plugins.bundle.config')
-    assert.equal(registration.key, 'dsh-context')
-    assert.equal(registration.locale, 'dsh-context')
+    assert.equal(registration.key, '@our/context-panel-write')
+    assert.equal(registration.locale, '@our/context-panel-write')
     const face = registration.inject?.() as {
       hooks: { contextSettings: { getSnapshot(): SettingsState } }
       set: (field: SettingsField, value: string) => void
@@ -425,8 +465,8 @@ describe('client entry: settings card slot', () => {
   test('registers the keyed card; inject exposes the settings store and a set verb', () => {
     const { ctx, scope, registration } = setup()
     assert.equal(registration.name, 'settings.plugin.item')
-    assert.equal(registration.key, 'dsh-context')
-    assert.equal(registration.locale, 'dsh-context')
+    assert.equal(registration.key, '@our/context-panel-write')
+    assert.equal(registration.locale, '@our/context-panel-write')
 
     const face = registration.inject?.() as {
       hooks: { contextSettings: { getSnapshot(): SettingsState } }
@@ -547,10 +587,10 @@ describe('client entry: dispose', () => {
     }
     const ctx = new TestClientCtx({ services: { inputTriggers } })
     applyTo(ctx)
-    assert.ok(ctx.locale.namespaces.has('dsh-context'))
+    assert.ok(ctx.locale.namespaces.has('@our/context-panel-write'))
     assert.equal(sources.length, 1)
     ctx.dispose()
-    assert.equal(ctx.locale.namespaces.has('dsh-context'), false)
+    assert.equal(ctx.locale.namespaces.has('@our/context-panel-write'), false)
     assert.equal(sources.length, 0)
   })
 })

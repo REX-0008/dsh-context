@@ -65,7 +65,16 @@ import './styles/overview.css'
 // sheets (all classes here are new; see contextManagement.css).
 import './styles/contextManagement.css'
 
-const NS = 'dsh-context'
+// Two distinct keys, both of which must name THIS package on this fork:
+//   - the Locale/Slots namespace and the `plugins.bundle.config` slot key are
+//     the BUNDLE PACKAGE NAME (the Plugins page renders that keyed slot with
+//     `entryKey: pkg.name`);
+//   - the settings transport key (`configForms.get`/`whileServed`) is the HOST
+//     loader ENTRY ID, which our cordis.patch.yml declares as `context-panel-write`.
+// Upstream could use one string for all three because its package, entry id and
+// namespace were all `dsh-context`; this fork renamed the first two.
+const NS = '@our/context-panel-write'
+const SETTINGS_NS = 'context-panel-write'
 
 function apply(ctx: ClientCtx): void {
   // Bilingual dictionaries, registered via ctx.effect so a stop or HMR reload
@@ -175,12 +184,14 @@ function apply(ctx: ClientCtx): void {
   //   - the Config-form generation (dsh 0.1.7+) retired that pair — there the
   //     card rides the configForms transport and the Plugins page's keyed
   //     `plugins.bundle.config` seat, alive only while the Host serves the
-  //     namespace (the entry Config's volatile preference fields).
+  //     entry (its Config's volatile preference fields).
+  // The two seats key differently (see the NS/SETTINGS_NS note above): the slot
+  // key is the bundle package name, the transport namespace the loader entry id.
   ctx.inject(['settingsScope'], (raw) => {
     const c = raw as ClientCtx & { settingsScope?: SettingsScopeBinderFace }
     const binder = c.settingsScope
     if (binder === undefined) return
-    c.effect(() => settings.attach(binder.bind({ namespace: NS })), 'dsh-context: settings scope')
+    c.effect(() => settings.attach(binder.bind({ namespace: SETTINGS_NS })), 'dsh-context: settings scope')
     const SettingsCard = makeSettingsCard(kit)
     c.slots.inject('settings.plugin.item', () => {
       return c.slots.register(
@@ -195,9 +206,9 @@ function apply(ctx: ClientCtx): void {
     const c = raw as ClientCtx & { configForms?: ConfigFormsFace }
     const forms = c.configForms
     if (forms === undefined || typeof forms.get !== 'function' || typeof forms.whileServed !== 'function') return
-    c.effect(() => settings.attach(forms.get(NS)), 'dsh-context: config forms')
+    c.effect(() => settings.attach(forms.get(SETTINGS_NS)), 'dsh-context: config forms')
     const PluginConfigCard = makePluginConfigCard(kit)
-    c.effect(() => forms.whileServed([NS], () => {
+    c.effect(() => forms.whileServed([SETTINGS_NS], () => {
       // slots.inject's disposer is the registration's disposer (the typed
       // local face reads unknown; the harness contract returns a disposer).
       return c.slots.inject('plugins.bundle.config', () => {

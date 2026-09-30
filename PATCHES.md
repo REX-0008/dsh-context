@@ -175,7 +175,36 @@ scalar and `.loose()` — a second resolve degrades them to their default. The
 bounds now resolve through a bounds-only schema (`BoundsSchema`), which never
 touches the volatile subtrees.
 
-## 10. `src/client/i18n.ts` — our added keys
+**The read path (the fix to this insert).** The read path is the Config reference, never `describe()`. The official
+contract is that a business plugin reads its own Config reference
+(`docs/subsystems/settings.md`: "Business consumers read `.get()` on their own
+Config references"). The 0.1.x registration adapter that read through
+`settings.describe()` was wrong: `describe` projects every entry's form schema
+for the management page (it walks the whole profile, serializes each schema, and
+emits `settings/document-updated`), and the write layer reads its settings on
+every model request — once from the `agent/pre-step` waterfall and once from
+`system-prompt/assemble`. Measured on the desktop runtime, that put roughly 1 ms
+of whole-profile form projection on the per-request path. `src/our/panel/scope.ts`
+now wraps the resolved `config.panel` reference for reads (0.029 us measured)
+and uses the Settings service only for the merge WRITE (`update(ns, { panel })`).
+
+## 14. Registration keys — three roles, two distinct strings
+
+Upstream could use one string for every key because its package name, Host loader
+entry id, and settings namespace were all `dsh-context`. This fork renamed the
+first two, so they must be tracked separately:
+
+| Key | Value | Who reads it |
+| --- | --- | --- |
+| Locale namespace, `settings.plugin.item` key, `plugins.bundle.config` key | `@our/context-panel-write` | the browser; the Plugins page renders the keyed `plugins.bundle.config` seat with `entryKey: pkg.name` |
+| Settings transport namespace (`configForms.get` / `whileServed`) | `context-panel-write` | the Host settings document; `configForms.get` is documented as "Unique Host plugin entry id" |
+| Host loader entry id (host/config.ts write address) | `context-panel-write` | `cordis.patch.yml`'s row id, which the write uses as `ns` |
+
+Collapsing these is what hid the preference card from the Plugins page;
+`tests/client/index.spec.ts` now reads both identities from `package.json` and
+`cordis.patch.yml` and asserts they stay distinct.
+
+## 15. `src/client/i18n.ts` — our added keys
 
 **Anchor**: the end of `DICT_ZH` and `DICT_EN`.
 
