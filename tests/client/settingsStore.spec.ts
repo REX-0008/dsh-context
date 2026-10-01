@@ -61,6 +61,23 @@ describe('the price-map accessors', () => {
     assert.deepEqual(settings.priceMap(), { good: { vendor: 'zai', model: 'glm-5.2' } })
   })
 
+  test('the map keeps ONE identity while the stored value is unchanged', () => {
+    // Load-bearing: the settings card hands this object to an effect keyed on its
+    // identity. Rebuilding it per read made that effect re-run on every render,
+    // and each run notified the pricing store — an unbounded update loop that
+    // unmounted the whole card.
+    const settings = createContextSettings()
+    const scope = makeScope({ priceMap: { k: { vendor: 'zai', model: 'glm-5.2' } } })
+    settings.attach(scope)
+    const first = settings.priceMap()
+    assert.equal(settings.priceMap(), first, 'the same object comes back')
+    // A value change (the scope republishing) does rebuild it.
+    scope.push({ priceMap: { k: { vendor: 'deepseek', model: 'deepseek-flash' } } })
+    const second = settings.priceMap()
+    assert.notEqual(second, first, 'a changed value is a new object')
+    assert.deepEqual(second, { k: { vendor: 'deepseek', model: 'deepseek-flash' } })
+  })
+
   test('a write echoes immediately and reaches the scope under its own key', async () => {
     const settings = createContextSettings()
     const scope = makeScope({})

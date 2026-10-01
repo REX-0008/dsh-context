@@ -12,10 +12,11 @@
  * scrolling itself into view.
  */
 
-import { useEffect, useRef, useState, type ReactElement } from 'react'
+import { useEffect, useRef, useState, type ComponentType, type ReactElement, type ReactNode } from 'react'
 import { Menu } from '@deepseek-ai/dsh-client-ui-primitives'
 import { IconChevronDown } from '../primitives'
 import { consumeCardExpand } from '../settingsJump'
+import { makeErrorBoundary } from './errorBoundary'
 import { PriceMapTable } from '../../our/client/PriceMapTable'
 import type { SettingsField, SettingsState } from '../settings'
 import type { ViewKit } from '../viewkit'
@@ -171,6 +172,7 @@ function PreferenceRows(props: { t: Translate; state: SettingsState; set?: Setti
 
 export function makeSettingsCard(kit: ViewKit): (props: SettingsCardProps) => ReactElement | null {
   const { t } = kit
+  const PriceMapBoundary = makeErrorBoundary(t)
   return function SettingsCard(props: SettingsCardProps): ReactElement | null {
     const [open, setOpen] = useState(false)
     const itemRef = useRef<HTMLLIElement | null>(null)
@@ -207,7 +209,7 @@ export function makeSettingsCard(kit: ViewKit): (props: SettingsCardProps) => Re
                 ? <p className="lc-settings-note" role="status">{t('settings.readOnly')}</p>
                 : null}
               <PreferenceRows t={t} state={state} set={props.set} />
-              <PriceMapBlock {...props} t={t} />
+              <PriceMapBlock {...props} t={t} boundary={PriceMapBoundary} />
             </div>
           )
           : null}
@@ -224,6 +226,7 @@ export function makeSettingsCard(kit: ViewKit): (props: SettingsCardProps) => Re
  */
 export function makePluginConfigCard(kit: ViewKit): (props: SettingsCardProps) => ReactElement | null {
   const { t } = kit
+  const PriceMapBoundary = makeErrorBoundary(t)
   return function PluginConfigCard(props: SettingsCardProps): ReactElement | null {
     const state = typeof props.useContextSettings === 'function' ? props.useContextSettings(s => s) : undefined
     if (state === undefined || state.status === 'unavailable') return null
@@ -233,7 +236,7 @@ export function makePluginConfigCard(kit: ViewKit): (props: SettingsCardProps) =
           ? <p className="lc-settings-note" role="status">{t('settings.readOnly')}</p>
           : null}
         <PreferenceRows t={t} state={state} set={props.set} />
-        <PriceMapBlock {...props} t={t} />
+        <PriceMapBlock {...props} t={t} boundary={PriceMapBoundary} />
       </div>
     )
   }
@@ -243,7 +246,22 @@ export function makePluginConfigCard(kit: ViewKit): (props: SettingsCardProps) =
  * The model-price mapping block: a collapsible section so the card stays short
  * until the mapping is actually wanted (the table is wide and rarely needed).
  */
-function PriceMapBlock(props: SettingsCardProps & { t: Translate }): ReactElement | null {
+interface PriceMapBlockProps extends SettingsCardProps {
+  t: Translate
+  /** The pre-built fence (see below); a component type must not be made in render. */
+  boundary: ComponentType<{ children?: ReactNode }>
+}
+
+/**
+ * The block's fence, built ONCE per card factory.
+ *
+ * It cannot be built inside the block: a component type created during render is
+ * a new type every render, so React unmounts and remounts the subtree instead of
+ * updating it — which re-ran the table's effects on every pass and spun a render
+ * loop. Upstream's other boundaries are module-scope for the same reason; here
+ * the translator only exists in the factory, so the factory is where it is built.
+ */
+function PriceMapBlock(props: PriceMapBlockProps): ReactElement | null {
   const [open, setOpen] = useState(false)
   const seat = props.usePriceMap
   const state = typeof seat === 'function' ? seat() : undefined
@@ -264,14 +282,16 @@ function PriceMapBlock(props: SettingsCardProps & { t: Translate }): ReactElemen
       </button>
       {open
         ? (
-          <PriceMapTable
-            t={props.t}
-            useSessions={props.useSessions}
-            overrides={state.overrides}
-            onWrite={state.write}
-            currencyOf={props.currencyOf}
-            revision={state.revision}
-          />
+          <props.boundary>
+            <PriceMapTable
+              t={props.t}
+              useSessions={props.useSessions}
+              overrides={state.overrides}
+              onWrite={state.write}
+              currencyOf={props.currencyOf}
+              revision={state.revision}
+            />
+          </props.boundary>
         )
         : null}
     </div>

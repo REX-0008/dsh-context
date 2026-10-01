@@ -280,6 +280,13 @@ one collapsible block under the preference rows. The block renders nothing when 
 seat is absent, so a deployment whose Host does not serve the mapping shows exactly
 upstream's card.
 
+The block is wrapped in the harness's own `makeErrorBoundary`, so a throw inside OUR
+block can never unmount the host card's preference rows — the observed failure mode
+when this block first shipped (every setting on the page vanished). The boundary is
+built in the card FACTORY, never in the block: a component type created during
+render is a new type every render, which makes React unmount and remount the
+subtree instead of updating it, re-running its effects on every pass.
+
 ## 19. `src/client/index.ts` — the mapping's seat and subscription
 
 **Anchor**: `cardFace`, and the statement after `watchHistoryFaces(ctx)`.
@@ -290,6 +297,16 @@ compartment — a bare observable the renderer binds here at the binding site, p
 the client stack rules. One `ctx.effect(() => observeModelPrices(noteBook), …)`
 mounts the runtime, deliberately outside any component so the estimate is already
 mapped on the first render that reads it.
+
+A second effect subscribes to the settings store and pushes `settings.priceMap()`
+into the runtime, so the mapping prices a session whether or not the settings card
+is open. Two hazards are load-bearing here and are pinned by tests:
+
+- the store's `priceMap()` returns a **stable object** while its stored value is
+  unchanged. Rebuilding it per read gave an identity-keyed effect a new value every
+  render, and each run notified the pricing store — an unbounded update loop that
+  unmounted the whole settings card;
+- `priceBook.setOverrides` ignores an **equal** map for the same reason.
 
 ## Local identity (not an insert point)
 

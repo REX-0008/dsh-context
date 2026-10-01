@@ -22,7 +22,6 @@ import {
   modelChoices,
   noteObservedPairs,
   priceMapRows,
-  setOverrides,
   vendorChoices,
   type ObservedPair,
 } from './priceBook'
@@ -167,7 +166,6 @@ export function PriceMapTable(props: PriceMapTableProps): ReactElement {
   // The runtime synthesizes from the same pair list this table renders, so the
   // estimate and the table can never disagree about what is billed.
   useEffect(() => { noteObservedPairs(pairs) }, [pairs])
-  useEffect(() => { setOverrides(props.overrides ?? {}) }, [props.overrides])
   const rows = useMemo(
     () => priceMapRows(pairs, props.overrides),
     // A new book changes rates and options without changing the pair list, so

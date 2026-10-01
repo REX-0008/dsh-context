@@ -107,6 +107,16 @@ export function createContextSettings(): ContextSettings {
   let scope: SettingsScopeLike | undefined
   /** The last raw scope value: the price mapping and other non-preference fields read off it. */
   let raw: Record<string, unknown> | undefined
+  /**
+   * The price map, cached against the stored value it was derived from.
+   *
+   * Load-bearing: the mapping table syncs this map into the pricing runtime from
+   * an effect keyed on its identity. Rebuilding the object on every read gave the
+   * effect a new identity on every render, and each run notified the runtime,
+   * which re-rendered the card — an unbounded update loop that took the whole
+   * settings card down.
+   */
+  let priceMapCache: { source: unknown; value: Record<string, { vendor: string; model: string }> } | undefined
   const listeners = new Set<() => void>()
   const publish = (next: SettingsState): void => {
     if (next.status === state.status && next.placement === state.placement && next.granularity === state.granularity
@@ -150,9 +160,11 @@ export function createContextSettings(): ContextSettings {
       getSnapshot: () => state,
     },
     priceMap() {
-      const stored = raw?.priceMap
-      if (stored === null || typeof stored !== 'object' || Array.isArray(stored)) return {}
+      const stored: unknown = raw?.priceMap
+      if (priceMapCache !== undefined && priceMapCache.source === stored) return priceMapCache.value
       const out: Record<string, { vendor: string; model: string }> = {}
+      priceMapCache = { source: stored, value: out }
+      if (stored === null || typeof stored !== 'object' || Array.isArray(stored)) return out
       for (const [key, value] of Object.entries(stored as Record<string, unknown>)) {
         if (value === null || typeof value !== 'object') continue
         const entry = value as { vendor?: unknown; model?: unknown }

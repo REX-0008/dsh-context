@@ -34,7 +34,7 @@ import type { ClientCtx } from './services'
 import { createContextSettings, type ConfigFormsFace, type SettingsField, type SettingsScopeBinderFace } from './settings'
 import { makeContextView } from './components/contextView'
 import { makeContextJumpButton } from './components/contextJump'
-import { noteBook, priceMapStore } from '../our/client/priceBook'
+import { noteBook, priceMapStore, setOverrides } from '../our/client/priceBook'
 import { observeModelPrices } from './modelPrices'
 import { watchHistoryFaces } from './historyPage'
 import { watchPlacement } from './placement'
@@ -102,6 +102,16 @@ function apply(ctx: ClientCtx): void {
   // estimate is already mapped on the first render that reads it.
   ctx.effect(() => observeModelPrices(noteBook), 'dsh-context: price map follows the book')
   const settings = createContextSettings()
+  // The stored overrides reach the runtime from the STORE, not from the settings
+  // card: the mapping must price a session whether or not that card is open.
+  // (The card's own push was an identity-keyed effect, and its churn is what once
+  // spun an unbounded render loop.) setOverrides ignores an equal map, so the
+  // store's every preference notification is cheap here.
+  ctx.effect(() => {
+    const push = (): void => { setOverrides(settings.priceMap()) }
+    push()
+    return settings.store.subscribe(push)
+  }, 'dsh-context: price map follows the settings store')
   const ContextView = makeContextView(ctx, kit, settings)
 
   // Placement: the per-user `defaultPlacement` preference picks which

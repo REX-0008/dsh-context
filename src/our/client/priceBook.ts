@@ -130,8 +130,29 @@ export function noteObservedPairs(next: readonly ObservedPair[]): void {
   bump()
 }
 
-/** Replace the mapping overrides and rebuild. */
+/** Whether two override maps are equivalent (they are small: one row per pair). */
+function sameOverrides(a: PriceMapOverrides, b: PriceMapOverrides): boolean {
+  const aKeys = Object.keys(a)
+  if (aKeys.length !== Object.keys(b).length) return false
+  for (const key of aKeys) {
+    // Equal counts do not prove equal keys, and one side can come off the wire.
+    if (!Object.hasOwn(b, key)) return false
+    const left = a[key]
+    const right = b[key]
+    if (left.vendor !== right.vendor || left.model !== right.model) return false
+  }
+  return true
+}
+
+/**
+ * Replace the mapping overrides and rebuild.
+ *
+ * An EQUAL map is a no-op. The table pushes what it renders, and rebuilding on
+ * an equal map notified every subscriber for nothing — the shape that once grew
+ * into an unbounded render loop and took the settings card down with it.
+ */
 export function setOverrides(next: PriceMapOverrides): void {
+  if (sameOverrides(overrides, next)) return
   overrides = next
   apply()
   bump()

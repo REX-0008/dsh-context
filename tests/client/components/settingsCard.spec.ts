@@ -4,15 +4,16 @@
 // "Open in Settings" jump path mounts the card pre-expanded (settingsJump.ts
 // expand request), with the scroll best-effort against stubbed prototypes.
 
-import { createElement as h } from 'react'
+import { createElement as h, useSyncExternalStore } from 'react'
 import assert from 'node:assert/strict'
-import { describe, test } from 'vitest'
+import { beforeEach, describe, test } from 'vitest'
 import { makePluginConfigCard, makeSettingsCard } from '../../../src/client/components/settingsCard'
 import type { SettingsState } from '../../../src/client/settings'
 import { DICT_EN } from '../../../src/client/i18n'
 import { requestCardExpand } from '../../../src/client/settingsJump'
 import { click, keydown, makeKit, mount, query, queryAll, text } from '../helpers/kit'
 import { rowKey } from '../../../src/our/client/priceMap'
+import { priceMapStore, resetPriceBook } from '../../../src/our/client/priceBook'
 
 const kit = makeKit()
 const SettingsCard = makeSettingsCard(kit)
@@ -370,6 +371,9 @@ describe('PluginConfigCard (the Plugins-page seat)', () => {
 })
 
 describe('SettingsCard: the model-price mapping block', () => {
+  // The runtime store is module state shared across cases; each one starts empty.
+  beforeEach(() => { resetPriceBook() })
+
   /** A price-map seat with a stored override on one row. The returned face is
    *  stable, as the real one must be for the table's memos to settle. */
   function priceSeat(overrides: Record<string, { vendor: string; model: string }> = {}) {
@@ -381,6 +385,30 @@ describe('SettingsCard: the model-price mapping block', () => {
     return () => face
   }
   priceSeat.written = undefined as Record<string, { vendor: string; model: string }> | undefined
+
+  /**
+   * A price seat modelled on the REAL one: `overrides` is a freshly built object
+   * on every call. The regression this guards is a render loop — the table
+   * pushed that object into the store from an effect keyed on its identity, the
+   * store notified, the seat rebuilt it, and the whole settings card came down
+   * with "Maximum update depth exceeded".
+   */
+  function churningPriceSeat(overrides: Record<string, { vendor: string; model: string }> = {}) {
+    let renders = 0
+    return {
+      seat: () => {
+        renders += 1
+        // Exactly the real seat: it binds the store's observable, and it builds
+        // a fresh overrides object on every call (as settings.priceMap does).
+        const revision = useSyncExternalStore(
+          listener => priceMapStore.subscribe(listener),
+          () => priceMapStore.getSnapshot(),
+        )
+        return { overrides: { ...overrides }, write: () => {}, revision }
+      },
+      renders: () => renders,
+    }
+  }
 
   /** The sessions seat the table folds pairs from (a hook taking a selector). */
   function sessionsSeat(cost: Record<string, unknown>) {
@@ -424,6 +452,41 @@ describe('SettingsCard: the model-price mapping block', () => {
     assert.equal(cells[1], 'glm-5.3-flash')
     // The tokens cell prints total/in/out/cache in millions.
     assert.equal(cells[5], '3.0 / 2.0 / 1.0 / 0.0')
+  })
+
+  test('opening the block does not re-render without bound when the seat rebuilds its overrides', async () => {
+    const churning = churningPriceSeat()
+    const m = await mount(h(SettingsCard, {
+      useContextSettings: hookFor(stateOf()),
+      usePriceMap: churning.seat,
+      useSessions: sessionsSeat({
+        dycp: { 'glm-5.3-flash': { peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } },
+      }),
+    }))
+    await click(query(m.container, '.lc-settings-head') as HTMLElement)
+    await click(query(m.container, '.lc-settings-subhead') as HTMLElement)
+    // The table renders, and the preference rows are still on the page: a render
+    // loop would have taken the whole card down instead.
+    assert.ok(query(m.container, '.lc-pricemap-table'), 'the table rendered')
+    assert.equal(queryAll(m.container, '.lc-settings-select').length, 7, 'every preference row survives')
+    assert.ok(churning.renders() < 20, 'the seat is not rebuilt without bound (was ' + churning.renders() + ')')
+    await m.unmount()
+  })
+
+  test('a throwing table is fenced: the preference rows survive it', async () => {
+    // The reported failure was the whole settings card disappearing. Whatever our
+    // block does, the host card's own rows must stay on the page.
+    const m = await mount(h(SettingsCard, {
+      useContextSettings: hookFor(stateOf()),
+      usePriceMap: priceSeat(),
+      useSessions: sessionsSeat({}),
+      currencyOf: () => { throw new Error('boom') },
+    }))
+    await click(query(m.container, '.lc-settings-head') as HTMLElement)
+    await click(query(m.container, '.lc-settings-subhead') as HTMLElement)
+    assert.equal(queryAll(m.container, '.lc-pricemap-table').length, 0, 'the broken table is not rendered')
+    assert.equal(queryAll(m.container, '.lc-settings-select').length, 7, 'every preference row survives')
+    await m.unmount()
   })
 
   test('an empty bill says so instead of drawing an empty table', async () => {

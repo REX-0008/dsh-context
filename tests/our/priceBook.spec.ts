@@ -9,9 +9,11 @@ import { priceFaceOf, type ModelBook, type PriceTriple } from '../../src/client/
 import { priceIndexOf } from '../../src/client/cost'
 import {
   effectiveRate,
+  currentOverrides,
   noteBook,
   noteObservedPairs,
   priceMapRows,
+  priceMapStore,
   rateForTarget,
   resetPriceBook,
   setOverrides,
@@ -134,6 +136,50 @@ describe('overrides', () => {
     setOverrides({ [rowKey('dycp', 'glm-5.3-flash')]: { vendor: 'zai', model: 'glm-5.2' } })
     setOverrides({})
     assert.equal(priceFaceOf(book, 'dycp', 'glm-5.3-flash')?.rate.miss, 0.15)
+  })
+})
+
+describe('the override write', () => {
+  test('an equal map is a no-op, so a caller pushing every render cannot spin the store', () => {
+    resetPriceBook()
+    noteBook(bookOf({ zai: { 'glm-5.3-flash': R(0.15, 0.5) } }))
+    let notifications = 0
+    const stop = priceMapStore.subscribe(() => { notifications += 1 })
+    setOverrides({ [rowKey('dycp', 'glm-5.3-flash')]: { vendor: 'zai', model: 'glm-5.2' } })
+    const afterFirst = notifications
+    assert.ok(afterFirst > 0, 'a real change notifies')
+    // A freshly built but EQUAL map: the seat rebuilds one on every render.
+    setOverrides({ [rowKey('dycp', 'glm-5.3-flash')]: { vendor: 'zai', model: 'glm-5.2' } })
+    assert.equal(notifications, afterFirst, 'an equal map does not notify again')
+    stop()
+  })
+
+  test('a changed, added, or removed row does notify', () => {
+    resetPriceBook()
+    noteBook(bookOf({ zai: { 'glm-5.3-flash': R(0.15, 0.5), 'glm-5.2': R(1.4, 4.4) } }))
+    const one = { [rowKey('dycp', 'glm-5.3-flash')]: { vendor: 'zai', model: 'glm-5.2' } }
+    const other = { [rowKey('dycp', 'glm-5.3-flash')]: { vendor: 'zai', model: 'glm-5.3-flash' } }
+    setOverrides(one)
+    let notifications = 0
+    const stop = priceMapStore.subscribe(() => { notifications += 1 })
+    setOverrides(other)
+    assert.equal(notifications, 1, 'a changed target notifies')
+    setOverrides({ ...other, [rowKey('x', 'y')]: { vendor: 'zai', model: 'glm-5.2' } })
+    assert.equal(notifications, 2, 'an added row notifies')
+    setOverrides(other)
+    assert.equal(notifications, 3, 'a removed row notifies')
+    stop()
+  })
+
+  test('the explicit read agrees with the map in force', () => {
+    resetPriceBook()
+    noteBook(bookOf({ zai: { 'glm-5.3-flash': R(0.15, 0.5), 'glm-5.2': R(1.4, 4.4) } }))
+    const explicit = { [rowKey('dycp', 'glm-5.3-flash')]: { vendor: 'zai', model: 'glm-5.2' } }
+    setOverrides(explicit)
+    assert.deepEqual(currentOverrides(), explicit)
+    const rows = priceMapRows([{ provider: 'dycp', model: 'glm-5.3-flash' }], explicit)
+    assert.equal(rows[0].source, 'override')
+    assert.equal(rows[0].rate?.miss, 1.4)
   })
 })
 
