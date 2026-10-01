@@ -95,27 +95,52 @@ function millions(n: number): string {
 }
 
 /**
- * One picker cell: a native dropdown over the given options, with the browser's
- * own type-to-search while it is open. The empty value is the cell's own
- * placeholder row, so choosing it is a no-op rather than a write.
+ * One picker cell: a text input that autocompletes over the given option ids.
+ *
+ * `<input list>` + `<datalist>` is the platform's own combobox: type and the
+ * browser narrows the suggestions, pick one and it lands in the field. No local
+ * open/filter state, no portal, and no harness primitive — the block renders its
+ * options and the browser does the rest.
+ *
+ * Only a KNOWN id commits; free text reverts on blur or Enter, so a cell can
+ * never name a vendor or model the price book cannot answer.
  */
-function Chooser(props: {
+function Combo(props: {
   value: string
-  options: ReadonlyArray<{ id: string; label: string }>
+  options: readonly string[]
+  listId: string
   placeholder: string
   label: string
   onPick: (id: string) => void
 }): ReactElement {
+  const commit = (input: HTMLInputElement): void => {
+    const next = input.value.trim()
+    if (next === props.value) return
+    if (!props.options.includes(next)) {
+      input.value = props.value
+      return
+    }
+    props.onPick(next)
+  }
   return (
-    <select
-      className={'lc-pricemap-pick' + (props.value === '' ? ' lc-pricemap-pick-empty' : '')}
-      value={props.value}
-      aria-label={props.label}
-      onChange={(event) => { if (event.target.value !== '') props.onPick(event.target.value) }}
-    >
-      <option value="">{props.placeholder}</option>
-      {props.options.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
-    </select>
+    <>
+      <input
+        // Keyed on the committed value: an external change (a vendor pick
+        // rewriting the model) remounts the field, so there is no draft state to
+        // sync and no effect to keep in step.
+        key={props.value}
+        className={'lc-pricemap-pick' + (props.value === '' ? ' lc-pricemap-pick-empty' : '')}
+        list={props.listId}
+        defaultValue={props.value}
+        placeholder={props.placeholder}
+        aria-label={props.label}
+        onBlur={(event) => { commit(event.target) }}
+        onKeyDown={(event) => { if (event.key === 'Enter') commit(event.currentTarget) }}
+      />
+      <datalist id={props.listId}>
+        {props.options.map(id => <option key={id} value={id} />)}
+      </datalist>
+    </>
   )
 }
 
@@ -247,23 +272,29 @@ function PriceMapRowCells(props: {
 }): ReactElement {
   const { row, t } = props
   const targetOptions = row.target === null ? [] : modelChoices(row.target.vendor)
+  const vendorIds = props.vendors.map(vendor => vendor.id)
+  // A datalist id must be unique per field, or the browser binds one list to
+  // both cells and the model field suggests vendors.
+  const listPrefix = 'lc-pricemap-list-' + rowKey(row.provider, row.model).replace(/[^A-Za-z0-9_-]/g, '_')
   return (
     <tr className={row.edited ? 'lc-pricemap-edited' : undefined}>
       <td className="lc-pricemap-mono" data-label={t('settings.priceMapRoute')}>{row.provider}</td>
       <td className="lc-pricemap-mono" data-label={t('settings.priceMapModel')}>{row.model}</td>
       <td data-label={t('settings.priceMapVendor')}>
-        <Chooser
+        <Combo
           value={row.target?.vendor ?? ''}
-          options={props.vendors.map(vendor => ({ id: vendor.id, label: vendor.name }))}
+          options={vendorIds}
+          listId={listPrefix + '-vendor'}
           placeholder={t('settings.priceMapPick')}
           label={t('settings.priceMapVendor')}
           onPick={props.onPickVendor}
         />
       </td>
       <td data-label={t('settings.priceMapTarget')}>
-        <Chooser
+        <Combo
           value={row.target?.model ?? ''}
-          options={targetOptions.map(id => ({ id, label: id }))}
+          options={targetOptions}
+          listId={listPrefix + '-model'}
           placeholder={t('settings.priceMapPick')}
           label={t('settings.priceMapTarget')}
           onPick={props.onPickModel}

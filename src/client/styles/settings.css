@@ -101,6 +101,11 @@
   border-color: var(--dsw-alias-label-dimmed);
 }
 
+.lc-pricemap-pick:focus {
+  outline: none;
+  border-color: var(--dsw-alias-label-primary);
+}
+
 /* An unmapped cell states the invitation, so it must not read as a value. */
 .lc-pricemap-pick-empty {
   color: var(--dsw-alias-label-tertiary);

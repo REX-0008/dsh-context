@@ -13,7 +13,7 @@ import { DICT_EN } from '../../../src/client/i18n'
 import { requestCardExpand } from '../../../src/client/settingsJump'
 import { click, keydown, makeKit, mount, query, queryAll, text } from '../helpers/kit'
 import { rowKey } from '../../../src/our/client/priceMap'
-import { priceMapStore, resetPriceBook } from '../../../src/our/client/priceBook'
+import { noteBook, priceMapStore, resetPriceBook } from '../../../src/our/client/priceBook'
 
 const kit = makeKit()
 const SettingsCard = makeSettingsCard(kit)
@@ -489,6 +489,33 @@ describe('SettingsCard: the model-price mapping block', () => {
     await m.unmount()
   })
 
+  test('the pickers autocomplete and only commit a known option', async () => {
+    // Seed a book so the vendor list is non-empty (the seats are the module's
+    // own store, which is unseeded in jsdom).
+    noteBook({ prices: { zai: { 'glm-5.2': { hit: 0.1, miss: 1, write: 0, out: 2 } } }, index: { byModel: new Map() } } as never)
+    const m = await mount(h(SettingsCard, {
+      useContextSettings: hookFor(stateOf()),
+      usePriceMap: priceSeat(),
+      useSessions: sessionsSeat({
+        dycp: { 'glm-5.3-flash': { peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } },
+      }),
+    }))
+    await click(query(m.container, '.lc-settings-head') as HTMLElement)
+    await click(query(m.container, '.lc-settings-subhead') as HTMLElement)
+    const inputs = queryAll(m.container, '.lc-pricemap-pick') as HTMLInputElement[]
+    assert.equal(inputs.length, 2, 'a vendor field and a model field')
+    assert.ok(inputs[0].getAttribute('list'), 'the vendor field has a datalist')
+    assert.notEqual(inputs[0].getAttribute('list'), inputs[1].getAttribute('list'), 'each field has its own datalist')
+    // Free text is not a commitment: it reverts to the committed value.
+    inputs[0].value = 'no-such-vendor'
+    await keydown('Enter', inputs[0])
+    assert.equal(inputs[0].value, '', 'an unknown vendor reverts')
+    // A known id commits through the seat's write.
+    inputs[0].value = 'zai'
+    await keydown('Enter', inputs[0])
+    assert.deepEqual(priceSeat.written, { [rowKey('dycp', 'glm-5.3-flash')]: { vendor: 'zai', model: 'glm-5.2' } })
+    await m.unmount()
+  })
   test('the pickers open on an unresolved row, where the model list is empty', async () => {
     // An unresolvable pair has no vendor, so the model picker has NO options at
     // all — a menu with only a label row. The primitives' keyboard walk is the
