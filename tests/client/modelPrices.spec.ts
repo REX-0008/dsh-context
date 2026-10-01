@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict'
 import { afterEach, beforeEach, describe, test, vi } from 'vitest'
-import { getModelPricesSnap, pricesBookOf, resetModelPrices, setModelPricesLoader, subscribeModelPrices } from '../../src/client/modelPrices'
+import { getModelPricesSnap, observeModelPrices, pricesBookOf, resetModelPrices, setModelPricesLoader, subscribeModelPrices } from '../../src/client/modelPrices'
 import type { ModelPricesSnap } from '../../src/client/modelPrices'
 import { priceOf } from '../../src/client/cost'
 
@@ -214,6 +214,46 @@ describe('the price store', () => {
       assert.deepEqual(getModelPricesSnap().book, pricesBookOf(FIXTURE), 'the retry lands the sanitized book')
     } finally {
       vi.unstubAllGlobals()
+    }
+  })
+})
+
+// The write layer's additive seam (see PATCHES.md): it hands every PUBLISHED book
+// to the caller so the price mapping can synthesize the local routes' branches.
+// Additive — a deployment that never calls it keeps upstream's behavior exactly.
+describe('observeModelPrices (the write-layer seam)', () => {
+  beforeEach(() => { resetModelPrices() })
+  afterEach(() => { resetModelPrices() })
+
+  test('each published book reaches the observer, and the disposer stops it', async () => {
+    setModelPricesLoader(() => Promise.resolve(FIXTURE))
+    const seen: number[] = []
+    const stop = observeModelPrices((book) => { seen.push(Object.keys(book.prices).length) })
+    await vi.waitFor(() => { assert.ok(seen.length > 0) })
+    assert.ok(seen[0] > 0, 'the landed book carried its vendors')
+    stop()
+  })
+
+  test('an observer subscribing before the first fetch still sees the book', async () => {
+    setModelPricesLoader(() => Promise.resolve(FIXTURE))
+    const seen: unknown[] = []
+    const stop = observeModelPrices((book) => { seen.push(book.index) })
+    await vi.waitFor(() => { assert.ok(seen.length > 0) })
+    assert.ok(seen[0], 'the index rides along')
+    stop()
+  })
+
+  test('a failed fetch publishes nothing to the observer', async () => {
+    vi.useFakeTimers()
+    try {
+      setModelPricesLoader(() => Promise.reject(new Error('down')))
+      let calls = 0
+      const stop = observeModelPrices(() => { calls += 1 })
+      await vi.advanceTimersByTimeAsync(0)
+      assert.equal(calls, 0, 'no book, no notification')
+      stop()
+    } finally {
+      vi.useRealTimers()
     }
   })
 })

@@ -469,13 +469,48 @@ describe('client entry: settings card slot', () => {
     assert.equal(registration.locale, '@our/context-panel-write')
 
     const face = registration.inject?.() as {
-      hooks: { contextSettings: { getSnapshot(): SettingsState } }
+      hooks: { contextSettings: { getSnapshot(): SettingsState }; priceMapRevision: unknown }
       set: (field: SettingsField, value: string) => void
+      usePriceMap: () => {
+        overrides: Record<string, { vendor: string; model: string }>
+        write: (next: Record<string, { vendor: string; model: string }>) => void
+        revision: number
+      }
     }
     assert.equal(face.hooks.contextSettings.getSnapshot().granularity, 'step')
     face.set('defaultGranularity', 'turn')
     assert.equal(face.hooks.contextSettings.getSnapshot().granularity, 'turn')
     assert.deepEqual(scope.sets, [{ field: 'defaultGranularity', value: 'turn' }])
+    // The price-mapping seat rides the same face. Its reader is a real hook, so
+    // it is exercised in the render test below, not called out of band.
+    assert.ok(face.hooks.priceMapRevision, 'the revision observable is exposed')
+    ctx.dispose()
+  })
+
+  test('the price-mapping seat reads the stored overrides and writes them back', async () => {
+    const { ctx, scope } = setup()
+    const face = ctx.slots.of('settings.plugin.item')[0].registration.inject?.() as {
+      usePriceMap: () => {
+        overrides: Record<string, { vendor: string; model: string }>
+        write: (next: Record<string, { vendor: string; model: string }>) => void
+        revision: number
+      }
+    }
+    // The seat is a hook, so a component calls it exactly as the card does.
+    let seen: { overrides: Record<string, { vendor: string; model: string }>; revision: number } | undefined
+    let write: ((next: Record<string, { vendor: string; model: string }>) => void) | undefined
+    function Probe(): ReactElement {
+      const seat = face.usePriceMap()
+      seen = { overrides: seat.overrides, revision: seat.revision }
+      write = seat.write
+      return h('span', null, String(seat.revision))
+    }
+    const m = await mount(h(Probe as never, {}))
+    assert.deepEqual(seen?.overrides, {}, 'no overrides stored yet')
+    assert.equal(typeof seen?.revision, 'number')
+    write?.({ k: { vendor: 'zai', model: 'glm-5.2' } })
+    assert.deepEqual(scope.sets, [{ field: 'priceMap', value: { k: { vendor: 'zai', model: 'glm-5.2' } } }])
+    await m.unmount()
     ctx.dispose()
   })
 

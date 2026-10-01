@@ -16,12 +16,31 @@ import { useEffect, useRef, useState, type ReactElement } from 'react'
 import { Menu } from '@deepseek-ai/dsh-client-ui-primitives'
 import { IconChevronDown } from '../primitives'
 import { consumeCardExpand } from '../settingsJump'
+import { PriceMapTable } from '../../our/client/PriceMapTable'
 import type { SettingsField, SettingsState } from '../settings'
 import type { ViewKit } from '../viewkit'
 
 export interface SettingsCardProps {
   useContextSettings?: <T>(selector: (state: SettingsState) => T) => T
   set?: (field: SettingsField, value: string) => void
+  /**
+   * The model-price mapping's seat: the stored overrides, the wholesale write,
+   * and the store's revision (a new price book moves the rates and the pickers'
+   * options without moving the preferences).
+   */
+  usePriceMap?: () => {
+    overrides: Record<string, { vendor: string; model: string }>
+    write: (next: Record<string, { vendor: string; model: string }>) => void
+    revision: number
+  }
+  /** The sessions seat the price table folds its billed pairs from. */
+  useSessions?: unknown
+  /**
+   * Reads the display currency. A CALLBACK rather than a value: the slot outlet
+   * re-renders on a locale switch, so reading per render keeps the printed
+   * figures in step with the language.
+   */
+  currencyOf?: () => 'usd' | 'cny'
 }
 
 interface PrefRowProps {
@@ -188,6 +207,7 @@ export function makeSettingsCard(kit: ViewKit): (props: SettingsCardProps) => Re
                 ? <p className="lc-settings-note" role="status">{t('settings.readOnly')}</p>
                 : null}
               <PreferenceRows t={t} state={state} set={props.set} />
+              <PriceMapBlock {...props} t={t} />
             </div>
           )
           : null}
@@ -213,7 +233,47 @@ export function makePluginConfigCard(kit: ViewKit): (props: SettingsCardProps) =
           ? <p className="lc-settings-note" role="status">{t('settings.readOnly')}</p>
           : null}
         <PreferenceRows t={t} state={state} set={props.set} />
+        <PriceMapBlock {...props} t={t} />
       </div>
     )
   }
+}
+
+/**
+ * The model-price mapping block: a collapsible section so the card stays short
+ * until the mapping is actually wanted (the table is wide and rarely needed).
+ */
+function PriceMapBlock(props: SettingsCardProps & { t: Translate }): ReactElement | null {
+  const [open, setOpen] = useState(false)
+  const seat = props.usePriceMap
+  const state = typeof seat === 'function' ? seat() : undefined
+  if (state === undefined) return null
+  return (
+    <div className="lc-settings-row lc-settings-pricemap">
+      <button
+        type="button"
+        className="lc-settings-head lc-settings-subhead"
+        aria-expanded={open}
+        onClick={() => { setOpen(!open) }}
+      >
+        <span className="lc-settings-headtext">
+          <span className="lc-settings-name">{props.t('settings.priceMap')}</span>
+          <span className="lc-settings-desc">{props.t('settings.priceMapDesc')}</span>
+        </span>
+        <IconChevronDown className="lc-settings-chevron" />
+      </button>
+      {open
+        ? (
+          <PriceMapTable
+            t={props.t}
+            useSessions={props.useSessions}
+            overrides={state.overrides}
+            onWrite={state.write}
+            currencyOf={props.currencyOf}
+            revision={state.revision}
+          />
+        )
+        : null}
+    </div>
+  )
 }

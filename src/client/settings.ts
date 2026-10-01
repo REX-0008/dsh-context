@@ -58,6 +58,14 @@ export interface SettingsState {
 export interface ContextSettings {
   /** Observable snapshot store, bound onto card props as `useContextSettings`. */
   store: { subscribe(listener: () => void): () => void; getSnapshot(): SettingsState }
+  /**
+   * The stored model-price mapping overrides (`settings.priceMap`), read off the
+   * same scope snapshot the preferences come from. Empty until the Host serves
+   * them, which is also the "every row is mechanical" state.
+   */
+  priceMap(): Record<string, { vendor: string; model: string }>
+  /** Replace the stored overrides wholesale (the table owns the whole map). */
+  setPriceMap(next: Record<string, { vendor: string; model: string }>): void
   defaultPlacement(): DefaultPlacement
   defaultGranularity(): DefaultGranularity
   defaultTrendMode(): DefaultTrendMode
@@ -97,6 +105,8 @@ function prefsOf(value: unknown): Prefs {
 export function createContextSettings(): ContextSettings {
   let state: SettingsState = { status: 'loading', placement: 'all', granularity: 'step', mode: 'total', deltaBase: 'step', toolSort: 'count', fileSort: 'count', insightsEntry: 'show', writable: false }
   let scope: SettingsScopeLike | undefined
+  /** The last raw scope value: the price mapping and other non-preference fields read off it. */
+  let raw: Record<string, unknown> | undefined
   const listeners = new Set<() => void>()
   const publish = (next: SettingsState): void => {
     if (next.status === state.status && next.placement === state.placement && next.granularity === state.granularity
@@ -115,7 +125,7 @@ export function createContextSettings(): ContextSettings {
     // value wins; one the plugin cannot understand degrades to the field's
     // default; a section without the field (older Host half) keeps the
     // current state.
-    const raw = snap.value !== null && typeof snap.value === 'object'
+    raw = snap.value !== null && typeof snap.value === 'object'
       ? snap.value as Record<string, unknown>
       : undefined
     publish({
@@ -138,6 +148,35 @@ export function createContextSettings(): ContextSettings {
         return () => { listeners.delete(listener) }
       },
       getSnapshot: () => state,
+    },
+    priceMap() {
+      const stored = raw?.priceMap
+      if (stored === null || typeof stored !== 'object' || Array.isArray(stored)) return {}
+      const out: Record<string, { vendor: string; model: string }> = {}
+      for (const [key, value] of Object.entries(stored as Record<string, unknown>)) {
+        if (value === null || typeof value !== 'object') continue
+        const entry = value as { vendor?: unknown; model?: unknown }
+        if (typeof entry.vendor !== 'string' || typeof entry.model !== 'string') continue
+        out[key] = { vendor: entry.vendor, model: entry.model }
+      }
+      return out
+    },
+    setPriceMap(next) {
+      // Optimistic echo, then the fenced scope write — the same shape the
+      // preference setter uses, so a refused write recovers through the scope's
+      // own re-read rather than leaving the table showing a value that never
+      // persisted. The echo writes the whole field, so the rollback restores the
+      // previous field value (absent means "no overrides", not "keep the echo").
+      const before: unknown = raw?.priceMap
+      const base: Record<string, unknown> = raw ?? {}
+      raw = { ...base, priceMap: next }
+      publish({ ...state })
+      const bound = scope
+      if (bound === undefined) return
+      void bound.set('priceMap', next).catch(() => {
+        raw = before === undefined ? { ...base } : { ...base, priceMap: before }
+        publish({ ...state })
+      })
     },
     defaultPlacement: () => state.placement,
     defaultGranularity: () => state.granularity,

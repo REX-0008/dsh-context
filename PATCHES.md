@@ -36,6 +36,15 @@ sections of `statsContext.tsx` / `settingsCard.tsx` / `i18n.ts`. The former
 `settings.billing*` i18n keys and the settings card's `BillingBlock` went with
 the table.
 
+What replaced it is the **model price mapping** (#16–#19): a local route is a
+gateway, not a vendor, so no provider rename can price it — and several vendors
+resell one route under spellings the registry does not carry. The mapping answers
+it per (route, model) pair by NAME (family → vendor, then a folded model-id match)
+with a manual override for the rows that cannot settle, and applies it by feeding
+`cost.ts` the route's own branch — the one path upstream already reads first and
+treats as final. Upstream's lookup ladder, ambiguity refusal, and period handling
+are all untouched.
+
 ---
 
 ## 1. `src/host/index.ts` — import
@@ -229,8 +238,58 @@ Collapsing these is what hid the preference card from the Plugins page;
 
 **Anchor**: the end of `DICT_ZH` and `DICT_EN`.
 
-Every key this plugin adds is namespaced `our.*` and appended after the last
-upstream entry, so an upstream release that adds keys does not collide with them.
+Keys this plugin adds are appended after the last upstream entry, so an upstream
+release that adds keys does not collide with them. Panel-owned strings are
+namespaced `our.*`; the price-mapping block's labels ride the settings card's own
+`settings.priceMap*` prefix (they are settings-card strings, and the block is
+rendered by that card).
+
+## 16. `src/client/settings.ts` — the price-mapping read/write
+
+**Anchor**: `createContextSettings`, plus the `ContextSettings` interface.
+
+Two additions, both driven by the same scope snapshot the preferences already come
+from:
+
+- a module-local `raw` holding the last scope value, so non-preference fields
+  (`priceMap`) are readable without a second subscription;
+- `priceMap()` / `setPriceMap(next)`, the mapping's read and wholesale write.
+
+The write is optimistic-then-fenced like the preference setter: it echoes, then
+writes through the scope, and rolls the echo back if the scope refuses. It writes
+the WHOLE map (not a per-row patch) because only a wholesale write can express a
+removal — a merge could never return a row to the mechanical pass.
+
+## 17. `src/client/modelPrices.ts` — the additive observer
+
+**Anchor**: the end of the file, after `useModelPrices`.
+
+`observeModelPrices(note)` hands every PUBLISHED book to the caller and returns the
+disposer. The store itself is untouched: no behavior changes for a deployment that
+never calls it, which is what keeps this upstreamable as a plain test/extension
+seam. It exists so the price mapping can synthesize the local routes' branches
+(`src/our/client/priceBook.ts`) without editing `cost.ts`'s lookup ladder.
+
+## 18. `src/client/components/settingsCard.tsx` — the mapping block
+
+**Anchor**: the end of `SettingsCardProps`, both cards' `PreferenceRows` render,
+and `PriceMapBlock` appended after `makePluginConfigCard`.
+
+Upstream's card gains three props (`usePriceMap`, `useSessions`, `currencyOf`) and
+one collapsible block under the preference rows. The block renders nothing when the
+seat is absent, so a deployment whose Host does not serve the mapping shows exactly
+upstream's card.
+
+## 19. `src/client/index.ts` — the mapping's seat and subscription
+
+**Anchor**: `cardFace`, and the statement after `watchHistoryFaces(ctx)`.
+
+`cardFace` grows `usePriceMap` (the table's seat: stored overrides, the wholesale
+write, and the store revision) and carries `priceMapStore` in the inject `hooks`
+compartment — a bare observable the renderer binds here at the binding site, per
+the client stack rules. One `ctx.effect(() => observeModelPrices(noteBook), …)`
+mounts the runtime, deliberately outside any component so the estimate is already
+mapped on the first render that reads it.
 
 ## Local identity (not an insert point)
 

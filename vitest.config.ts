@@ -20,6 +20,17 @@ export default defineConfig({
         },
       },
       {
+        // The write layer's PURE modules (priceMap/priceBook): importable
+        // functions with no ctx, so they take the ordinary per-file gate. The
+        // rest of src/our/ is exercised through the wiring it mounts and stays
+        // out of coverage (see the exclude list).
+        test: {
+          name: 'our',
+          include: ['tests/our/**/*.spec.ts'],
+          environment: 'node',
+        },
+      },
+      {
         // The inlined primitives dist references a sourcemap it does not
         // ship; vite's warning is noise, so the client lane logs errors only.
         logLevel: 'error',
@@ -63,10 +74,23 @@ export default defineConfig({
         // Pure type declarations: no runtime surface to instrument.
         'src/shared/types.ts',
         'src/host/compat.ts',
-        // The write layer is exercised through the wiring it mounts (host
+        // Most of the write layer is exercised through the wiring it mounts (host
         // applyOur, the context view's panel) rather than importable pure
-        // functions, so a per-file unit gate does not apply to it.
-        'src/our/**',
+        // functions, so a per-file unit gate does not apply to it. The two pure
+        // mapping modules ARE importable and tests/our/ drives them directly, so
+        // they stay inside the gate — enumerated by directory rather than globbed
+        // away (a later pure module added here joins them).
+        'src/our/agent-events.ts',
+        'src/our/agent-face.ts',
+        'src/our/index.ts',
+        'src/our/known-injectors.ts',
+        'src/our/known-sections.ts',
+        'src/our/section-registry.ts',
+        'src/our/types.ts',
+        'src/our/assembler/**',
+        'src/our/panel/**',
+        'src/our/preset/**',
+        'src/our/client/**',
       ],
       thresholds: { perFile: true, statements: 100, branches: 100, functions: 100, lines: 100 },
       reporter: ['text', 'html'],

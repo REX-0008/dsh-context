@@ -16,11 +16,11 @@
 .lc-settings-label { flex: 1; min-width: 0; font-size: 14px; color: var(--dsw-alias-label-primary); }
 .lc-settings-select { display: inline-flex; align-items: center; gap: 12px; height: 36px; padding: 0 14px; border: none; border-radius: 18px; background: var(--dsw-alias-bg-module-platform); font: inherit; font-size: 14px; line-height: 22px; color: var(--dsw-alias-label-primary); cursor: pointer; transition: background-color var(--ds-transition-duration, 0.2s) var(--ds-ease-in-out, ease-in-out); }
 .lc-settings-note { color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 1.5; margin: 12px 0 4px; }
-/* ---- billing: the maintained price table, shown where it is edited ---- */
+/* ---- the model price mapping (PriceMapTable.tsx) ---- */
 
-/* The sub-head is a nested disclosure, so it must not inherit the card head's
-   size: the outer head is the card's own title. */
-.lc-settings-billing {
+/* A nested disclosure, so it must not inherit the card head's size: the outer
+   head is the card's own title. */
+.lc-settings-pricemap {
   display: block;
   padding: 0;
 }
@@ -39,43 +39,165 @@
   font-size: 12px;
 }
 
-.lc-settings-billing-body {
+/* The block is its OWN query container: it is rendered on the Plugins page,
+   which the plugin does not own, so there is no ancestor container to borrow.
+   Every width rule below therefore measures this element. */
+.lc-pricemap {
+  container: lc-pricemap / inline-size;
   padding: 4px 0 8px;
 }
 
-/* A model with no price silently drops out of every cost comparison, so the gap
-   note is a warning, not a footnote. */
-.lc-settings-missing {
-  color: var(--dsw-alias-state-warn-primary);
+.lc-pricemap-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
 }
 
-.lc-price-list {
-  list-style: none;
-  margin: 0;
+.lc-pricemap-table th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--dsw-alias-label-tertiary);
+  padding: 4px 6px 6px 0;
+  white-space: nowrap;
+}
+
+.lc-pricemap-table td {
+  padding: 5px 6px 5px 0;
+  vertical-align: middle;
+  color: var(--dsw-alias-label-primary);
+  border-top: 1px solid var(--dsw-alias-border-l1);
+}
+
+/* Figures line up column-wise, and a dash never reads as a zero. */
+.lc-pricemap-nums {
+  font-variant-numeric: tabular-nums;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+}
+
+.lc-pricemap-mono {
+  font-family: var(--dsw-font-family-mono, ui-monospace, monospace);
+  word-break: break-all;
+}
+
+/* The pickers: a chip that reads as a control, not as body text. */
+.lc-pricemap-pick {
+  max-width: 100%;
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-module-platform);
+  font: inherit;
+  color: var(--dsw-alias-label-primary);
+  padding: 3px 8px;
+  cursor: pointer;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lc-pricemap-pick:hover {
+  border-color: var(--dsw-alias-label-dimmed);
+}
+
+/* An unmapped cell states the invitation, so it must not read as a value. */
+.lc-pricemap-pick-empty {
+  color: var(--dsw-alias-label-tertiary);
+  background: transparent;
+  border-color: var(--dsw-alias-border-l2);
+}
+
+.lc-pricemap-search {
+  width: 100%;
+  box-sizing: border-box;
+  border: 0;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+  background: none;
+  font: inherit;
+  color: inherit;
+  padding: 6px 8px;
+  outline: none;
+}
+
+.lc-pricemap-src-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.lc-pricemap-src {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* An edited row is the user's own decision, so it is marked, not hidden. */
+.lc-pricemap-edited .lc-pricemap-src-override {
+  color: var(--dsw-alias-state-business-primary, var(--dsw-alias-label-secondary));
+}
+
+/* The row's own action: shrink to text so it never crowds the source cell. */
+.lc-pricemap-clear {
+  appearance: none;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
+  text-decoration: underline;
+  cursor: pointer;
   padding: 0;
 }
 
-.lc-price-row {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  padding: 4px 0;
-  border-bottom: 1px solid var(--dsw-alias-border-l1);
-}
-
-.lc-price-row:last-child {
-  border-bottom: 0;
-}
-
-.lc-price-key {
-  flex: none;
-  min-width: 8em;
-  font-size: 12px;
+.lc-pricemap-clear:hover {
   color: var(--dsw-alias-label-primary);
 }
 
-.lc-price-rates {
-  font-size: 12px;
-  color: var(--dsw-alias-label-tertiary);
-  font-variant-numeric: tabular-nums;
+/* Under the fold width the eight columns stop fitting side by side, so each row
+   becomes its own block and every cell names itself. Folding beats a horizontal
+   scrollbar: the pane is draggable, and a scrollbar would hide the pickers. */
+@container lc-pricemap (max-width: 720px) {
+  .lc-pricemap-table,
+  .lc-pricemap-table tbody,
+  .lc-pricemap-table tr,
+  .lc-pricemap-table td {
+    display: block;
+    width: auto;
+  }
+
+  .lc-pricemap-table thead {
+    display: none;
+  }
+
+  .lc-pricemap-table tr {
+    padding: 8px 0;
+    border-top: 1px solid var(--dsw-alias-border-l1);
+  }
+
+  .lc-pricemap-table td {
+    border-top: 0;
+    padding: 2px 0;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .lc-pricemap-table td::before {
+    content: attr(data-label);
+    flex: none;
+    min-width: 7.5em;
+    font-size: 11px;
+    color: var(--dsw-alias-label-tertiary);
+  }
+
+  /* The two identifier cells lead the block, so they drop their labels. */
+  .lc-pricemap-mono {
+    display: inline-block;
+    padding-right: 8px;
+  }
+
+  .lc-pricemap-mono::before {
+    content: none;
+  }
 }

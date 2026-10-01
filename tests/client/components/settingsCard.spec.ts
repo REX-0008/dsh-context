@@ -12,6 +12,7 @@ import type { SettingsState } from '../../../src/client/settings'
 import { DICT_EN } from '../../../src/client/i18n'
 import { requestCardExpand } from '../../../src/client/settingsJump'
 import { click, keydown, makeKit, mount, query, queryAll, text } from '../helpers/kit'
+import { rowKey } from '../../../src/our/client/priceMap'
 
 const kit = makeKit()
 const SettingsCard = makeSettingsCard(kit)
@@ -365,5 +366,96 @@ describe('PluginConfigCard (the Plugins-page seat)', () => {
     assert.deepEqual(calls, [['defaultFileSort', 'path']])
     await writable.unmount()
     await m.unmount()
+  })
+})
+
+describe('SettingsCard: the model-price mapping block', () => {
+  /** A price-map seat with a stored override on one row. The returned face is
+   *  stable, as the real one must be for the table's memos to settle. */
+  function priceSeat(overrides: Record<string, { vendor: string; model: string }> = {}) {
+    const face = {
+      overrides,
+      write: (next: Record<string, { vendor: string; model: string }>) => { priceSeat.written = next },
+      revision: 0,
+    }
+    return () => face
+  }
+  priceSeat.written = undefined as Record<string, { vendor: string; model: string }> | undefined
+
+  /** The sessions seat the table folds pairs from (a hook taking a selector). */
+  function sessionsSeat(cost: Record<string, unknown>) {
+    const snapshot = { ids: ['s1'], byId: { s1: { title: 't', updatedAt: 1, projectionValues: { contextTimeline: { cost } } } } }
+    return <T,>(sel: (value: unknown) => T): T => sel(snapshot)
+  }
+
+  test('the block stays collapsed until opened, and is absent without the seat', async () => {
+    priceSeat.written = undefined
+    const without = await mount(h(SettingsCard, { useContextSettings: hookFor(stateOf()) }))
+    assert.equal(queryAll(without.container, '.lc-settings-pricemap').length, 0, 'no seat, no block')
+
+    const m = await mount(h(SettingsCard, {
+      useContextSettings: hookFor(stateOf()),
+      usePriceMap: priceSeat(),
+    }))
+    // The card itself starts collapsed; the block lives in its body.
+    await click(query(m.container, '.lc-settings-head') as HTMLElement)
+    const head = query(m.container, '.lc-settings-subhead') as HTMLElement
+    assert.ok(head, 'the block renders collapsed')
+    assert.equal(queryAll(m.container, '.lc-pricemap-table').length, 0, 'the table is not mounted while collapsed')
+    await click(head)
+    // No billed pairs arrive without the sessions seat, so the block states that
+    // instead of drawing an empty table.
+    assert.ok(text(m.container).includes(DICT_EN['settings.priceMapEmpty']), 'the empty note shows')
+  })
+
+  test('a billed pair renders one row with its mapping and source', async () => {
+    const m = await mount(h(SettingsCard, {
+      useContextSettings: hookFor(stateOf()),
+      usePriceMap: priceSeat(),
+      useSessions: sessionsSeat({
+        dycp: { 'glm-5.3-flash': { peak: { uncached: 2_000_000, cacheRead: 0, cacheWrite: 0, output: 1_000_000 } } },
+      }),
+    }))
+    // The card itself starts collapsed; the block lives in its body.
+    await click(query(m.container, '.lc-settings-head') as HTMLElement)
+    await click(query(m.container, '.lc-settings-subhead') as HTMLElement)
+    const cells = queryAll(m.container, '.lc-pricemap-table tbody tr td').map(td => text(td))
+    assert.equal(cells[0], 'dycp')
+    assert.equal(cells[1], 'glm-5.3-flash')
+    // The tokens cell prints total/in/out/cache in millions.
+    assert.equal(cells[5], '3.0 / 2.0 / 1.0 / 0.0')
+  })
+
+  test('an empty bill says so instead of drawing an empty table', async () => {
+    const m = await mount(h(SettingsCard, {
+      useContextSettings: hookFor(stateOf()),
+      usePriceMap: priceSeat(),
+      useSessions: sessionsSeat({}),
+    }))
+    // The card itself starts collapsed; the block lives in its body.
+    await click(query(m.container, '.lc-settings-head') as HTMLElement)
+    await click(query(m.container, '.lc-settings-subhead') as HTMLElement)
+    assert.equal(queryAll(m.container, '.lc-pricemap-table').length, 0)
+    assert.ok(text(m.container).includes(DICT_EN['settings.priceMapEmpty']))
+  })
+
+  test('a stored override marks the row edited and offers the revert control', async () => {
+    const m = await mount(h(SettingsCard, {
+      useContextSettings: hookFor(stateOf()),
+      usePriceMap: priceSeat({ [rowKey('dycp', 'glm-5.3-flash')]: { vendor: 'zai', model: 'glm-5.2' } }),
+      useSessions: sessionsSeat({
+        dycp: { 'glm-5.3-flash': { peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } },
+      }),
+    }))
+    // The card itself starts collapsed; the block lives in its body.
+    await click(query(m.container, '.lc-settings-head') as HTMLElement)
+    await click(query(m.container, '.lc-settings-subhead') as HTMLElement)
+    const tr = query(m.container, '.lc-pricemap-table tbody tr') as HTMLElement
+    assert.equal(tr.className, 'lc-pricemap-edited')
+    assert.ok(text(tr).includes(DICT_EN['settings.priceMapSource.override']), 'marked as edited')
+    const clear = query(tr, '.lc-pricemap-clear') as HTMLElement
+    assert.ok(clear, 'the revert control is offered')
+    await click(clear)
+    assert.deepEqual(priceSeat.written, {}, 'reverting drops the override')
   })
 })

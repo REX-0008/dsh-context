@@ -136,6 +136,23 @@ export function useModelPrices(): ModelPricesSnap {
   return useSyncExternalStore(subscribeModelPrices, getModelPricesSnap)
 }
 
+/**
+ * The write-layer seam: hand every published book to the price-mapping runtime
+ * so it can synthesize the local routes' branches.
+ *
+ * This is an ADDITIVE export at the end of the file (see PATCHES.md): the store
+ * itself is untouched, and a deployment that never calls this keeps exactly
+ * upstream's behavior. Called once from the client entry's apply.
+ * @param note - receives each book the store publishes.
+ * @returns the disposer removing the subscription.
+ */
+export function observeModelPrices(note: (book: ModelBook) => void): () => void {
+  return subscribeModelPrices(() => {
+    const current = snap.book
+    if (current !== null) note(current)
+  })
+}
+
 /** Test isolation: drop the book, the retry timer, and the listeners. */
 export function resetModelPrices(): void {
   if (timer !== null) {

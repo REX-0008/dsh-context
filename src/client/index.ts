@@ -22,7 +22,7 @@
  * beyond the bundled source.
  */
 
-import { createElement as h } from 'react'
+import { createElement as h, useSyncExternalStore } from 'react'
 import { DICT_EN, DICT_ZH } from './i18n'
 import { registerContextCommand } from './command'
 import { makeContextModal } from './components/contextModal'
@@ -34,6 +34,8 @@ import type { ClientCtx } from './services'
 import { createContextSettings, type ConfigFormsFace, type SettingsField, type SettingsScopeBinderFace } from './settings'
 import { makeContextView } from './components/contextView'
 import { makeContextJumpButton } from './components/contextJump'
+import { noteBook, priceMapStore } from '../our/client/priceBook'
+import { observeModelPrices } from './modelPrices'
 import { watchHistoryFaces } from './historyPage'
 import { watchPlacement } from './placement'
 import { watchSidebarContextTab } from './sidebar'
@@ -94,6 +96,11 @@ function apply(ctx: ClientCtx): void {
   // harness that never composes the namespace never fires the callback and
   // the targeted fetches simply stay absent.
   watchHistoryFaces(ctx)
+  // The price-mapping runtime follows the price book: each published book is
+  // adopted, and the local routes' branches are synthesized from it (see
+  // our/client/priceBook). Mounted here rather than in a component so the
+  // estimate is already mapped on the first render that reads it.
+  ctx.effect(() => observeModelPrices(noteBook), 'dsh-context: price map follows the book')
   const settings = createContextSettings()
   const ContextView = makeContextView(ctx, kit, settings)
 
@@ -168,11 +175,30 @@ function apply(ctx: ClientCtx): void {
   /** The injected face both preference cards ride: the settings store as the
    *  framework's hooks-compartment `useContextSettings` seat, plus the set verb. */
   const cardFace = (): {
-    hooks: { contextSettings: typeof settings.store }
+    hooks: { contextSettings: typeof settings.store; priceMapRevision: typeof priceMapStore }
     set: (field: SettingsField, value: string) => void
+    usePriceMap: () => {
+      overrides: Record<string, { vendor: string; model: string }>
+      write: (next: Record<string, { vendor: string; model: string }>) => void
+      revision: number
+    }
   } => ({
-    hooks: { contextSettings: settings.store },
+    hooks: { contextSettings: settings.store, priceMapRevision: priceMapStore },
     set: (field, value) => { settings.set(field, value) },
+    // The price table's seat. The bare observable rides the hooks compartment and
+    // is bound to a hook here at the binding site, per the client stack rules
+    // (business components never subscribe themselves).
+    usePriceMap: () => {
+      const revision = useSyncExternalStore(
+        listener => priceMapStore.subscribe(listener),
+        () => priceMapStore.getSnapshot(),
+      )
+      return {
+        overrides: settings.priceMap(),
+        write: (next: Record<string, { vendor: string; model: string }>) => { settings.setPriceMap(next) },
+        revision,
+      }
+    },
   })
 
   // Per-user display preferences. Two generations, two transports and seats,

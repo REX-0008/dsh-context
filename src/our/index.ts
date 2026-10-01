@@ -531,6 +531,14 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
   editBaseline: ({ service, p, sessionId }) => {
     service.editBaselineConfig((p.patch as Record<string, unknown> | undefined) ?? {}, sessionId)
   },
+  /**
+   * Replace the model-price mapping's manual rows.
+   *
+   * The whole map is written at once (not a per-row patch): the client owns the
+   * table, and a wholesale write is what keeps a removal (a row returned to the
+   * mechanical pass) expressible — a merge could never delete a key.
+   */
+  setPriceMap: ({ scope, p }) => scope.update({ priceMap: (p.map as ContextPanelSettings['priceMap']) ?? {} }),
   clearOverrides: ({ scope, sessionId }) => {
     const value = scope.get()
     const { [sessionId]: _removed, ...rest }: ContextPanelSettings['conversationOverrides'] = value.conversationOverrides

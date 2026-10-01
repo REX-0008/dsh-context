@@ -44,6 +44,9 @@ describe('Config validator (cordis Standard Schema face)', () => {
         modules: {},
         presetDisabledContexts: {},
         presetDisabledSections: {},
+        // The price mapping's manual rows start empty: every row is mechanical
+        // until the user edits one.
+        priceMap: {},
         sectionOriginals: {},
         sectionOverrides: {},
         sectionWeights: {},

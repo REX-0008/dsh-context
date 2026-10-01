@@ -50,6 +50,7 @@ export const DEFAULT_SETTINGS: ContextPanelSettings = {
   conversationDisabledContexts: {},
   contextOverrides: {},
   suppressedInjections: {},
+  priceMap: {},
 }
 
 
@@ -70,6 +71,10 @@ const FIELDS = {
   sectionOverrides: z.dict(z.dict(z.string())),
   sectionWeights: z.dict(z.dict(z.number())),
   sectionOriginals: z.dict(z.dict(z.string())),
+  // The model-price mapping's manual rows, keyed by "<route>\u0000<model>"
+  // (priceMap.rowKey). Only edited rows live here: an absent key means the
+  // mechanical pass owns that row.
+  priceMap: z.dict(z.object({ vendor: z.string(), model: z.string() })),
 }
 
 /** Namespace schema (schemastery primitives: z.dict replaces zod's z.record; fields are optional by default). */
