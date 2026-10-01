@@ -36,6 +36,27 @@ export function culpritOf(componentStack: string | undefined | null): string {
   return ''
 }
 
+/**
+ * Everything React and the runtime will say about a caught error, in one block:
+ * the culprit frame first (the readable summary), then React's FULL component
+ * stack and the runtime's own stack.
+ *
+ * One line is not enough to act on. React names the component but its frame
+ * cannot name the expression, and a component stack alone does not say whether
+ * the throw came from render, an effect, or a child — the two stacks together
+ * do.
+ * @param error - the caught value.
+ * @param componentStack - React's `ErrorInfo.componentStack`, when provided.
+ * @returns the report, newline-separated.
+ */
+export function describeCrash(error: unknown, componentStack: string | undefined | null): string {
+  const message = error instanceof Error ? error.message : String(error)
+  const culprit = culpritOf(componentStack)
+  const jsStack = error instanceof Error && typeof error.stack === 'string' ? error.stack.trim() : ''
+  const react = typeof componentStack === 'string' ? componentStack.trim() : ''
+  return [culprit === '' ? message : culprit, react, jsStack === '' ? message : jsStack].join('\n')
+}
+
 export function makeErrorBoundary(t: Translate): ComponentType<{ children?: ReactNode }> {
   return class ErrorBoundary extends Component<{ children?: ReactNode }, { error: Error | null; where: string }> {
     constructor(props: { children?: ReactNode }) {
@@ -48,8 +69,8 @@ export function makeErrorBoundary(t: Translate): ComponentType<{ children?: Reac
     }
 
     /** React hands the component stack here, never to `getDerivedStateFromError`. */
-    componentDidCatch(_error: unknown, info: ErrorInfo): void {
-      this.setState({ where: culpritOf(info.componentStack) })
+    componentDidCatch(error: unknown, info: ErrorInfo): void {
+      this.setState({ where: describeCrash(error, info.componentStack) })
     }
 
     render(): ReactNode {

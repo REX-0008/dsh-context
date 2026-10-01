@@ -7,7 +7,7 @@
 import { createElement as h } from 'react'
 import assert from 'node:assert/strict'
 import { afterEach, describe, test, vi } from 'vitest'
-import { culpritOf, makeErrorBoundary } from '../../../src/client/components/errorBoundary'
+import { culpritOf, describeCrash, makeErrorBoundary } from '../../../src/client/components/errorBoundary'
 import { click, makeKit, mount, query, silenceWindowErrors, text } from '../helpers/kit'
 
 const kit = makeKit()
@@ -71,9 +71,24 @@ describe('ErrorBoundary', () => {
     }
     const m = await mount(h(ErrorBoundary, {}, h(Culprit, {})))
     const where = query(m.container, '.lc-error-where').textContent ?? ''
-    assert.ok(where.includes('Culprit'), 'the culprit frame is shown: ' + where)
-    assert.ok(!where.includes('ErrorBoundary'), 'the boundary does not name itself')
+    // The report LEADS with the culprit frame; the full component stack follows
+    // it (which is where the boundary's own frames appear).
+    assert.ok(where.split('\n')[0].includes('Culprit'), 'the culprit frame leads: ' + where)
+    assert.ok(where.includes('ErrorBoundary'), 'the full component stack follows')
     await m.unmount()
+  })
+
+  test('describeCrash leads with the culprit and carries both stacks', () => {
+    const err = new Error('boom')
+    err.stack = 'Error: boom\n    at Thing (a.tsx:1:1)'
+    const report = describeCrash(err, '\n    at Culprit (b.tsx:2:2)\n    at ErrorBoundary (c.tsx:3:3)\n').split('\n')
+    assert.equal(report[0], 'at Culprit (b.tsx:2:2)', 'the culprit leads')
+    assert.ok(report.includes('    at Thing (a.tsx:1:1)'), 'the runtime stack is carried')
+    // Degenerate inputs still produce the message rather than an empty card.
+    assert.equal(describeCrash('plain', undefined), 'plain\n\nplain')
+    const noStack = new Error('bare')
+    noStack.stack = undefined
+    assert.equal(describeCrash(noStack, ''), 'bare\n\nbare')
   })
 
   test('culpritOf skips the boundary frame and tolerates a missing stack', () => {
