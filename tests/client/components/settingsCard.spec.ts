@@ -14,7 +14,7 @@ import { requestCardExpand } from '../../../src/client/settingsJump'
 import { click, keydown, makeKit, mount, query, queryAll, text } from '../helpers/kit'
 import { rowKey } from '../../../src/our/client/priceMap'
 import { priceMapStore, resetPriceBook } from '../../../src/our/client/priceBook'
-import { crashFrameOf } from '../../../src/our/client/PriceMapTable'
+import { crashFrameOf, runGuarded } from '../../../src/our/client/PriceMapTable'
 
 const kit = makeKit()
 const SettingsCard = makeSettingsCard(kit)
@@ -575,6 +575,9 @@ describe('SettingsCard: the model-price mapping block', () => {
     assert.ok(frame.includes('settingsCard.spec.ts'), 'the frame comes from the stack: ' + frame)
     assert.ok(frame.includes('deep'), 'and carries the message: ' + frame)
     assert.equal(crashFrameOf('not an error'), 'not an error')
+    // The effect fence: a clean body reports nothing, a throwing one reports.
+    assert.equal(runGuarded(() => {}), '')
+    assert.ok(runGuarded(() => { throw new Error('from the effect') }).includes('from the effect'))
     const noStack = new Error('no stack')
     noStack.stack = undefined
     assert.equal(crashFrameOf(noStack), 'no stack')

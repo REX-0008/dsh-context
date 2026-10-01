@@ -210,7 +210,13 @@ export function PriceMapTable(props: PriceMapTableProps): ReactElement {
   const failed = observed.failed !== '' ? observed.failed : rowGuard.failed !== '' ? rowGuard.failed : vendorGuard.failed
   // The runtime synthesizes from the same pair list this table renders, so the
   // estimate and the table can never disagree about what is billed.
-  useEffect(() => { noteObservedPairs(pairs) }, [pairs])
+  //
+  // FENCED, and this is load-bearing: React runs an effect during COMMIT, after
+  // the render value exists, so the render fence above cannot cover it — an
+  // effect throw still reaches the boundary and is attributed to this component,
+  // which is exactly the un-actionable report this block kept producing.
+  const [crash, setCrash] = useState('')
+  useEffect(() => { setCrash(runGuarded(() => { noteObservedPairs(pairs) })) }, [pairs])
   const overrides = props.overrides ?? {}
   /**
    * The whole body, built as a value so it can be fenced.
@@ -220,6 +226,7 @@ export function PriceMapTable(props: PriceMapTableProps): ReactElement {
    * name the expression. Catching here yields the runtime's own stack frame,
    * which can — that is what makes a report of this block actionable.
    */
+  const report = failed !== '' ? failed : crash
   const body = (): ReactElement => {
     const currency: CostCurrency = props.currencyOf?.() ?? 'usd'
     const setRow = (provider: string, model: string, vendor: string, target: string): void => {
@@ -242,7 +249,7 @@ export function PriceMapTable(props: PriceMapTableProps): ReactElement {
         <p className="lc-settings-note">{t('settings.priceMapHint', { n: rows.length })}</p>
         {failed === ''
           ? null
-          : <p className="lc-settings-note lc-pricemap-failed" role="status">{t('settings.priceMapFailed', { step: failed })}</p>}
+          : <p className="lc-settings-note lc-pricemap-failed" role="status">{t('settings.priceMapFailed', { step: report })}</p>}
         {rows.length === 0
           ? <p className="lc-settings-note" role="status">{t('settings.priceMapEmpty')}</p>
           : (
@@ -343,6 +350,20 @@ export function PriceMapTable(props: PriceMapTableProps): ReactElement {
  * @param error - the caught value.
  * @returns one line for the card.
  */
+/**
+ * Run an effect body, reporting instead of throwing.
+ * @param run - the effect body.
+ * @returns the crash frame, or the empty string when it ran clean.
+ */
+export function runGuarded(run: () => void): string {
+  try {
+    run()
+    return ''
+  } catch (error) {
+    return crashFrameOf(error)
+  }
+}
+
 export function crashFrameOf(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error)
   const stack = error instanceof Error && typeof error.stack === 'string' ? error.stack : ''
