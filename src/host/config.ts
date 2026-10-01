@@ -20,7 +20,7 @@ import z from '@deepseek-ai/schemastery'
 import type { DefaultFileSort, DefaultGranularity, DefaultPlacement, DefaultTrendMode, DefaultToolSort, InsightsEntry } from '../shared/types'
 // OUR INSERT POINT (PATCHES.md #9): the context-management write layer's
 // settings tree rides the entry config on harness 0.2+ (see src/our/panel/scope.ts).
-import { CONTEXT_PANEL_ENTRY_SCHEMA } from '../our/panel/settings'
+import { CONTEXT_PANEL_ENTRY_SCHEMA, PRICE_MAP_SCHEMA } from '../our/panel/settings'
 // The runtime value is the Volatile live reference; folds never read it, the
 // typed face only satisfies the schema's inferred param (see the field doc).
 import type { ContextPanelSettings } from '../our/types'
@@ -140,6 +140,12 @@ export const Config = z.object({
   // settings surface on 0.2+; a separate root so the volatile mark never
   // leaks into the registration schema (src/our/panel/settings.ts).
   panel: volatileField(CONTEXT_PANEL_ENTRY_SCHEMA),
+  // OUR INSERT: the model-price mapping's manual rows, a TOP-LEVEL preference.
+  // It must sit here rather than inside `panel`: the settings card addresses
+  // top-level field names, exactly as it does for the display preferences above,
+  // and the Config-form generation serves only the volatile top-level fields —
+  // inside the tree the write would be dropped and the mapping lost on reboot.
+  priceMap: volatileField(PRICE_MAP_SCHEMA.default({})),
 })
 
 /**

@@ -134,15 +134,6 @@ export interface ContextPanelSettings {
    * two differ and the panel offers a comparison.
    */
   sectionOriginals?: Record<string, Record<string, string>>
-  /**
-   * The model-price mapping's MANUAL rows, keyed by `<route>\u0000<model>`
-   * (see our/client/priceMap.rowKey).
-   *
-   * Only edited rows appear here; an absent key leaves that row to the
-   * mechanical pass, which is what makes "a row I edited stops being
-   * auto-processed" fall out of the data instead of needing a dirty flag.
-   */
-  priceMap?: Record<string, { vendor: string; model: string }>
 }
 
 /** Empty configuration (the fallback while settings is not ready). */
@@ -162,5 +153,4 @@ export const EMPTY_CONFIG: ContextPanelSettings = {
   sectionOverrides: {},
   sectionWeights: {},
   sectionOriginals: {},
-  priceMap: {},
 }

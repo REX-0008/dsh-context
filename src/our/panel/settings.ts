@@ -50,7 +50,6 @@ export const DEFAULT_SETTINGS: ContextPanelSettings = {
   conversationDisabledContexts: {},
   contextOverrides: {},
   suppressedInjections: {},
-  priceMap: {},
 }
 
 
@@ -71,11 +70,24 @@ const FIELDS = {
   sectionOverrides: z.dict(z.dict(z.string())),
   sectionWeights: z.dict(z.dict(z.number())),
   sectionOriginals: z.dict(z.dict(z.string())),
-  // The model-price mapping's manual rows, keyed by "<route>\u0000<model>"
-  // (priceMap.rowKey). Only edited rows live here: an absent key means the
-  // mechanical pass owns that row.
-  priceMap: z.dict(z.object({ vendor: z.string(), model: z.string() })),
 }
+
+/**
+ * The model-price mapping's manual rows: one entry per EDITED row, keyed by
+ * `priceMap.rowKey`. An absent key leaves that row to the mechanical pass.
+ *
+ * Deliberately NOT part of the panel tree above: that tree rides the entry
+ * config's `panel` field, while the settings card writes TOP-LEVEL field names
+ * (`set('priceMap', …)`, the same call the display preferences use). Declared
+ * inside the tree it would be unaddressable — the write lands on a field the
+ * schema does not carry, is dropped, and the mapping vanishes on the next boot.
+ */
+/** One manual mapping row: the vendor id and that vendor's model id. */
+export interface PriceMapEntry { vendor: string; model: string }
+
+// Annotated, not inferred: the declaration emit cannot name the Dict type this
+// would otherwise infer to (TS2883), and the same pattern the panel roots use.
+export const PRICE_MAP_SCHEMA: z<Record<string, PriceMapEntry>> = z.dict(z.object({ vendor: z.string(), model: z.string() }))
 
 /** Namespace schema (schemastery primitives: z.dict replaces zod's z.record; fields are optional by default). */
 export const CONTEXT_PANEL_SCHEMA: z<ContextPanelSettings> = z.object(FIELDS)

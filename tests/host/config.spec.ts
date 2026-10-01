@@ -34,6 +34,10 @@ describe('Config validator (cordis Standard Schema face)', () => {
       defaultToolSort: 'count',
       defaultFileSort: 'count',
       insightsEntry: 'show',
+      // Our insert: the model-price mapping's manual rows, a TOP-LEVEL preference.
+      // (The settings card writes top-level field names; inside the panel tree the
+      // write is dropped and the mapping is lost on reboot.)
+      priceMap: {},
       // Our insert (PATCHES.md #9): the write layer's settings tree rides the
       // entry config as a volatile field; absent config resolves its empty maps.
       panel: {
@@ -46,7 +50,6 @@ describe('Config validator (cordis Standard Schema face)', () => {
         presetDisabledSections: {},
         // The price mapping's manual rows start empty: every row is mechanical
         // until the user edits one.
-        priceMap: {},
         sectionOriginals: {},
         sectionOverrides: {},
         sectionWeights: {},
