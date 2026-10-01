@@ -108,18 +108,6 @@
   border-color: var(--dsw-alias-border-l2);
 }
 
-.lc-pricemap-search {
-  width: 100%;
-  box-sizing: border-box;
-  border: 0;
-  border-bottom: 1px solid var(--dsw-alias-border-l2);
-  background: none;
-  font: inherit;
-  color: inherit;
-  padding: 6px 8px;
-  outline: none;
-}
-
 .lc-pricemap-src-cell {
   display: flex;
   align-items: center;
