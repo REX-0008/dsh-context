@@ -4,7 +4,7 @@
 // "Open in Settings" jump path mounts the card pre-expanded (settingsJump.ts
 // expand request), with the scroll best-effort against stubbed prototypes.
 
-import { createElement as h, useSyncExternalStore } from 'react'
+import { act, createElement as h, useSyncExternalStore } from 'react'
 import assert from 'node:assert/strict'
 import { beforeEach, describe, test } from 'vitest'
 import { makePluginConfigCard, makeSettingsCard } from '../../../src/client/components/settingsCard'
@@ -486,6 +486,48 @@ describe('SettingsCard: the model-price mapping block', () => {
     await click(query(m.container, '.lc-settings-subhead') as HTMLElement)
     assert.equal(queryAll(m.container, '.lc-pricemap-table').length, 0, 'the broken table is not rendered')
     assert.equal(queryAll(m.container, '.lc-settings-select').length, 7, 'every preference row survives')
+    await m.unmount()
+  })
+
+  test('the pickers open on an unresolved row, where the model list is empty', async () => {
+    // An unresolvable pair has no vendor, so the model picker has NO options at
+    // all — a menu with only a label row. The primitives' keyboard walk is the
+    // kind of code that assumes a selectable row exists.
+    const m = await mount(h(SettingsCard, {
+      useContextSettings: hookFor(stateOf()),
+      usePriceMap: priceSeat(),
+      useSessions: sessionsSeat({
+        dycp: { 'mystery-model': { peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } },
+      }),
+    }))
+    await click(query(m.container, '.lc-settings-head') as HTMLElement)
+    await click(query(m.container, '.lc-settings-subhead') as HTMLElement)
+    const picks = queryAll(m.container, '.lc-pricemap-pick') as HTMLElement[]
+    assert.equal(picks.length, 2, 'a vendor and a model picker')
+    // The model picker (second) has no options on an unresolved row.
+    await click(picks[1])
+    assert.equal(queryAll(m.container, '.lc-settings-select').length, 7, 'the card survives')
+    await m.unmount()
+  })
+
+  test('a picker survives a query that matches nothing', async () => {
+    const m = await mount(h(SettingsCard, {
+      useContextSettings: hookFor(stateOf()),
+      usePriceMap: priceSeat(),
+      useSessions: sessionsSeat({
+        dycp: { 'glm-5.3-flash': { peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } },
+      }),
+    }))
+    await click(query(m.container, '.lc-settings-head') as HTMLElement)
+    await click(query(m.container, '.lc-settings-subhead') as HTMLElement)
+    const picks = queryAll(m.container, '.lc-pricemap-pick') as HTMLElement[]
+    await click(picks[0])
+    // The menu portals into document.body, so its search row is not inside the card.
+    const search = query(document.body, '.lc-pricemap-search') as HTMLInputElement
+    search.value = 'zzzz-no-such-vendor'
+    search.dispatchEvent(new Event('input', { bubbles: true }))
+    await act(async () => { await Promise.resolve() })
+    assert.equal(queryAll(m.container, '.lc-settings-select').length, 7, 'the card survives')
     await m.unmount()
   })
 

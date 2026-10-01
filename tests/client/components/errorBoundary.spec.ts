@@ -7,7 +7,7 @@
 import { createElement as h } from 'react'
 import assert from 'node:assert/strict'
 import { afterEach, describe, test, vi } from 'vitest'
-import { makeErrorBoundary } from '../../../src/client/components/errorBoundary'
+import { culpritOf, makeErrorBoundary } from '../../../src/client/components/errorBoundary'
 import { click, makeKit, mount, query, silenceWindowErrors, text } from '../helpers/kit'
 
 const kit = makeKit()
@@ -62,5 +62,28 @@ describe('ErrorBoundary', () => {
     const m = await mount(h(ErrorBoundary, {}, h(Bomb, {})))
     assert.equal(query(m.container, '.lc-error-msg').textContent, 'string failure')
     await m.unmount()
+  })
+
+  test('the card names the component that threw, so a report is diagnosable', async () => {
+    silenceRenderErrors()
+    function Culprit(): never {
+      throw new Error('reading length of undefined')
+    }
+    const m = await mount(h(ErrorBoundary, {}, h(Culprit, {})))
+    const where = query(m.container, '.lc-error-where').textContent ?? ''
+    assert.ok(where.includes('Culprit'), 'the culprit frame is shown: ' + where)
+    assert.ok(!where.includes('ErrorBoundary'), 'the boundary does not name itself')
+    await m.unmount()
+  })
+
+  test('culpritOf skips the boundary frame and tolerates a missing stack', () => {
+    assert.equal(culpritOf(undefined), '')
+    assert.equal(culpritOf(null), '')
+    assert.equal(culpritOf(''), '')
+    assert.equal(culpritOf('   \n  '), '')
+    assert.equal(
+      culpritOf('\n    at ErrorBoundary (a.tsx:1:1)\n    at PriceMapTable (b.tsx:9:9)\n'),
+      'at PriceMapTable (b.tsx:9:9)',
+    )
   })
 })
