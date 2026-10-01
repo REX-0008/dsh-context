@@ -15,7 +15,7 @@
  * @module @our/context-panel-write/our/client/PriceMapTable
  */
 
-import { useEffect, useMemo, type ReactElement } from 'react'
+import { useEffect, useMemo, useState, type ReactElement } from 'react'
 import { rowsOfSnapshot, usageTotalsOf } from '../../client/overview'
 import { formatCost, type CostCurrency, type PriceTriple } from '../../client/cost'
 import type { Translate } from '../../client/i18n'
@@ -181,6 +181,11 @@ export function PriceMapTable(props: PriceMapTableProps): ReactElement {
     [pairs, props.overrides, props.revision],
   )
   const vendors = useMemo(() => vendorChoices(), [props.revision])
+  // The vendors picked in THIS view, by row key. The model field's options follow
+  // this first, so a pick shows that vendor's models at once — the stored map is
+  // not consulted for it, because the store round-trip (echo, scope write,
+  // republish) is not something the UI may depend on to become usable.
+  const [picked, setPicked] = useState<Record<string, string>>({})
   const overrides = props.overrides ?? {}
   const rateOf = (rate: PriceTriple | undefined): string =>
     rate === undefined ? '—' : [rate.miss, rate.out, rate.hit, rate.write].map(n => formatCost(n, currency)).join(' / ')
@@ -201,6 +206,9 @@ export function PriceMapTable(props: PriceMapTableProps): ReactElement {
   return (
     <div className="lc-pricemap">
       <p className="lc-settings-note">{t('settings.priceMapHint', { n: rows.length })}</p>
+      {vendors.length === 0
+        ? <p className="lc-settings-note" role="status">{t('settings.priceMapNoVendors')}</p>
+        : null}
       {rows.length === 0
         ? <p className="lc-settings-note" role="status">{t('settings.priceMapEmpty')}</p>
         : (
@@ -228,7 +236,8 @@ export function PriceMapTable(props: PriceMapTableProps): ReactElement {
                   // vendor is set but whose model is not yet would otherwise show
                   // an empty model list.
                   const stored: { vendor: string; model: string } | undefined = Object.hasOwn(overrides, key) ? overrides[key] : undefined
-                  const chosenVendor = stored?.vendor ?? row.target?.vendor ?? ''
+                  const pickedVendor: string | undefined = Object.hasOwn(picked, key) ? picked[key] : undefined
+                  const chosenVendor = pickedVendor ?? stored?.vendor ?? row.target?.vendor ?? ''
                   return (
                     <PriceMapRowCells
                       key={key}
@@ -240,9 +249,11 @@ export function PriceMapTable(props: PriceMapTableProps): ReactElement {
                       spend={spendOf(row.rate, usage)}
                       tokensCell={tokenCell(usage)}
                       onPickVendor={(vendor) => {
-                        // The vendor is stored even when its model list is empty, so
-                        // the pick is never silently dropped and the model field can
-                        // offer that vendor's models straight away.
+                        // Local first: the model list must follow the pick even when
+                        // the write below is refused or still in flight. The vendor is
+                        // stored even when its model list is empty, so the pick is
+                        // never silently dropped.
+                        setPicked((current: Record<string, string>) => ({ ...current, [key]: vendor }))
                         const next = { ...overrides }
                         next[key] = { vendor, model: modelChoices(vendor)[0] ?? '' }
                         props.onWrite?.(next)

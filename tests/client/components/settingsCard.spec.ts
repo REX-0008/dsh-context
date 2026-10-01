@@ -489,6 +489,45 @@ describe('SettingsCard: the model-price mapping block', () => {
     await m.unmount()
   })
 
+  test('picking a vendor fills the model field even when the write is never echoed back', async () => {
+    // The real failure: the seat's write is asynchronous (echo, scope write,
+    // republish), and the model list must not wait on it.
+    noteBook({
+      prices: { zai: { 'glm-5.2': { hit: 1, miss: 2, write: 3, out: 4 }, 'glm-5.3': { hit: 1, miss: 2, write: 3, out: 4 } } },
+      index: { byModel: new Map() },
+    } as never)
+    const m = await mount(h(SettingsCard, {
+      useContextSettings: hookFor(stateOf()),
+      usePriceMap: priceSeat(),
+      useSessions: sessionsSeat({
+        dycp: { 'glm-5.3-flash': { peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } },
+      }),
+    }))
+    await click(query(m.container, '.lc-settings-head') as HTMLElement)
+    await click(query(m.container, '.lc-settings-subhead') as HTMLElement)
+    const inputs = queryAll(m.container, '.lc-pricemap-pick') as HTMLInputElement[]
+    const modelList = inputs[1].getAttribute('list') ?? ''
+    assert.equal(document.querySelectorAll('#' + modelList + ' option').length, 0, 'nothing picked yet')
+    inputs[0].value = 'zai'
+    await keydown('Enter', inputs[0])
+    assert.equal(document.querySelectorAll('#' + modelList + ' option').length, 2, 'the models appear without any echo')
+    await m.unmount()
+  })
+
+  test('an unloaded catalogue says so instead of offering nothing', async () => {
+    resetPriceBook()
+    const m = await mount(h(SettingsCard, {
+      useContextSettings: hookFor(stateOf()),
+      usePriceMap: priceSeat(),
+      useSessions: sessionsSeat({
+        dycp: { 'glm-5.3-flash': { peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } },
+      }),
+    }))
+    await click(query(m.container, '.lc-settings-head') as HTMLElement)
+    await click(query(m.container, '.lc-settings-subhead') as HTMLElement)
+    assert.ok(text(m.container).includes(DICT_EN['settings.priceMapNoVendors']), 'the empty catalogue is stated')
+    await m.unmount()
+  })
   test('picking a vendor fills the model field with that vendor\'s models', async () => {
     // A seat that FEEDS ITS OWN WRITE BACK, as the real store does — without
     // that the model list can never follow the pick, which was the bug.
