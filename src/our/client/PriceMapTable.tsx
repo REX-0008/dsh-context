@@ -174,7 +174,6 @@ function guarded<T>(step: string, make: () => T, fallback: T): { value: T; faile
 /** The block. */
 export function PriceMapTable(props: PriceMapTableProps): ReactElement {
   const { t } = props
-  const currency: CostCurrency = props.currencyOf?.() ?? 'usd'
   // The sessions seat is a real hook, so it is read once at the top rather than
   // inside a memo (the same guarded-seat contract the overview card follows).
   const seat = props.useSessions
@@ -213,107 +212,143 @@ export function PriceMapTable(props: PriceMapTableProps): ReactElement {
   // estimate and the table can never disagree about what is billed.
   useEffect(() => { noteObservedPairs(pairs) }, [pairs])
   const overrides = props.overrides ?? {}
-  const setRow = (provider: string, model: string, vendor: string, target: string): void => {
-    props.onWrite?.({ ...overrides, [rowKey(provider, model)]: { vendor, model: target } })
-  }
-  const clearRow = (provider: string, model: string): void => {
-    const { [rowKey(provider, model)]: _dropped, ...rest } = overrides
-    props.onWrite?.(rest)
-  }
-  /** The rate cells print input/output/cache-read/cache-write, as the board does. */
-  const rateOf = (rate: PriceTriple | undefined): string =>
-    rate === undefined ? '—' : [rate.miss, rate.out, rate.hit, rate.write].map(n => formatCost(n, currency)).join(' / ')
-  const spendOf = (rate: PriceTriple | undefined, usage: PairTokens | undefined): string => {
-    if (rate === undefined || usage === undefined) return '—'
-    return formatCost((usage.input * rate.miss + usage.cache * rate.hit + usage.output * rate.out) / 1e6, currency)
-  }
+  /**
+   * The whole body, built as a value so it can be fenced.
+   *
+   * React attributes a render throw to this COMPONENT's definition, and the
+   * bundler inlines every helper into that frame, so the component frame cannot
+   * name the expression. Catching here yields the runtime's own stack frame,
+   * which can — that is what makes a report of this block actionable.
+   */
+  const body = (): ReactElement => {
+    const currency: CostCurrency = props.currencyOf?.() ?? 'usd'
+    const setRow = (provider: string, model: string, vendor: string, target: string): void => {
+      props.onWrite?.({ ...overrides, [rowKey(provider, model)]: { vendor, model: target } })
+    }
+    const clearRow = (provider: string, model: string): void => {
+      const { [rowKey(provider, model)]: _dropped, ...rest } = overrides
+      props.onWrite?.(rest)
+    }
+    /** The rate cells print input/output/cache-read/cache-write, as the board does. */
+    const rateOf = (rate: PriceTriple | undefined): string =>
+      rate === undefined ? '—' : [rate.miss, rate.out, rate.hit, rate.write].map(n => formatCost(n, currency)).join(' / ')
+    const spendOf = (rate: PriceTriple | undefined, usage: PairTokens | undefined): string => {
+      if (rate === undefined || usage === undefined) return '—'
+      return formatCost((usage.input * rate.miss + usage.cache * rate.hit + usage.output * rate.out) / 1e6, currency)
+    }
 
-  return (
-    <div className="lc-pricemap">
-      <p className="lc-settings-note">{t('settings.priceMapHint', { n: rows.length })}</p>
-      {failed === ''
-        ? null
-        : <p className="lc-settings-note lc-pricemap-failed" role="status">{t('settings.priceMapFailed', { step: failed })}</p>}
-      {rows.length === 0
-        ? <p className="lc-settings-note" role="status">{t('settings.priceMapEmpty')}</p>
-        : (
-          <div className="lc-pricemap-wrap">
-            <table className="lc-pricemap-table">
-              <thead>
-                <tr>
-                  <th>{t('settings.priceMapRoute')}</th>
-                  <th>{t('settings.priceMapModel')}</th>
-                  <th>{t('settings.priceMapVendor')}</th>
-                  <th>{t('settings.priceMapTarget')}</th>
-                  <th>{t('settings.priceMapRate')}</th>
-                  <th>{t('settings.priceMapTokens')}</th>
-                  <th>{t('settings.priceMapSpend')}</th>
-                  <th>{t('settings.priceMapFrom')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => {
-                  const key = rowKey(row.provider, row.model)
-                  const usage = tokens.get(key)
-                  const targetOptions = row.target === null ? [] : modelChoices(row.target.vendor)
-                  return (
-                    <tr key={key} className={row.edited ? 'lc-pricemap-edited' : undefined}>
-                      <td className="lc-pricemap-mono" data-label={t('settings.priceMapRoute')}>{row.provider}</td>
-                      <td className="lc-pricemap-mono" data-label={t('settings.priceMapModel')}>{row.model}</td>
-                      <td data-label={t('settings.priceMapVendor')}>
-                        <Picker
-                          value={row.target?.vendor ?? ''}
-                          options={vendors.map(vendor => ({ id: vendor.id, label: vendor.name }))}
-                          placeholder={t('settings.priceMapPick')}
-                          searchLabel={t('settings.priceMapSearch')}
-                          onPick={(vendor) => {
-                            const choices = modelChoices(vendor)
-                            if (choices.length > 0) setRow(row.provider, row.model, vendor, choices[0])
-                          }}
-                        />
-                      </td>
-                      <td data-label={t('settings.priceMapTarget')}>
-                        <Picker
-                          value={row.target?.model ?? ''}
-                          options={targetOptions.map(id => ({ id, label: id }))}
-                          placeholder={t('settings.priceMapPick')}
-                          searchLabel={t('settings.priceMapSearch')}
-                          onPick={(target) => {
-                            if (row.target !== null) setRow(row.provider, row.model, row.target.vendor, target)
-                          }}
-                        />
-                      </td>
-                      <td className="lc-pricemap-nums" data-label={t('settings.priceMapRate')}>{rateOf(row.rate)}</td>
-                      <td className="lc-pricemap-nums" data-label={t('settings.priceMapTokens')}>
-                        {usage === undefined
-                          ? '—'
-                          : t('settings.priceMapTokenCell', {
-                            total: millions(usage.total),
-                            input: millions(usage.input),
-                            output: millions(usage.output),
-                            cache: millions(usage.cache),
-                          })}
-                      </td>
-                      <td className="lc-pricemap-nums" data-label={t('settings.priceMapSpend')}>{spendOf(row.rate, usage)}</td>
-                      <td className="lc-pricemap-src-cell" data-label={t('settings.priceMapFrom')}>
-                        <span className={'lc-pricemap-src lc-pricemap-src-' + row.source}>
-                          {t('settings.priceMapSource.' + row.source)}
-                        </span>
-                        {row.edited
-                          ? (
-                            <button type="button" className="lc-pricemap-clear" onClick={() => { clearRow(row.provider, row.model) }}>
-                              {t('settings.priceMapClear')}
-                            </button>
-                          )
-                          : null}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-    </div>
-  )
+    return (
+      <div className="lc-pricemap">
+        <p className="lc-settings-note">{t('settings.priceMapHint', { n: rows.length })}</p>
+        {failed === ''
+          ? null
+          : <p className="lc-settings-note lc-pricemap-failed" role="status">{t('settings.priceMapFailed', { step: failed })}</p>}
+        {rows.length === 0
+          ? <p className="lc-settings-note" role="status">{t('settings.priceMapEmpty')}</p>
+          : (
+            <div className="lc-pricemap-wrap">
+              <table className="lc-pricemap-table">
+                <thead>
+                  <tr>
+                    <th>{t('settings.priceMapRoute')}</th>
+                    <th>{t('settings.priceMapModel')}</th>
+                    <th>{t('settings.priceMapVendor')}</th>
+                    <th>{t('settings.priceMapTarget')}</th>
+                    <th>{t('settings.priceMapRate')}</th>
+                    <th>{t('settings.priceMapTokens')}</th>
+                    <th>{t('settings.priceMapSpend')}</th>
+                    <th>{t('settings.priceMapFrom')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row) => {
+                    const key = rowKey(row.provider, row.model)
+                    const usage = tokens.get(key)
+                    const targetOptions = row.target === null ? [] : modelChoices(row.target.vendor)
+                    return (
+                      <tr key={key} className={row.edited ? 'lc-pricemap-edited' : undefined}>
+                        <td className="lc-pricemap-mono" data-label={t('settings.priceMapRoute')}>{row.provider}</td>
+                        <td className="lc-pricemap-mono" data-label={t('settings.priceMapModel')}>{row.model}</td>
+                        <td data-label={t('settings.priceMapVendor')}>
+                          <Picker
+                            value={row.target?.vendor ?? ''}
+                            options={vendors.map(vendor => ({ id: vendor.id, label: vendor.name }))}
+                            placeholder={t('settings.priceMapPick')}
+                            searchLabel={t('settings.priceMapSearch')}
+                            onPick={(vendor) => {
+                              const choices = modelChoices(vendor)
+                              if (choices.length > 0) setRow(row.provider, row.model, vendor, choices[0])
+                            }}
+                          />
+                        </td>
+                        <td data-label={t('settings.priceMapTarget')}>
+                          <Picker
+                            value={row.target?.model ?? ''}
+                            options={targetOptions.map(id => ({ id, label: id }))}
+                            placeholder={t('settings.priceMapPick')}
+                            searchLabel={t('settings.priceMapSearch')}
+                            onPick={(target) => {
+                              if (row.target !== null) setRow(row.provider, row.model, row.target.vendor, target)
+                            }}
+                          />
+                        </td>
+                        <td className="lc-pricemap-nums" data-label={t('settings.priceMapRate')}>{rateOf(row.rate)}</td>
+                        <td className="lc-pricemap-nums" data-label={t('settings.priceMapTokens')}>
+                          {usage === undefined
+                            ? '—'
+                            : t('settings.priceMapTokenCell', {
+                              total: millions(usage.total),
+                              input: millions(usage.input),
+                              output: millions(usage.output),
+                              cache: millions(usage.cache),
+                            })}
+                        </td>
+                        <td className="lc-pricemap-nums" data-label={t('settings.priceMapSpend')}>{spendOf(row.rate, usage)}</td>
+                        <td className="lc-pricemap-src-cell" data-label={t('settings.priceMapFrom')}>
+                          <span className={'lc-pricemap-src lc-pricemap-src-' + row.source}>
+                            {t('settings.priceMapSource.' + row.source)}
+                          </span>
+                          {row.edited
+                            ? (
+                              <button type="button" className="lc-pricemap-clear" onClick={() => { clearRow(row.provider, row.model) }}>
+                                {t('settings.priceMapClear')}
+                              </button>
+                            )
+                            : null}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+      </div>
+    )
+  }
+  try {
+    return body()
+  } catch (error) {
+    return (
+      <div className="lc-pricemap">
+        <p className="lc-settings-note lc-pricemap-failed" role="status">{t('settings.priceMapFailed', { step: crashFrameOf(error) })}</p>
+      </div>
+    )
+  }
+}
+
+/**
+ * The runtime's own top frame for a caught render error — `file:line:column`
+ * plus the message, which is the only thing that names the failing expression.
+ * @param error - the caught value.
+ * @returns one line for the card.
+ */
+export function crashFrameOf(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  const stack = error instanceof Error && typeof error.stack === 'string' ? error.stack : ''
+  for (const raw of stack.split('\n')) {
+    const line = raw.trim()
+    if (line.startsWith('at ')) return line.replace(/^at\s+/, '') + ' — ' + message
+  }
+  return message
 }

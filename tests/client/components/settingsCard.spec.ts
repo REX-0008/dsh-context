@@ -14,6 +14,7 @@ import { requestCardExpand } from '../../../src/client/settingsJump'
 import { click, keydown, makeKit, mount, query, queryAll, text } from '../helpers/kit'
 import { rowKey } from '../../../src/our/client/priceMap'
 import { priceMapStore, resetPriceBook } from '../../../src/our/client/priceBook'
+import { crashFrameOf } from '../../../src/our/client/PriceMapTable'
 
 const kit = makeKit()
 const SettingsCard = makeSettingsCard(kit)
@@ -563,6 +564,30 @@ describe('SettingsCard: the model-price mapping block', () => {
     await click(query(m.container, '.lc-settings-head') as HTMLElement)
     await click(query(m.container, '.lc-settings-subhead') as HTMLElement)
     assert.ok(query(m.container, '.lc-pricemap-table'), 'the table rendered from a slim head')
+    assert.equal(queryAll(m.container, '.lc-settings-select').length, 7, 'the card survives')
+    await m.unmount()
+  })
+
+  test('a throw anywhere in the body is fenced and reports the real stack frame', async () => {
+    // React's component frame names the COMPONENT; this note carries the
+    // runtime's own frame, which is what names the failing expression.
+    const frame = crashFrameOf(new Error('deep'))
+    assert.ok(frame.includes('settingsCard.spec.ts'), 'the frame comes from the stack: ' + frame)
+    assert.ok(frame.includes('deep'), 'and carries the message: ' + frame)
+    assert.equal(crashFrameOf('not an error'), 'not an error')
+    const noStack = new Error('no stack')
+    noStack.stack = undefined
+    assert.equal(crashFrameOf(noStack), 'no stack')
+    const m = await mount(h(SettingsCard, {
+      useContextSettings: hookFor(stateOf()),
+      usePriceMap: priceSeat(),
+      useSessions: sessionsSeat({}),
+      currencyOf: () => { throw new Error('currency blew up') },
+    }))
+    await click(query(m.container, '.lc-settings-head') as HTMLElement)
+    await click(query(m.container, '.lc-settings-subhead') as HTMLElement)
+    const note = query(m.container, '.lc-pricemap-failed') as HTMLElement
+    assert.ok(text(note).includes('currency blew up'), 'the message is reported: ' + text(note))
     assert.equal(queryAll(m.container, '.lc-settings-select').length, 7, 'the card survives')
     await m.unmount()
   })
