@@ -125,15 +125,22 @@ export function PriceMapTable(props: PriceMapTableProps): ReactElement {
   const currency: CostCurrency = props.currencyOf?.() ?? 'usd'
   // The sessions seat is a real hook, so it is read once at the top rather than
   // inside a memo (the same guarded-seat contract the overview card follows).
+  // The sessions seat is a REAL HOOK, so it is called here at the top level,
+  // unconditionally — never inside a memo factory. That is the contract the
+  // overview card's `sessionsSnapshotOf` documents: the seat yields the raw
+  // snapshot, and only the DERIVATION rides useMemo. Calling it inside a factory
+  // is a Rules-of-Hooks violation, and the harness's hook dispatch fails on it —
+  // measured as a shell-bundle frame reading `length` of undefined, surfacing as
+  // this block's render error.
   const seat = props.useSessions
-  const snapshot = useMemo(() => {
-    if (typeof seat !== 'function') return null
+  let snapshot: unknown = null
+  if (typeof seat === 'function') {
     try {
-      return (seat as <T>(selector: (value: unknown) => T) => T)(value => value)
+      snapshot = (seat as <T>(selector: (value: unknown) => T) => T)(value => value)
     } catch {
-      return null
+      snapshot = null
     }
-  }, [seat])
+  }
   // The pair list is derived on its OWN, off the snapshot only. Folding it in
   // with the override-keyed rows would hand it a new identity whenever the caller
   // rebuilt an equal overrides object, and the effect below feeds the pairs into
