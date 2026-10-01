@@ -4,7 +4,7 @@
 // "Open in Settings" jump path mounts the card pre-expanded (settingsJump.ts
 // expand request), with the scroll best-effort against stubbed prototypes.
 
-import { createElement as h, useSyncExternalStore } from 'react'
+import { createElement as h, useState, useSyncExternalStore } from 'react'
 import assert from 'node:assert/strict'
 import { beforeEach, describe, test } from 'vitest'
 import { makePluginConfigCard, makeSettingsCard } from '../../../src/client/components/settingsCard'
@@ -489,6 +489,34 @@ describe('SettingsCard: the model-price mapping block', () => {
     await m.unmount()
   })
 
+  test('picking a vendor fills the model field with that vendor\'s models', async () => {
+    // A seat that FEEDS ITS OWN WRITE BACK, as the real store does — without
+    // that the model list can never follow the pick, which was the bug.
+    noteBook({
+      prices: { zai: { 'glm-5.2': { hit: 1, miss: 2, write: 3, out: 4 }, 'glm-5.3': { hit: 1, miss: 2, write: 3, out: 4 } } },
+      index: { byModel: new Map() },
+    } as never)
+    const live = () => {
+      const [map, setMap] = useState<Record<string, { vendor: string; model: string }>>({})
+      return { overrides: map, write: (next: Record<string, { vendor: string; model: string }>) => { setMap(next) }, revision: 0 }
+    }
+    const m = await mount(h(SettingsCard, {
+      useContextSettings: hookFor(stateOf()),
+      usePriceMap: live,
+      useSessions: sessionsSeat({
+        dycp: { 'glm-5.3-flash': { peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } },
+      }),
+    }))
+    await click(query(m.container, '.lc-settings-head') as HTMLElement)
+    await click(query(m.container, '.lc-settings-subhead') as HTMLElement)
+    const inputs = queryAll(m.container, '.lc-pricemap-pick') as HTMLInputElement[]
+    const modelList = inputs[1].getAttribute('list') ?? ''
+    assert.equal(document.querySelectorAll('#' + modelList + ' option').length, 0, 'no vendor picked yet')
+    inputs[0].value = 'zai'
+    await keydown('Enter', inputs[0])
+    assert.equal(document.querySelectorAll('#' + modelList + ' option').length, 2, 'the vendor\'s models are offered')
+    await m.unmount()
+  })
   test('the pickers autocomplete and only commit a known option', async () => {
     // Seed a book so the vendor list is non-empty (the seats are the module's
     // own store, which is unseeded in jsdom).

@@ -220,27 +220,36 @@ export function PriceMapTable(props: PriceMapTableProps): ReactElement {
               </thead>
               <tbody>
                 {rows.map((row) => {
-                  const usage = tokens.get(rowKey(row.provider, row.model))
+                  const key = rowKey(row.provider, row.model)
+                  const usage = tokens.get(key)
+                  // The vendor the row is SHOWING: the stored override's, else the
+                  // mechanical one. The model field's options follow this, NOT the
+                  // resolved target — a target needs a model too, so a row whose
+                  // vendor is set but whose model is not yet would otherwise show
+                  // an empty model list.
+                  const stored: { vendor: string; model: string } | undefined = Object.hasOwn(overrides, key) ? overrides[key] : undefined
+                  const chosenVendor = stored?.vendor ?? row.target?.vendor ?? ''
                   return (
                     <PriceMapRowCells
-                      key={rowKey(row.provider, row.model)}
+                      key={key}
                       row={row}
                       t={t}
                       vendors={vendors}
+                      chosenVendor={chosenVendor}
                       rate={rateOf(row.rate)}
                       spend={spendOf(row.rate, usage)}
                       tokensCell={tokenCell(usage)}
                       onPickVendor={(vendor) => {
-                        const choices = modelChoices(vendor)
-                        if (choices.length === 0) return
+                        // The vendor is stored even when its model list is empty, so
+                        // the pick is never silently dropped and the model field can
+                        // offer that vendor's models straight away.
                         const next = { ...overrides }
-                        next[rowKey(row.provider, row.model)] = { vendor, model: choices[0] }
+                        next[key] = { vendor, model: modelChoices(vendor)[0] ?? '' }
                         props.onWrite?.(next)
                       }}
                       onPickModel={(target) => {
-                        if (row.target === null) return
                         const next = { ...overrides }
-                        next[rowKey(row.provider, row.model)] = { vendor: row.target.vendor, model: target }
+                        next[key] = { vendor: chosenVendor === '' ? row.target?.vendor ?? '' : chosenVendor, model: target }
                         props.onWrite?.(next)
                       }}
                       onClear={() => {
@@ -266,12 +275,13 @@ function PriceMapRowCells(props: {
   rate: string
   spend: string
   tokensCell: string
+  chosenVendor: string
   onPickVendor: (vendor: string) => void
   onPickModel: (target: string) => void
   onClear: () => void
 }): ReactElement {
   const { row, t } = props
-  const targetOptions = row.target === null ? [] : modelChoices(row.target.vendor)
+  const targetOptions = props.chosenVendor === '' ? [] : modelChoices(props.chosenVendor)
   const vendorIds = props.vendors.map(vendor => vendor.id)
   // A datalist id must be unique per field, or the browser binds one list to
   // both cells and the model field suggests vendors.
@@ -282,7 +292,7 @@ function PriceMapRowCells(props: {
       <td className="lc-pricemap-mono" data-label={t('settings.priceMapModel')}>{row.model}</td>
       <td data-label={t('settings.priceMapVendor')}>
         <Combo
-          value={row.target?.vendor ?? ''}
+          value={props.chosenVendor}
           options={vendorIds}
           listId={listPrefix + '-vendor'}
           placeholder={t('settings.priceMapPick')}
