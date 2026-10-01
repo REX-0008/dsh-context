@@ -452,7 +452,7 @@ describe('SettingsCard: the model-price mapping block', () => {
     assert.equal(cells[1], 'glm-5.3-flash')
     // The tokens cell prints total / cache-hit% / input / output (millions;
     // whole numbers above 1, and the hit share alone keeps a decimal).
-    assert.equal(cells[6], '3 / 0.0 / 2 / 1')
+    assert.equal(cells[6], '3 / 0.0% / 2 / 1')
   })
 
   test('opening the block does not re-render without bound when the seat rebuilds its overrides', async () => {

@@ -172,11 +172,15 @@ function PriceMapRowCells(props: {
   const usage = props.usage
   // Total, cache-hit share, input, output — the hit share is a percentage, so it
   // is the one figure here that keeps a decimal.
+  const hit = usage === undefined
+    ? null
+    : cacheHitPercent(usage.cache, usage.input + usage.cache, 1)
   const tokensCell = usage === undefined
     ? '—'
     : t('settings.priceMapTokenCell', {
       total: millions(usage.total),
-      cache: cacheHitPercent(usage.cache, usage.input + usage.cache, 1) ?? '—',
+      // Carries its own sign: a bare figure here reads as another token count.
+      cache: hit === null ? '—' : `${hit}%`,
       input: millions(usage.input),
       output: millions(usage.output),
     })
