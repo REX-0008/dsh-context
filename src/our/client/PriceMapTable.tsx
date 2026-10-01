@@ -24,7 +24,11 @@ import {
   priceMapRows,
   vendorChoices,
   type ObservedPair,
+  type PriceMapRow,
 } from './priceBook'
+
+/** One vendor option, as the picker takes it. */
+interface VendorChoice { id: string; name: string }
 
 /** One pair's consumed volume, in tokens. */
 interface PairTokens {
@@ -147,6 +151,26 @@ function Picker(props: {
   )
 }
 
+/**
+ * Run one derivation, reporting the step instead of throwing.
+ *
+ * The step name is the whole point: a render throw reaches the fence with only
+ * the runtime's message, which names no code. A named step turns the next report
+ * into an answer.
+ * @param step - the derivation's name, as the note prints it.
+ * @param make - the derivation.
+ * @param fallback - what to render when it refuses.
+ * @returns the value and, when it refused, the step plus the runtime's message.
+ */
+function guarded<T>(step: string, make: () => T, fallback: T): { value: T; failed: string } {
+  try {
+    return { value: make(), failed: '' }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return { value: fallback, failed: step + ' — ' + message }
+  }
+}
+
 /** The block. */
 export function PriceMapTable(props: PriceMapTableProps): ReactElement {
   const { t } = props
@@ -162,17 +186,32 @@ export function PriceMapTable(props: PriceMapTableProps): ReactElement {
       return null
     }
   }, [seat])
-  const { pairs, tokens } = useMemo(() => observedOf(snapshot), [snapshot])
-  // The runtime synthesizes from the same pair list this table renders, so the
-  // estimate and the table can never disagree about what is billed.
-  useEffect(() => { noteObservedPairs(pairs) }, [pairs])
-  const rows = useMemo(
-    () => priceMapRows(pairs, props.overrides),
+  // Every derivation runs inside its own guard. A seat/snapshot the fold cannot
+  // read must cost this block its table, never the settings card: the note names
+  // the step that refused, which is what a report needs to be actionable.
+  // The pair list is derived on its OWN, off the snapshot only. Folding it in
+  // with the override-keyed rows would hand it a new identity whenever the
+  // caller rebuilds an equal overrides object, and the effect below feeds the
+  // pairs into the store — the identity churn that once grew into an unbounded
+  // render loop.
+  const observed = useMemo(
+    () => guarded('pairs', () => observedOf(snapshot), { pairs: [] as ObservedPair[], tokens: new Map<string, PairTokens>() }),
+    [snapshot],
+  )
+  const { pairs, tokens } = observed.value
+  const rowGuard = useMemo(
+    () => guarded('rows', () => priceMapRows(pairs, props.overrides), [] as PriceMapRow[]),
     // A new book changes rates and options without changing the pair list, so
     // the store's revision is part of the derivation.
     [pairs, props.overrides, props.revision],
   )
-  const vendors = useMemo(() => vendorChoices(), [props.revision])
+  const vendorGuard = useMemo(() => guarded('vendors', () => vendorChoices(), [] as VendorChoice[]), [props.revision])
+  const rows = rowGuard.value
+  const vendors = vendorGuard.value
+  const failed = observed.failed !== '' ? observed.failed : rowGuard.failed !== '' ? rowGuard.failed : vendorGuard.failed
+  // The runtime synthesizes from the same pair list this table renders, so the
+  // estimate and the table can never disagree about what is billed.
+  useEffect(() => { noteObservedPairs(pairs) }, [pairs])
   const overrides = props.overrides ?? {}
   const setRow = (provider: string, model: string, vendor: string, target: string): void => {
     props.onWrite?.({ ...overrides, [rowKey(provider, model)]: { vendor, model: target } })
@@ -192,6 +231,9 @@ export function PriceMapTable(props: PriceMapTableProps): ReactElement {
   return (
     <div className="lc-pricemap">
       <p className="lc-settings-note">{t('settings.priceMapHint', { n: rows.length })}</p>
+      {failed === ''
+        ? null
+        : <p className="lc-settings-note lc-pricemap-failed" role="status">{t('settings.priceMapFailed', { step: failed })}</p>}
       {rows.length === 0
         ? <p className="lc-settings-note" role="status">{t('settings.priceMapEmpty')}</p>
         : (

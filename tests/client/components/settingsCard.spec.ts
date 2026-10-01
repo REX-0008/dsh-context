@@ -531,6 +531,60 @@ describe('SettingsCard: the model-price mapping block', () => {
     await m.unmount()
   })
 
+  test('a SLIM wire head (no collections) renders without throwing', async () => {
+    // What the session list actually delivers on the split generation: the head
+    // carries counts/last/detailRev and NO request/event collections. Every other
+    // case in this file feeds a fat row, so this shape was untested.
+    const slim = {
+      ids: ['s1'],
+      byId: {
+        s1: {
+          title: 't',
+          updatedAt: 1,
+          projectionValues: {
+            contextTimeline: {
+              ok: true,
+              current: { system: 1, tools: 2, user: 3, inject: 4, skill: 5, assistant: 6, tool: 7, total: 28 },
+              counts: { turns: 2, steps: 5, injects: 1, compactions: 0, prunes: 0 },
+              last: { seq: 9, total: 100 },
+              detailRev: 3,
+              cost: { dycp: { 'glm-5.3-flash': { peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } } },
+            },
+          },
+        },
+      },
+    }
+    const seat = <T,>(sel: (value: unknown) => T): T => sel(slim)
+    const m = await mount(h(SettingsCard, {
+      useContextSettings: hookFor(stateOf()),
+      usePriceMap: priceSeat(),
+      useSessions: seat,
+    }))
+    await click(query(m.container, '.lc-settings-head') as HTMLElement)
+    await click(query(m.container, '.lc-settings-subhead') as HTMLElement)
+    assert.ok(query(m.container, '.lc-pricemap-table'), 'the table rendered from a slim head')
+    assert.equal(queryAll(m.container, '.lc-settings-select').length, 7, 'the card survives')
+    await m.unmount()
+  })
+
+  test('a hostile sessions snapshot names the failing step instead of throwing', async () => {
+    // The seat returns a snapshot whose collection accessor throws: the pairs
+    // derivation refuses, and the block says WHICH step refused.
+    const hostile = { ids: ['s1'], get byId(): never { throw new Error('hostile row') } }
+    const seat = <T,>(sel: (value: unknown) => T): T => sel(hostile)
+    const m = await mount(h(SettingsCard, {
+      useContextSettings: hookFor(stateOf()),
+      usePriceMap: priceSeat(),
+      useSessions: seat,
+    }))
+    await click(query(m.container, '.lc-settings-head') as HTMLElement)
+    await click(query(m.container, '.lc-settings-subhead') as HTMLElement)
+    const note = query(m.container, '.lc-pricemap-failed') as HTMLElement
+    assert.ok(text(note).includes('pairs'), 'the failing step is named: ' + text(note))
+    assert.equal(queryAll(m.container, '.lc-settings-select').length, 7, 'the card survives')
+    await m.unmount()
+  })
+
   test('an empty bill says so instead of drawing an empty table', async () => {
     const m = await mount(h(SettingsCard, {
       useContextSettings: hookFor(stateOf()),
