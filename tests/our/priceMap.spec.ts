@@ -105,6 +105,26 @@ describe('mechanicalTarget', () => {
     const same = { zai: { 'glm-5.2': {} } }
     assert.deepEqual(mechanicalTarget('glm-5-2-260617', same), { vendor: 'zai', model: 'glm-5.2' })
   })
+
+  test('a preferred aggregator wins over the model\'s own family', () => {
+    // opencode-go is tried first: its ids are spelled the way these gateways bill.
+    const vendors = { 'opencode-go': { 'glm-5.3-flash': {} }, zai: { 'glm-5.3-flash': {} } }
+    assert.deepEqual(mechanicalTarget('glm-5.3-flash', vendors), { vendor: 'opencode-go', model: 'glm-5.3-flash' })
+  })
+
+  test('the family answers when the aggregator cannot settle the id', () => {
+    const vendors = { 'opencode-go': { 'glm-5.2': {} }, zai: { 'glm-5.3-flash': {} } }
+    assert.deepEqual(mechanicalTarget('glm-5.3-flash', vendors), { vendor: 'zai', model: 'glm-5.3-flash' })
+  })
+
+  test('an aggregator with an ambiguous fold falls through to the family', () => {
+    const vendors = { 'opencode-go': { 'glm-5.3-flash': {}, 'glm-5-3-flash': {} }, zai: { 'glm-5.3-flash': {} } }
+    assert.deepEqual(mechanicalTarget('glm-5-3-flash', vendors), { vendor: 'zai', model: 'glm-5.3-flash' })
+  })
+
+  test('with neither an aggregator nor a family, nothing is guessed', () => {
+    assert.equal(mechanicalTarget('mystery-model', { 'opencode-go': { 'glm-5.2': {} } }), null)
+  })
 })
 
 describe('resolveTarget', () => {

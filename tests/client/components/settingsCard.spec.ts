@@ -450,8 +450,9 @@ describe('SettingsCard: the model-price mapping block', () => {
     const cells = queryAll(m.container, '.lc-pricemap-table tbody tr td').map(td => text(td))
     assert.equal(cells[0], 'dycp')
     assert.equal(cells[1], 'glm-5.3-flash')
-    // The tokens cell prints total/in/out/cache in millions.
-    assert.equal(cells[5], '3.0 / 2.0 / 1.0 / 0.0')
+    // The tokens cell prints total / cache-hit% / input / output (millions;
+    // whole numbers above 1, and the hit share alone keeps a decimal).
+    assert.equal(cells[6], '3 / 0.0 / 2 / 1')
   })
 
   test('opening the block does not re-render without bound when the seat rebuilds its overrides', async () => {
@@ -666,7 +667,8 @@ describe('SettingsCard: the model-price mapping block', () => {
     await click(query(m.container, '.lc-settings-subhead') as HTMLElement)
     const tr = query(m.container, '.lc-pricemap-table tbody tr') as HTMLElement
     assert.equal(tr.className, 'lc-pricemap-edited')
-    assert.ok(text(tr).includes(DICT_EN['settings.priceMapSource.override']), 'marked as edited')
+    // No source column any more: the edited state IS the revert control's presence.
+    assert.ok(query(tr, '.lc-pricemap-clear'), 'an edited row offers the revert control')
     const clear = query(tr, '.lc-pricemap-clear') as HTMLElement
     assert.ok(clear, 'the revert control is offered')
     await click(clear)

@@ -124,11 +124,40 @@ function branchOf(vendors: Record<string, VendorBranch | undefined>, vendor: str
 }
 
 /**
- * The mechanical target for one local pair: the family's vendor, and inside that
- * vendor the model whose folded id equals the local one's.
+ * The vendors tried BEFORE a model id's own family, in order.
  *
- * A fold can be ambiguous (two ids in one vendor collapse together); the pair
- * then resolves to nothing rather than letting row order pick a rate.
+ * `opencode-go` (OpenCode Go) is a curated aggregator whose model ids are spelled
+ * the way these gateways bill them — `deepseek-v4.1-flash` with the dot,
+ * `glm-5.3-flash` — where the vendor's own branch often is not. It is a pricing
+ * SOURCE, not a claim about who served the request: the rates are the list's.
+ */
+const PREFERRED_VENDORS: readonly string[] = ['opencode-go']
+
+/** The id inside one vendor's branch whose folded spelling equals the wanted one. */
+function modelInBranch(
+  vendors: Record<string, VendorBranch | undefined>,
+  vendor: string,
+  wanted: string,
+): string | null {
+  const branch = branchOf(vendors, vendor)
+  if (branch === undefined) return null
+  let found: string | null = null
+  for (const id of Object.keys(branch)) {
+    if (normalizeModelId(id) !== wanted) continue
+    if (found !== null && found !== id) return null
+    found = id
+  }
+  return found
+}
+
+/**
+ * The mechanical target for one local pair: a preferred aggregator first, then
+ * the family's vendor, each supplying the model whose folded id equals the local
+ * one's.
+ *
+ * A fold can be ambiguous (two ids in one vendor collapse together); that vendor
+ * then settles nothing and the next is tried rather than letting row order pick
+ * a rate.
  * @param model - the local model id.
  * @param vendors - the registry vendors with their model ids.
  * @returns the suggestion, or null when the mechanical pass cannot settle it.
@@ -137,18 +166,15 @@ export function mechanicalTarget(
   model: string,
   vendors: Record<string, VendorBranch | undefined>,
 ): PriceTarget | null {
-  const vendor = vendorForModel(model)
-  if (vendor === undefined) return null
-  const branch = branchOf(vendors, vendor)
-  if (branch === undefined) return null
   const wanted = normalizeModelId(model)
-  let found: string | null = null
-  for (const id of Object.keys(branch)) {
-    if (normalizeModelId(id) !== wanted) continue
-    if (found !== null && found !== id) return null
-    found = id
+  const family = vendorForModel(model)
+  // A vendor that cannot settle the id (absent branch, ambiguous fold) is skipped
+  // for the next; nothing is guessed when all of them refuse.
+  for (const vendor of [...PREFERRED_VENDORS, ...(family === undefined ? [] : [family])]) {
+    const found = modelInBranch(vendors, vendor, wanted)
+    if (found !== null) return { vendor, model: found }
   }
-  return found === null ? null : { vendor, model: found }
+  return null
 }
 
 /**
