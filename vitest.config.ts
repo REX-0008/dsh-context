@@ -76,10 +76,9 @@ export default defineConfig({
         'src/host/compat.ts',
         // Most of the write layer is exercised through the wiring it mounts (host
         // applyOur, the context view's panel) rather than importable pure
-        // functions, so a per-file unit gate does not apply to it. The two pure
-        // mapping modules ARE importable and tests/our/ drives them directly, so
-        // they stay inside the gate — enumerated by directory rather than globbed
-        // away (a later pure module added here joins them).
+        // functions, so a per-file unit gate does not apply to it. The importable
+        // modules tests/our/ drives directly STAY inside the gate — enumerated by
+        // directory rather than globbed away (a later pure module joins them).
         'src/our/agent-events.ts',
         'src/our/agent-face.ts',
         'src/our/index.ts',
@@ -88,7 +87,11 @@ export default defineConfig({
         'src/our/section-registry.ts',
         'src/our/types.ts',
         'src/our/assembler/**',
-        'src/our/panel/**',
+        // The panel is wiring, with ONE exception: the module-definitions file's
+        // content rules are pure, so it stays inside the gate.
+        'src/our/panel/panel-service.ts',
+        'src/our/panel/scope.ts',
+        'src/our/panel/settings.ts',
         'src/our/preset/**',
         'src/our/client/**',
       ],

@@ -22,8 +22,15 @@ import { SEED_MODULES } from '../preset/seeds'
  */
 export const CONTEXT_PANEL_NS = 'context-panel-write'
 
-/** Module patch schema (every field optional; source stays a loose object so it can be extended). */
-const PatchSchema = z.object({
+/**
+ * Module patch schema (every field optional; source stays a loose object so it can
+ * be extended).
+ *
+ * EXPORTED so the module-definitions FILE validates through this same shape: a
+ * second schema would be a second answer to "is this a module", and the file and
+ * the settings it succeeds must agree by construction.
+ */
+export const PatchSchema = z.object({
   text: z.string(),
   channel: z.union([z.const('section'), z.const('context')]),
   order: z.number(),
