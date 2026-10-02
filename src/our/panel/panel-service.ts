@@ -16,7 +16,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { PanelScope } from './scope'
 import type { ContextAssemblerService } from '../assembler/service'
 import type { PromptModulePatch } from '../types'
-import { mergePatch } from './settings'
+import { modulesFileOf } from './data-dir'
+import type { ModulesStore, StoreStatus } from './modules-store'
 
 /** The ctx.contextPanel public contract. */
 export interface ContextPanelService {
@@ -39,13 +40,30 @@ export interface ContextPanelService {
    * @param patch - the patch.
    * @param sessionId - the session id.
    */
-  updateModule(target: 'conversation' | 'agent', name: string, patch: PromptModulePatch, sessionId: string): Promise<void>
+  /**
+   * Patch one module's definition. Synchronous by design: the file write is, and
+   * a caller that awaited a Promise would be waiting on nothing.
+   * @param target - unused; the definitions file is the only destination.
+   * @param name - the module name.
+   * @param patch - the fields to set.
+   * @param sessionId - the session id, for the optional preset mirror.
+   */
+  updateModule(target: 'conversation' | 'agent', name: string, patch: PromptModulePatch, sessionId: string): void
+  /**
+   * The definitions file: where it is and how the last read of it went.
+   * @returns the path and status.
+   */
+  modulesFile(): { path: string; status: StoreStatus }
   /**
    * Drop one module's definition. The set IS the settings' module map, so a
    * removal is a key removal.
    * @param name - the module name.
    */
-  removeModule(name: string): Promise<void>
+  /**
+   * Remove one definition (the panel confirms before dispatching this).
+   * @param name - the module name.
+   */
+  removeModule(name: string): void
   /**
    * Copy the conversation-level overrides over the agent level in full and clear
    * this conversation's overrides (called after the client's confirmation dialog).
@@ -101,6 +119,7 @@ export function createPanelService(
   ctx: Context,
   getScope: () => PanelScope,
   engine: ContextAssemblerService,
+  store: ModulesStore,
 ): ContextPanelService {
   return {
     getSnapshot(sessionId) {
@@ -110,20 +129,22 @@ export function createPanelService(
         modules,
         autoSyncPreset: value.autoSyncPreset,
         dirty: engine.isDirty(sessionId),
+        modulesFile: store.status(),
       }
+    },
+    /** The definitions file's path and last-read state, for the panel's report. */
+    modulesFile() {
+      return { path: modulesFileOf(ctx), status: store.status() }
     },
     /**
      * Patch one module's definition. There is ONE definition per name, so the
      * target is always the settings' module map — the per-conversation copy this
      * used to branch into is gone.
      */
-    async updateModule(_target, name, patch, sessionId) {
-      const scope = getScope()
-      const value = scope.get()
-      const modules: Record<string, PromptModulePatch> = { ...value.modules }
-      modules[name] = mergePatch(modules[name], patch)
-      await scope.update({ modules })
-      if (value.autoSyncPreset) engine.syncToPreset(sessionId)
+    updateModule(_target, name, patch, sessionId) {
+      store.seedIfAbsent()
+      store.upsert(name, patch)
+      if (getScope().get().autoSyncPreset) engine.syncToPreset(sessionId)
     },
     /**
      * Drop one module's definition.
@@ -132,10 +153,8 @@ export function createPanelService(
      * one replaces that default wholesale — so a deleted seed stays deleted, and
      * an upgrade's new seed does not resurrect it.
      */
-    async removeModule(name) {
-      const scope = getScope()
-      const { [name]: _removed, ...modules } = scope.get().modules
-      await scope.update({ modules })
+    removeModule(name) {
+      store.remove(name)
     },
     async setToolRestriction(name, filter) {
       const scope = getScope()
@@ -167,3 +186,16 @@ export function createPanelService(
   }
 }
 
+/**
+ * Build the ctx.contextPanel service.
+ *
+ * The module store is INJECTED rather than opened here: the engine reads the same
+ * definitions, and two stores over one file would mean two caches — a write
+ * through one would be invisible to the other until its mtime check ran, which is
+ * exactly the lag this migration exists to remove.
+ * @param ctx - the plugin root context (the definitions file's path).
+ * @param getScope - returns the settings scope (everything but the definitions).
+ * @param engine - the engine instance.
+ * @param store - the process's single module store.
+ * @returns the service implementation.
+ */

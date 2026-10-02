@@ -26,6 +26,8 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 // not resolvable from every install, so the `compaction/summary` guard below
 // compares by string instead of relying on the merged event table.
 import { CONTEXT_PANEL_NS, CONTEXT_PANEL_SCHEMA, DEFAULT_SETTINGS, readPanel } from './panel/settings'
+import { modulesFileOf } from './panel/data-dir'
+import { openModulesStore } from './panel/modules-store'
 import { createEntryScope, wrapLegacyScope, type LegacySettingsFace, type LegacySettingsScope, type PanelScope, type SettingsFormsFace, type VolatileRef } from './panel/scope'
 import { createPanelService, type ContextPanelService } from './panel/panel-service'
 import type { ContextAssemblerService } from './assembler/service'
@@ -324,9 +326,9 @@ type ActionHandler = (ac: ActionContext) => void | Promise<void>
 
 /** Action table (a new action is one entry). */
 const ACTION_HANDLERS: Record<string, ActionHandler> = {
-  updateModule: ({ service, p, sessionId }) => service.updateModule(p.target as 'conversation' | 'agent', String(p.name), p.patch as never, sessionId),
+  updateModule: ({ service, p, sessionId }) => { service.updateModule(p.target as 'conversation' | 'agent', String(p.name), p.patch as never, sessionId) },
   /** Drop one of OUR modules. The panel confirms before dispatching this. */
-  removeModule: ({ service, p }) => service.removeModule(String(p.name)),
+  removeModule: ({ service, p }) => { service.removeModule(String(p.name)) },
   /**
    * Select one row for pruning, or deselect it.
    *
@@ -440,7 +442,7 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
     // (the settings view reads the module, the panel would read the override) and
     // the two would drift.
     if (engine?.isOwnModuleForSession(sessionId, name) === true) {
-      await service.updateModule('agent', name, { text }, sessionId)
+      service.updateModule('agent', name, { text }, sessionId)
       return
     }
     // Every other kind keeps its real text in someone else's file (a preset's or
@@ -461,7 +463,7 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
     // "restore" means putting the seeded text back.
     const seeded = SEED_MODULES[name]?.text
     if (seeded !== undefined && engine?.isOwnModuleForSession(sessionId, name) === true) {
-      await service.updateModule('agent', name, { text: seeded }, sessionId)
+      service.updateModule('agent', name, { text: seeded }, sessionId)
       return
     }
     const value = scope.get()
@@ -504,7 +506,7 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
     // harness's central table), so for those the weight is held locally as the
     // outgoing order and applied at send time.
     if (engine?.isOwnModuleForSession(sessionId, name) === true) {
-      await service.updateModule('agent', name, { order: p.weight === null || p.weight === undefined ? undefined : Number(p.weight) }, sessionId)
+      service.updateModule('agent', name, { order: p.weight === null || p.weight === undefined ? undefined : Number(p.weight) }, sessionId)
       return
     }
     const value = scope.get()
@@ -603,12 +605,31 @@ export function applyOur(ctx: Context, config: Config | undefined, bridge?: OurH
       // The engine resolves agents on demand (an agent created before this
       // plugin mounted still resolves), so it needs the host context.
       engine.setHostContext(ctx)
-      engine.setConfigReader(() => readPanel(scope.get()))
+      // The module DEFINITIONS live in the profile's data file; the settings value
+      // carries everything else. Composing them here keeps ONE funnel: every
+      // consumer (the engine's module view, the panel's decoration, the assembler)
+      // sees a settings object whose `modules` are the file's, without knowing
+      // there are two carriers at all.
+      const modulesFile = openModulesStore(modulesFileOf(ctx))
+      // MIGRATION, once and only once. The definitions used to live in settings, so
+      // a file that does not exist yet is created from what settings still holds —
+      // the user's definitions are the truth, and the seed only fills a genuinely
+      // first run. The settings value is deliberately NOT cleared: it is what makes
+      // a code rollback keep working. A file that already exists is only loaded, so
+      // this never runs twice.
+      const carried = readPanel(scope.get()).modules
+      const hadCarried = Object.keys(carried).length > 0
+      modulesFile.seedIfAbsent(
+        carried,
+        hadCarried ? 'settings' : undefined,
+        hadCarried ? new Date().toISOString() : undefined,
+      )
+      engine.setConfigReader(() => ({ ...readPanel(scope.get()), modules: modulesFile.current() }))
       // Live section-origin observation (placement order + registering package):
       // the assemble interface carries neither, so they are captured at the
       // registration call instead.
       wiring.sections = createSectionRegistry(ctx)
-      const service = createPanelService(ctx, () => scope, engine)
+      const service = createPanelService(ctx, () => scope, engine, modulesFile)
       const disposeProvide = ctx.provide('contextPanelWrite', service)
       const disposeEngineProvide = ctx.provide('contextAssemblerWrite', engine)
       wiring.scope = scope
