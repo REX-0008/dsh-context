@@ -41,18 +41,11 @@ describe('Config validator (cordis Standard Schema face)', () => {
       // Our insert (PATCHES.md #9): the write layer's settings tree rides the
       // entry config as a volatile field; absent config resolves its empty maps.
       panel: {
-        contextOverrides: {},
-        conversationDisabledContexts: {},
-        conversationDisabledSections: {},
-        conversationOverrides: {},
         modules: {},
         presetDisabledContexts: {},
         presetDisabledSections: {},
         // The price mapping's manual rows start empty: every row is mechanical
         // until the user edits one.
-        sectionOriginals: {},
-        sectionOverrides: {},
-        sectionWeights: {},
         suppressedInjections: {},
         toolRestrictions: {},
       },

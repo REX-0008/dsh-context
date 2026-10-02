@@ -230,15 +230,18 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
     }
   }
 
-  /** Merge the agent-level and conversation-level overrides and sort by order (settings is the single source of module definitions). */
-  private mergedModules(sessionId: string): PromptModule[] {
+  /**
+   * The module set, sorted by order. Settings is the single source of module
+   * definitions: there is ONE definition per name and no per-conversation copy,
+   * so this needs no session to resolve.
+   * @returns every module the settings declare.
+   */
+  private mergedModules(): PromptModule[] {
     const config = this.getConfig()
-    const overrides = config.conversationOverrides[sessionId] ?? {}
-    const names = new Set<string>([...Object.keys(config.modules), ...Object.keys(overrides)])
     const modules: PromptModule[] = []
-    for (const name of names) {
+    for (const name of Object.keys(config.modules)) {
       const def: ModuleDefinition = { name, channel: FALLBACK_CHANNEL, order: 0, enabled: true, text: '' }
-      modules.push(applyPatches(def, config.modules[name], overrides[name]))
+      modules.push(applyPatches(def, config.modules[name]))
     }
     return modules.sort((a, b) => a.order - b.order)
   }
@@ -380,7 +383,7 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
     }
     entry.toolRestrictionsDisposers = []
 
-    const modules = this.mergedModules(agent.id)
+    const modules = this.mergedModules()
     for (const module of modules) {
       if (!module.enabled) continue
       const disposer = module.channel === 'section'
@@ -428,20 +431,20 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
     if (entry === undefined) return false
     const config = this.getConfig()
     const current = digestOf({
-      modules: this.mergedModules(sessionId).filter(m => m.enabled),
+      modules: this.mergedModules().filter(m => m.enabled),
       toolRestrictions: config.toolRestrictions,
     })
     return current !== entry.snapshotDigest
   }
 
   /** @inheritdoc */
-  getModuleView(agent: Agent): PromptModule[] {
-    return this.mergedModules(agent.id)
+  getModuleView(_agent: Agent): PromptModule[] {
+    return this.mergedModules()
   }
 
   /** @inheritdoc */
   getModuleViewForSession(sessionId: string): PromptModule[] {
-    return this.agentFor(sessionId) === undefined ? [] : this.mergedModules(sessionId)
+    return this.agentFor(sessionId) === undefined ? [] : this.mergedModules()
   }
 
   /**
@@ -908,20 +911,14 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
     presetId?: string,
   ): T {
     const config = this.getConfig()
-    // Two disable levels apply here (the deployment level is not ours to
-    // manage): a conversation-level list scoped to this agent, and a
-    // preset-level list shared by every conversation on that preset.
-    const disabled = new Set([
-      ...(config.conversationDisabledSections?.[agentId] ?? []),
-      ...(presetId === undefined ? [] : (config.presetDisabledSections?.[presetId] ?? [])),
-    ])
-    const overrides: Record<string, string | undefined> = config.sectionOverrides?.[agentId] ?? {}
-    const weights: Record<string, number | undefined> = config.sectionWeights?.[agentId] ?? {}
-    const contextsDisabled = new Set([
-      ...(config.conversationDisabledContexts?.[agentId] ?? []),
-      ...(presetId === undefined ? [] : (config.presetDisabledContexts?.[presetId] ?? [])),
-    ])
-    const contextOverrides: Record<string, string | undefined> = config.contextOverrides?.[agentId] ?? {}
+    // ONE level applies here (the deployment level is not ours to manage): the
+    // preset's off list, shared by every conversation running it. Content — the
+    // text overrides and the weights below — is global, so it needs no level.
+    const disabled = new Set(presetId === undefined ? [] : (config.presetDisabledSections?.[presetId] ?? []))
+    const overrides: Record<string, string | undefined> = config.sectionOverrides ?? {}
+    const weights: Record<string, number | undefined> = config.sectionWeights ?? {}
+    const contextsDisabled = new Set(presetId === undefined ? [] : (config.presetDisabledContexts?.[presetId] ?? []))
+    const contextOverrides: Record<string, string | undefined> = config.contextOverrides ?? {}
     if (disabled.size === 0 && Object.keys(overrides).length === 0 && Object.keys(weights).length === 0
       && contextsDisabled.size === 0 && Object.keys(contextOverrides).length === 0) return assembly
     const sections = assembly.sections
@@ -990,7 +987,7 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
   /** @inheritdoc */
   syncToPreset(agentId: string): void {
     try {
-      const modules = this.mergedModules(agentId)
+      const modules = this.mergedModules()
       // write in place into the assembly manifest (this plugin's row config.modules)
       syncToPresetFile(agentId, modules)
       // record: the sidecar plain-JSON snapshot (the earlier implementation's redundant archive)

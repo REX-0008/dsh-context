@@ -57,37 +57,24 @@ export interface PromptModule {
 
 /** The context-panel settings namespace's value (persisted to disk; shared by the engine / panel / preset). */
 export interface ContextPanelSettings {
-  /** The current edit scope. */
-  scope: 'conversation' | 'agent'
   /** The sync-to-preset switch. */
   autoSyncPreset: boolean
   /** The panel's default width (% of window, a software-level UI preference). */
   panelWidth: number
-  /** Agent-level module configuration (the source of truth). */
+  /** The module set: ONE definition per name, the single source of truth. */
   modules: Record<string, PromptModulePatch>
-  /** Conversation-level temporary overrides (one set per conversation). */
-  conversationOverrides: Record<string, Record<string, PromptModulePatch>>
-  /** Agent-level tool restrictions (by tool name → filter). */
+  /** Tool restrictions (by tool name → filter). */
   toolRestrictions: Record<string, { allow?: string[]; deny?: string[] }>
   /**
-   * Sections disabled for every conversation under the same PRESET (the
-   * "preset off" state): keyed by preset id, then section name is membership.
-   *
-   * Three levels exist; this pair covers the two the panel owns:
-   * - the deployment (profile) level is NOT managed here;
-   * - preset level = this field, so every conversation on that preset is affected;
-   * - conversation level = {@link conversationDisabledSections}.
+   * Sections disabled for a preset (the "preset off" state): keyed by preset id,
+   * then section name is membership. Enablement is the ONE thing that keeps a
+   * level — content is global, and a preset decides what its conversations send.
    *
    * Disabling a section only stops its TEXT from being sent; it never unloads the
-   * plugin that registered it.
+   * plugin that registered it. A deployment (profile) level exists but is NOT
+   * managed here.
    */
   presetDisabledSections?: Record<string, string[]>
-  /**
-   * Sections disabled for ONE conversation only: keyed by session id, then
-   * section name is membership. Takes effect for this conversation alone, so a
-   * section can be off here and on in every other conversation.
-   */
-  conversationDisabledSections?: Record<string, string[]>
   /**
    * Injected messages to suppress at the pre-step boundary, keyed by the
    * message's own `source.kind` (the harness's merge-extensible
@@ -101,7 +88,9 @@ export interface ContextPanelSettings {
    * plugin adding content is unaffected, and one rewriting content still applies
    * — only a same-kind contention could conflict, and filtering cannot contend.
    *
-   * Conversation-scoped: an injection is per-step input, not part of a preset.
+   * Conversation-scoped on purpose, and the ONE place that stays so: an
+   * injection is per-step input rather than prompt content, so it has no preset
+   * to belong to.
    */
   suppressedInjections?: Record<string, string[]>
   /**
@@ -113,41 +102,40 @@ export interface ContextPanelSettings {
    * approval policy, subagent delegation), delivered as user-role snapshots.
    */
   presetDisabledContexts?: Record<string, string[]>
-  /** Contexts disabled for one conversation only; see {@link conversationDisabledSections}. */
-  conversationDisabledContexts?: Record<string, string[]>
-  /** Per-agent context text overrides; see {@link sectionOverrides}. */
-  contextOverrides?: Record<string, Record<string, string>>
+  /** GLOBAL context text overrides, by context name; see {@link sectionOverrides}. */
+  contextOverrides?: Record<string, string>
   /**
-   * Per-agent section text overrides, keyed by section name: the "plugin"
-   * source kind is adjusted here instead of in its own file, so a third-party
-   * plugin's prompt can be rewritten without touching that plugin.
+   * Section text overrides, keyed by section name: the "plugin" source kind is
+   * adjusted here instead of in its own file, so a third-party plugin's prompt
+   * can be rewritten without touching that plugin.
+   *
+   * GLOBAL: a section's text is prompt content, and content has no level — the
+   * same text is delivered to every conversation. A per-conversation copy was the
+   * complexity this model deliberately dropped.
    */
-  sectionOverrides?: Record<string, Record<string, string>>
+  sectionOverrides?: Record<string, string>
   /**
-   * Per-agent section weights, keyed by section name. Editing a number
-   * re-orders the prompt; sections without a weight keep their position.
+   * Section weights, keyed by section name. Editing a number re-orders the
+   * prompt; sections without a weight keep their position. Global for the same
+   * reason as {@link sectionOverrides}.
    */
-  sectionWeights?: Record<string, Record<string, number>>
+  sectionWeights?: Record<string, number>
   /**
    * What an overridden section's original text looked like when it was edited,
-   * one backup per section. When the plugin later changes that original, the
-   * two differ and the panel offers a comparison.
+   * one backup per section. When the plugin later changes that original, the two
+   * differ and the panel offers a comparison.
    */
-  sectionOriginals?: Record<string, Record<string, string>>
+  sectionOriginals?: Record<string, string>
 }
 
 /** Empty configuration (the fallback while settings is not ready). */
 export const EMPTY_CONFIG: ContextPanelSettings = {
-  scope: 'agent',
   autoSyncPreset: false,
   panelWidth: 720,
   modules: {},
-  conversationOverrides: {},
   toolRestrictions: {},
   presetDisabledSections: {},
-  conversationDisabledSections: {},
   presetDisabledContexts: {},
-  conversationDisabledContexts: {},
   suppressedInjections: {},
   contextOverrides: {},
   sectionOverrides: {},

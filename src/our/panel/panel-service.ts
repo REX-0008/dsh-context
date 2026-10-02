@@ -28,14 +28,13 @@ export interface ContextPanelService {
    */
   getSnapshot(sessionId: string): {
     modules: Array<{ name: string; channel: 'section' | 'context'; order: number; enabled: boolean; text: string }>
-    scope: 'conversation' | 'agent'
     autoSyncPreset: boolean
     dirty: boolean
   }
   /**
-   * Write a module patch at the given scope (conversation → the conversation
-   * override; agent → the source of truth).
-   * @param target - the level to write to.
+   * Patch one module's definition. One definition per name, so there is no level
+   * to pick; `target` is kept for the action payload's shape only.
+   * @param target - unused; the settings' module map is the only destination.
    * @param name - the module name.
    * @param patch - the patch.
    * @param sessionId - the session id.
@@ -46,7 +45,6 @@ export interface ContextPanelService {
    * this conversation's overrides (called after the client's confirmation dialog).
    * @param sessionId - the session id.
    */
-  syncConversationToAgent(sessionId: string): Promise<void>
   /**
    * Set one tool's restriction (disabled → { deny:[name] }; enabled → delete it).
    * @param name - the tool name.
@@ -66,7 +64,6 @@ export interface ContextPanelService {
    */
   applyChanges(sessionId: string): void
   /** Switch the edit scope (conversation → agent discards the conversation overrides; the client confirms first). */
-  setScope(scope: 'conversation' | 'agent'): Promise<void>
   /** Toggle the auto-sync-to-preset switch. */
   setAutoSyncPreset(b: boolean): Promise<void>
   /**
@@ -105,37 +102,21 @@ export function createPanelService(
       const modules = engine.getModuleViewForSession(sessionId) as Array<{ name: string; channel: 'section' | 'context'; order: number; enabled: boolean; text: string }>
       return {
         modules,
-        scope: value.scope,
         autoSyncPreset: value.autoSyncPreset,
         dirty: engine.isDirty(sessionId),
       }
     },
-    async updateModule(target, name, patch, sessionId) {
+    /**
+     * Patch one module's definition. There is ONE definition per name, so the
+     * target is always the settings' module map — the per-conversation copy this
+     * used to branch into is gone.
+     */
+    async updateModule(_target, name, patch, sessionId) {
       const scope = getScope()
       const value = scope.get()
-      if (target === 'conversation') {
-        const overrides: Record<string, Record<string, PromptModulePatch>> = { ...value.conversationOverrides }
-        const sessionOverrides: Record<string, PromptModulePatch> = { ...(overrides[sessionId] ?? {}) }
-        sessionOverrides[name] = mergePatch(sessionOverrides[name], patch)
-        overrides[sessionId] = sessionOverrides
-        await scope.update({ conversationOverrides: overrides })
-      } else {
-        const modules: Record<string, PromptModulePatch> = { ...value.modules }
-        modules[name] = mergePatch(modules[name], patch)
-        await scope.update({ modules })
-        if (value.autoSyncPreset) engine.syncToPreset(sessionId)
-      }
-    },
-    async syncConversationToAgent(sessionId) {
-      const scope = getScope()
-      const value = scope.get()
-      const sessionOverrides = value.conversationOverrides[sessionId] ?? {}
       const modules: Record<string, PromptModulePatch> = { ...value.modules }
-      for (const [name, patch] of Object.entries(sessionOverrides)) {
-        modules[name] = mergePatch(modules[name], patch)
-      }
-      const { [sessionId]: _removed, ...rest } = value.conversationOverrides
-      await scope.update({ modules, conversationOverrides: rest })
+      modules[name] = mergePatch(modules[name], patch)
+      await scope.update({ modules })
       if (value.autoSyncPreset) engine.syncToPreset(sessionId)
     },
     async setToolRestriction(name, filter) {
@@ -152,9 +133,6 @@ export function createPanelService(
     },
     applyChanges(sessionId) {
       engine.markPending(sessionId)
-    },
-    async setScope(scope) {
-      await getScope().update({ scope })
     },
     async setAutoSyncPreset(b) {
       await getScope().update({ autoSyncPreset: b })

@@ -38,16 +38,12 @@ const PatchSchema = z.object({
  * has its own range.
  */
 export const DEFAULT_SETTINGS: ContextPanelSettings = {
-  scope: 'agent',
   autoSyncPreset: false,
   panelWidth: 720,
   modules: { ...SEED_MODULES },
-  conversationOverrides: {},
   toolRestrictions: {},
   presetDisabledSections: {},
-  conversationDisabledSections: {},
   presetDisabledContexts: {},
-  conversationDisabledContexts: {},
   contextOverrides: {},
   suppressedInjections: {},
 }
@@ -55,21 +51,22 @@ export const DEFAULT_SETTINGS: ContextPanelSettings = {
 
 /** The field set both carriers share. */
 const FIELDS = {
-  scope: z.union([z.const('conversation'), z.const('agent')]),
   autoSyncPreset: z.boolean(),
   panelWidth: z.number(),
   modules: z.dict(PatchSchema),
-  conversationOverrides: z.dict(z.dict(PatchSchema)),
   toolRestrictions: z.dict(z.object({ allow: z.array(z.string()), deny: z.array(z.string()) })),
+  // The ONE level this layer owns: a preset's off lists.
   presetDisabledSections: z.dict(z.array(z.string())),
-  conversationDisabledSections: z.dict(z.array(z.string())),
   presetDisabledContexts: z.dict(z.array(z.string())),
-  conversationDisabledContexts: z.dict(z.array(z.string())),
-  contextOverrides: z.dict(z.dict(z.string())),
   suppressedInjections: z.dict(z.array(z.string())),
-  sectionOverrides: z.dict(z.dict(z.string())),
-  sectionWeights: z.dict(z.dict(z.number())),
-  sectionOriginals: z.dict(z.dict(z.string())),
+  // Content is global: one value per name, no per-conversation dimension. The
+  // nested alternative is the PRE-MIGRATION shape, still accepted so a stored
+  // document from before the change resolves instead of being dropped; readPanel
+  // folds it into the flat one.
+  contextOverrides: contentMap(z.string()),
+  sectionOverrides: contentMap(z.string()),
+  sectionWeights: contentMap(z.number()),
+  sectionOriginals: contentMap(z.string()),
 }
 
 /**
@@ -88,6 +85,59 @@ export interface PriceMapEntry { vendor: string; model: string }
 // Annotated, not inferred: the declaration emit cannot name the Dict type this
 // would otherwise infer to (TS2883), and the same pattern the panel roots use.
 export const PRICE_MAP_SCHEMA: z<Record<string, PriceMapEntry>> = z.dict(z.object({ vendor: z.string(), model: z.string() }))
+
+/**
+ * One content map, ACCEPTING the pre-migration nested shape while TYPING as the
+ * flat one.
+ *
+ * The cast is the point: the schema has to let an old document resolve, but
+ * every consumer reads the folded value `readPanel` returns, so the flat type is
+ * the only one the code should ever see. Losing validation here is acceptable —
+ * `foldMap` ignores anything that is not a map.
+ * @param inner - the value schema of one entry.
+ * @returns the map schema, typed flat.
+ */
+function contentMap<T>(inner: z<T>): z<Record<string, T>> {
+  return z.union([z.dict(inner), z.dict(z.dict(inner))]) as unknown as z<Record<string, T>>
+}
+
+/**
+ * Fold one content map to its GLOBAL form, whichever shape it has.
+ *
+ * A document stored before the per-conversation dimension was dropped carries
+ * `{ sessionId: { name: value } }`; the last session key wins per name, which is
+ * what "merge the experiments up" means. A flat map passes through.
+ * @param value - the stored field.
+ * @returns the flat map (never a nested one).
+ */
+function foldMap<T>(value: unknown): Record<string, T> {
+  const out: Record<string, T> = {}
+  if (value === null || typeof value !== 'object') return out
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (entry !== null && typeof entry === 'object') Object.assign(out, entry as Record<string, T>)
+    else out[key] = entry as T
+  }
+  return out
+}
+
+/**
+ * The settings as this layer consumes them: every content map global, whatever
+ * shape the stored document holds.
+ *
+ * Applied wherever the settings are read — the state route, the actions and the
+ * engine's config reader — so no consumer has to know the pre-migration shape.
+ * @param value - the resolved settings.
+ * @returns the same settings with the content maps folded flat.
+ */
+export function readPanel(value: ContextPanelSettings): ContextPanelSettings {
+  return {
+    ...value,
+    contextOverrides: foldMap<string>(value.contextOverrides),
+    sectionOverrides: foldMap<string>(value.sectionOverrides),
+    sectionWeights: foldMap<number>(value.sectionWeights),
+    sectionOriginals: foldMap<string>(value.sectionOriginals),
+  }
+}
 
 /** Namespace schema (schemastery primitives: z.dict replaces zod's z.record; fields are optional by default). */
 export const CONTEXT_PANEL_SCHEMA: z<ContextPanelSettings> = z.object(FIELDS)

@@ -25,7 +25,7 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 // No compaction type import: the capability is optional and its package name is
 // not resolvable from every install, so the `compaction/summary` guard below
 // compares by string instead of relying on the merged event table.
-import { CONTEXT_PANEL_NS, CONTEXT_PANEL_SCHEMA, DEFAULT_SETTINGS } from './panel/settings'
+import { CONTEXT_PANEL_NS, CONTEXT_PANEL_SCHEMA, DEFAULT_SETTINGS, readPanel } from './panel/settings'
 import { createEntryScope, wrapLegacyScope, type LegacySettingsFace, type LegacySettingsScope, type PanelScope, type SettingsFormsFace, type VolatileRef } from './panel/scope'
 import { createPanelService, type ContextPanelService } from './panel/panel-service'
 import type { ContextAssemblerService } from './assembler/service'
@@ -173,7 +173,7 @@ function stateHandler(wiring: Wiring) {
       // rendered system message is already joined into one string before it is
       // logged, so the split is read in-process from systemPrompt.assemble()).
       const sections = engine === undefined ? null : await engine.assembleSectionsForSession(sessionId)
-      const value = scope === undefined ? null : scope.get()
+      const value = scope === undefined ? null : readPanel(scope.get())
       // Decorate each section for the panel: source kind, whether it is
       // currently suppressed, whether its text was edited, and — when the
       // plugin has since changed the original — that the backup no longer
@@ -181,13 +181,13 @@ function stateHandler(wiring: Wiring) {
       // Two disable levels the panel owns: this conversation, and the preset it
       // runs on (a section off for a preset is off in every conversation using
       // it). The deployment level exists but is deliberately not managed here.
-      const conversationOff = new Set(value?.conversationDisabledSections?.[sessionId] ?? [])
-      // The preset NAME (what the panel shows) and the per-preset off list.
+      // The preset NAME (what the panel shows) and its off list — the ONE level
+      // this layer owns. Content (text and weights) is global and needs none.
       const presetId = engine === undefined ? undefined : engine.presetIdForSession(sessionId)
       const presetOff = new Set(presetId === undefined ? [] : (value?.presetDisabledSections?.[presetId] ?? []))
-      const overrides: Record<string, string | undefined> = value?.sectionOverrides?.[sessionId] ?? {}
-      const weights: Record<string, number | undefined> = value?.sectionWeights?.[sessionId] ?? {}
-      const originals: Record<string, string | undefined> = value?.sectionOriginals?.[sessionId] ?? {}
+      const overrides: Record<string, string | undefined> = value?.sectionOverrides ?? {}
+      const weights: Record<string, number | undefined> = value?.sectionWeights ?? {}
+      const originals: Record<string, string | undefined> = value?.sectionOriginals ?? {}
       const moduleView = engine === undefined ? [] : engine.getModuleViewForSession(sessionId)
       const ownModules = new Map(moduleView.map(module => [module.name, module]))
       // The registry read is the widest source, so it is fetched once per request
@@ -236,10 +236,8 @@ function stateHandler(wiring: Wiring) {
           kind: ownModules.has(section.name) ? 'config' as const : inferKind(section.name),
           // Tri-state, naming which level switched it off so the panel can say
           // so rather than showing a bare "off".
-          enabled: !conversationOff.has(section.name) && !presetOff.has(section.name),
-          ...(presetOff.has(section.name)
-            ? { disabledAt: 'preset' as const }
-            : conversationOff.has(section.name) ? { disabledAt: 'conversation' as const } : {}),
+          enabled: !presetOff.has(section.name),
+          ...(presetOff.has(section.name) ? { disabledAt: 'preset' as const } : {}),
           edited,
           originalChanged,
           // Placement/owner resolved above: observed live, filled from the
@@ -259,7 +257,7 @@ function stateHandler(wiring: Wiring) {
       res.end(JSON.stringify({
         ok: true,
         value: {
-          settings: scope === undefined ? null : scope.get(),
+          settings: scope === undefined ? null : readPanel(scope.get()),
           dirty: engine === undefined ? false : engine.isDirty(sessionId),
           presetEntries: engine === undefined ? [] : engine.presetEntriesForSession(sessionId),
           systemSections,
@@ -327,7 +325,6 @@ type ActionHandler = (ac: ActionContext) => void | Promise<void>
 /** Action table (a new action is one entry). */
 const ACTION_HANDLERS: Record<string, ActionHandler> = {
   updateModule: ({ service, p, sessionId }) => service.updateModule(p.target as 'conversation' | 'agent', String(p.name), p.patch as never, sessionId),
-  sync: ({ service, sessionId }) => service.syncConversationToAgent(sessionId),
   /**
    * Select one row for pruning, or deselect it.
    *
@@ -365,22 +362,22 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
    * Contexts take the same two decisions as sections but are keyed separately,
    * so they need their own action rather than sharing `setSectionLevel`.
    */
-  setContextLevel: ({ scope, p, sessionId }) => {
+  setContextLevel: ({ scope, p, sessionId, engine }) => {
     const name = String(p.name)
-    const all = { ...(scope.get().conversationDisabledContexts ?? {}) }
-    const mine = new Set(all[sessionId] ?? [])
+    const presetId = engine?.presetIdForSession(sessionId)
+    if (presetId === undefined) return
+    const all = { ...(readPanel(scope.get()).presetDisabledContexts ?? {}) }
+    const mine = new Set(all[presetId] ?? [])
     if (p.off === true) mine.add(name)
     else mine.delete(name)
-    all[sessionId] = [...mine]
-    return scope.update({ conversationDisabledContexts: all })
+    all[presetId] = [...mine]
+    return scope.update({ presetDisabledContexts: all })
   },
-  /** Replace one runtime context's text for this conversation. */
-  setContextText: async ({ scope, p, sessionId }) => {
+  /** Replace one runtime context's text, globally (content has no level). */
+  setContextText: async ({ scope, p }) => {
     const name = String(p.name)
-    const all = { ...(scope.get().contextOverrides ?? {}) }
-    const mine = { ...(all[sessionId] ?? {}) }
-    mine[name] = typeof p.text === 'string' ? p.text : ''
-    all[sessionId] = mine
+    const all = { ...(readPanel(scope.get()).contextOverrides ?? {}) }
+    all[name] = typeof p.text === 'string' ? p.text : ''
     await scope.update({ contextOverrides: all })
   },
   /**
@@ -392,7 +389,7 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
    */
   setInjectionSuppressed: ({ scope, p, sessionId }) => {
     const kind = String(p.kind)
-    const all = { ...(scope.get().suppressedInjections ?? {}) }
+    const all = { ...(readPanel(scope.get()).suppressedInjections ?? {}) }
     const mine = new Set(all[sessionId] ?? [])
     if (p.off === true) mine.add(kind)
     else mine.delete(kind)
@@ -400,7 +397,6 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
     return scope.update({ suppressedInjections: all })
   },
   setToolRestriction: ({ service, p }) => service.setToolRestriction(String(p.name), p.filter as never),
-  setScope: ({ service, p }) => service.setScope(p.scope as 'conversation' | 'agent'),
   setAutoSyncPreset: ({ service, p }) => service.setAutoSyncPreset(p.enabled === true),
   setPanelWidth: ({ scope, p }) => scope.update({ panelWidth: typeof p.width === 'number' ? p.width : 720 }),
   /**
@@ -413,17 +409,11 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
    */
   setSectionLevel: ({ scope, p, sessionId, engine }) => {
     const name = typeof p.name === 'string' ? p.name : ''
-    const level = p.level === 'preset' ? 'preset' : 'conversation'
     const off = p.off === true
+    // ONE level: a section is enabled or disabled FOR A PRESET, so every
+    // conversation running it agrees. There is no per-conversation switch to
+    // pick, which is why `p.level` is no longer read.
     const value = scope.get()
-    if (level === 'conversation') {
-      const all = { ...(value.conversationDisabledSections ?? {}) }
-      const mine = new Set(all[sessionId] ?? [])
-      if (off) mine.add(name)
-      else mine.delete(name)
-      all[sessionId] = [...mine]
-      return scope.update({ conversationDisabledSections: all })
-    }
     const presetId = engine?.presetIdForSession(sessionId)
     // Without a preset there is nothing to scope a preset-level switch to.
     if (presetId === undefined) return
@@ -455,15 +445,11 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
     // a plugin's), so the edit is held locally and applied on the way out.
     const value = scope.get()
     const overrides = { ...(value.sectionOverrides ?? {}) }
-    const session = { ...(overrides[sessionId] ?? {}) }
-    session[name] = text
-    overrides[sessionId] = session
+    overrides[name] = text
     const originals = { ...(value.sectionOriginals ?? {}) }
-    const sessionOriginals = { ...(originals[sessionId] ?? {}) }
-    if (typeof p.original === 'string' && !Object.hasOwn(sessionOriginals, name)) {
-      sessionOriginals[name] = p.original
+    if (typeof p.original === 'string' && !Object.hasOwn(originals, name)) {
+      originals[name] = p.original
     }
-    originals[sessionId] = sessionOriginals
     await scope.update({ sectionOverrides: overrides, sectionOriginals: originals })
   },
   /** Drop an edit: the plugin's own text is used again (its backup goes too). */
@@ -477,12 +463,8 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
       return
     }
     const value = scope.get()
-    const overrides = { ...(value.sectionOverrides ?? {}) }
-    const { [name]: _override, ...session } = overrides[sessionId] ?? {}
-    overrides[sessionId] = session
-    const originals = { ...(value.sectionOriginals ?? {}) }
-    const { [name]: _original, ...sessionOriginals } = originals[sessionId] ?? {}
-    originals[sessionId] = sessionOriginals
+    const { [name]: _override, ...overrides } = value.sectionOverrides ?? {}
+    const { [name]: _original, ...originals } = value.sectionOriginals ?? {}
     await scope.update({ sectionOverrides: overrides, sectionOriginals: originals })
   },
   /**
@@ -492,7 +474,7 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
    */
   writeBackPreset: ({ scope, p, sessionId, engine }) => {
     const name = String(p.name)
-    const text = scope.get().sectionOverrides?.[sessionId]?.[name]
+    const text = readPanel(scope.get()).sectionOverrides?.[name]
     if (typeof text !== 'string' || engine === undefined) return
     // The engine owns the preset file edit (line-level, so the rest of the
     // composition survives).
@@ -503,14 +485,12 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
    * user's edit: the backup is replaced, so the "original changed" reminder
    * clears while the user's version stays in force.
    */
-  refreshSectionBaseline: async ({ scope, p, sessionId }) => {
+  refreshSectionBaseline: async ({ scope, p }) => {
     const name = String(p.name)
     const original = typeof p.original === 'string' ? p.original : ''
     const value = scope.get()
     const originals = { ...(value.sectionOriginals ?? {}) }
-    const sessionOriginals = { ...(originals[sessionId] ?? {}) }
-    sessionOriginals[name] = original
-    originals[sessionId] = sessionOriginals
+    originals[name] = original
     await scope.update({ sectionOriginals: originals })
   },
   /** Set (or clear, with null) one section's ordering weight. */
@@ -527,25 +507,18 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
     }
     const value = scope.get()
     const weights = { ...(value.sectionWeights ?? {}) }
-    let session = { ...(weights[sessionId] ?? {}) }
     if (p.weight === null || p.weight === undefined) {
-      const { [name]: _removed, ...rest } = session
-      session = rest
-    } else {
-      session[name] = Number(p.weight)
+      const { [name]: _cleared, ...rest } = weights
+      await scope.update({ sectionWeights: rest })
+      return
     }
-    weights[sessionId] = session
+    weights[name] = Number(p.weight)
     await scope.update({ sectionWeights: weights })
   },
   apply: ({ service, sessionId }) =>{  service.applyChanges(sessionId) },
   editSkillDirs: ({ service, p, sessionId }) =>{  service.editSkillDirs((p.dirs as string[] | undefined) ?? [], sessionId) },
   editBaseline: ({ service, p, sessionId }) => {
     service.editBaselineConfig((p.patch as Record<string, unknown> | undefined) ?? {}, sessionId)
-  },
-  clearOverrides: ({ scope, sessionId }) => {
-    const value = scope.get()
-    const { [sessionId]: _removed, ...rest }: ContextPanelSettings['conversationOverrides'] = value.conversationOverrides
-    return scope.update({ conversationOverrides: rest })
   },
 }
 
@@ -628,7 +601,7 @@ export function applyOur(ctx: Context, config: Config | undefined, bridge?: OurH
       // The engine resolves agents on demand (an agent created before this
       // plugin mounted still resolves), so it needs the host context.
       engine.setHostContext(ctx)
-      engine.setConfigReader(() => scope.get())
+      engine.setConfigReader(() => readPanel(scope.get()))
       // Live section-origin observation (placement order + registering package):
       // the assemble interface carries neither, so they are captured at the
       // registration call instead.
