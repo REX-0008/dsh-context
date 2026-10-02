@@ -57,8 +57,6 @@ export interface PromptModule {
 
 /** The context-panel settings namespace's value (persisted to disk; shared by the engine / panel / preset). */
 export interface ContextPanelSettings {
-  /** The sync-to-preset switch. */
-  autoSyncPreset: boolean
   /** The panel's default width (% of window, a software-level UI preference). */
   panelWidth: number
   /** The module set: ONE definition per name, the single source of truth. */
@@ -130,7 +128,6 @@ export interface ContextPanelSettings {
 
 /** Empty configuration (the fallback while settings is not ready). */
 export const EMPTY_CONFIG: ContextPanelSettings = {
-  autoSyncPreset: false,
   panelWidth: 720,
   modules: {},
   toolRestrictions: {},

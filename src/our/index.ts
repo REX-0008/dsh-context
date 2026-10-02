@@ -401,7 +401,6 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
     return scope.update({ suppressedInjections: all })
   },
   setToolRestriction: ({ service, p }) => service.setToolRestriction(String(p.name), p.filter as never),
-  setAutoSyncPreset: ({ service, p }) => service.setAutoSyncPreset(p.enabled === true),
   setPanelWidth: ({ scope, p }) => scope.update({ panelWidth: typeof p.width === 'number' ? p.width : 720 }),
   /**
    * Set one section's state at ONE level.

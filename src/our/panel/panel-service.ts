@@ -29,7 +29,6 @@ export interface ContextPanelService {
    */
   getSnapshot(sessionId: string): {
     modules: Array<{ name: string; channel: 'section' | 'context'; order: number; enabled: boolean; text: string }>
-    autoSyncPreset: boolean
     dirty: boolean
   }
   /**
@@ -89,7 +88,6 @@ export interface ContextPanelService {
   applyChanges(sessionId: string): void
   /** Switch the edit scope (conversation → agent discards the conversation overrides; the client confirms first). */
   /** Toggle the auto-sync-to-preset switch. */
-  setAutoSyncPreset(b: boolean): Promise<void>
   /**
    * Record the skill directory settings (modify in place the skill-filesystem row's
    * config in the agent's preset; effective for a new generation).
@@ -123,11 +121,9 @@ export function createPanelService(
 ): ContextPanelService {
   return {
     getSnapshot(sessionId) {
-      const value = getScope().get()
       const modules = engine.getModuleViewForSession(sessionId) as Array<{ name: string; channel: 'section' | 'context'; order: number; enabled: boolean; text: string }>
       return {
         modules,
-        autoSyncPreset: value.autoSyncPreset,
         dirty: engine.isDirty(sessionId),
         modulesFile: store.status(),
       }
@@ -169,9 +165,6 @@ export function createPanelService(
     },
     applyChanges(sessionId) {
       engine.markPending(sessionId)
-    },
-    async setAutoSyncPreset(b) {
-      await getScope().update({ autoSyncPreset: b })
     },
     editSkillDirs(dirs, sessionId) {
       // modify in place the skill-filesystem row's config in the agent's preset (implemented by the engine; effective for a new generation)

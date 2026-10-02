@@ -45,7 +45,6 @@ export const PatchSchema = z.object({
  * has its own range.
  */
 export const DEFAULT_SETTINGS: ContextPanelSettings = {
-  autoSyncPreset: false,
   panelWidth: 720,
   modules: { ...SEED_MODULES },
   toolRestrictions: {},
@@ -58,7 +57,6 @@ export const DEFAULT_SETTINGS: ContextPanelSettings = {
 
 /** The field set both carriers share. */
 const FIELDS = {
-  autoSyncPreset: z.boolean(),
   panelWidth: z.number(),
   modules: z.dict(PatchSchema),
   toolRestrictions: z.dict(z.object({ allow: z.array(z.string()), deny: z.array(z.string()) })),
