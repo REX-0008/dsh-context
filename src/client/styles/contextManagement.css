@@ -32,6 +32,19 @@
   background: color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, transparent);
 }
 
+/* The weight's revert control: framed like the tag beside it — the pair reads as
+   one cell — and it takes the edited tint on hover, the colour of what it undoes. */
+.lc-br-sect-revert {
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  padding: 0 5px;
+}
+
+.lc-br-sect-revert:hover {
+  color: var(--dsw-alias-brand-primary);
+  border-color: color-mix(in srgb, var(--dsw-alias-brand-primary) 45%, transparent);
+}
+
 /* A weight whose built-in table entry disagrees with the live order: the table
    is stale, so the figure is flagged rather than silently trusted. */
 .lc-br-sect-stale {

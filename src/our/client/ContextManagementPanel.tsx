@@ -42,6 +42,17 @@ const KIND_HINT_KEY: Record<SectionKind, string> = {
   plugin: 'our.kindHint.plugin',
 }
 
+/**
+ * One section's effective placement: its weight when the user set one, else the
+ * order it reports. A section whose placement nothing knows sorts last rather
+ * than jumping to the top on a missing value.
+ * @param section - the section row.
+ * @returns its placement, or Infinity when unknown.
+ */
+function placeOf(section: SystemSectionInfo): number {
+  return section.weight ?? section.order ?? Number.POSITIVE_INFINITY
+}
+
 /** Estimated size, matching the host's fixed-density heuristic. */
 function sizeOf(text: string): number {
   return Math.ceil(text.length / 4) + 4
@@ -159,12 +170,16 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
     // The row filter: matches a section's name, its source plugin, and its text,
     // which is what makes a long section list navigable.
     const needle = query.trim().toLowerCase()
-    const shown = needle === ''
+    const listed = needle === ''
       ? sections
       : sections.filter(section =>
         section.name.toLowerCase().includes(needle)
         || (section.plugin ?? '').toLowerCase().includes(needle)
         || section.text.toLowerCase().includes(needle))
+    // Sorted by the effective weight so an edit reorders the list AT ONCE: the
+    // delivered order is the last ASSEMBLY's snapshot, which only moves on the
+    // next turn (engine.assembleSectionsForSession).
+    const shown = listed.slice().sort((a, b) => placeOf(a) - placeOf(b))
     return (
       <>
         {atPastStep ? (
@@ -192,8 +207,9 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
         <div className="lc-our-sections">
           {(atPastStep ? [] : shown).map((section) => {
             const open = editing === section.name
-            const weightEdited = section.weight !== undefined
-            const weightValue = weightEdited ? section.weight : section.order
+            const weightEdited = section.weightEdited
+            // The weight when one was set, else the placement the section reports.
+            const weightValue = section.weight ?? section.order
 
             // The expanded body: upstream's own chrome (head + line count + raw /
             // Markdown switch + copy) with our actions in the same head group,
@@ -304,6 +320,18 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
                     {weightValue === undefined ? '—' : String(weightValue)}
                   </button>
                 )}
+                {/* Only a changed weight offers this: an untouched row has nothing
+                    to put back. A null weight clears the value the row is holding. */}
+                {weightEdited && weightOpen !== section.name ? (
+                  <button type="button" className="lc-br-tag lc-br-sect-revert"
+                    title={t('our.weightTip.revert')}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      void dispatch('setSectionWeight', { name: section.name, weight: null })
+                    }}>
+                    ↺
+                  </button>
+                ) : null}
                 {/* Three states, because two disable levels exist (the deployment
                 level is not managed here). Clicking cycles enabled → off-here →
                 off-for-preset → enabled, and the tooltip names the current level. */}

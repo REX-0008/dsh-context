@@ -208,6 +208,16 @@ function stateHandler(wiring: Wiring) {
         const edited = own !== undefined
           ? seeded !== undefined && own.text !== seeded
           : overrides[section.name] !== undefined
+        // The module view carries the LIVE order (from settings), while the
+        // registry's is the order captured at registration — an edit does not
+        // move it. Reporting the registry's is why a changed weight looked
+        // unapplied until the next assembly picked it up.
+        const liveOrder = own?.order
+        const effectiveOrder = liveOrder ?? origin.order
+        const seededOrder = SEED_MODULES[section.name]?.order
+        const weightEdited = own !== undefined
+          ? liveOrder !== undefined && liveOrder !== seededOrder
+          : weights[section.name] !== undefined
         const backup = originals[section.name]
         // "Changed" compares the ONE stored backup against the plugin's CURRENT
         // text: the backup is what the text looked like when it was edited, so a
@@ -235,13 +245,14 @@ function stateHandler(wiring: Wiring) {
           // Placement/owner resolved above: observed live, filled from the
           // generated table, or unknown. `staleTable` means the table disagrees
           // with the live order, i.e. the table needs regenerating.
-          ...(origin.order === undefined ? {} : { order: origin.order }),
+          ...(effectiveOrder === undefined ? {} : { order: effectiveOrder }),
           ...(origin.plugin === undefined ? {} : { plugin: origin.plugin }),
           originFrom: origin.from,
           staleTable: origin.staleTable,
           /** The plugin's current text, delivered only for the comparison. */
           ...(originalChanged ? { originalText: section.text } : {}),
           weight: weights[section.name],
+          weightEdited,
         }
       })
       res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })

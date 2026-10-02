@@ -39,6 +39,12 @@ export interface SystemSectionInfo {
   enabled: boolean
   /** True when the text has been edited by the user. */
   edited: boolean
+  /**
+   * True when the user has set this section's weight. Separate from `edited`:
+   * the text compares against the seed, the weight against the seeded order, and
+   * a row can be one without the other.
+   */
+  weightEdited: boolean
   /** True when the plugin's original has changed since the edit (offers a comparison). */
   originalChanged: boolean
   /** The plugin's current text; present only while `originalChanged` (for the comparison). */
