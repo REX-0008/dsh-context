@@ -57,7 +57,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function entryOf(value: unknown): PromptModulePatch | undefined {
   if (!isRecord(value)) return undefined
   try {
-    return PatchSchema(value) as PromptModulePatch
+    return PatchSchema(value)
   } catch {
     return undefined
   }
