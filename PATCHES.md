@@ -15,6 +15,53 @@ that is a signal to reconsider the approach rather than grow this file.
 
 Baseline: upstream `v0.6.x` (merge commit `98073b6`, upstream/main `31ae13a`).
 
+## 0.1 The module definitions moved OUT of the settings document
+
+The modules (name / text / channel / order / enabled) no longer live in settings.
+They are one JSON file in the active profile's data directory:
+
+    <profile>/data/context-panel-write/modules.json
+
+Why it moved: one truth had TWO carriers — a 0.1.x settings namespace and a 0.2.x
+entry-config volatile field — and the value could not be opened, diffed or backed
+up by hand. The file is generation-independent, so the module path no longer
+diverges per dsh release.
+
+Where the profile comes from, and why not the obvious alternatives:
+
+- `ctx.get('profileContext').dir` is the host's own answer, provided by
+  `apps/cli/src/profile-boot.ts` BEFORE any config-tree entry is mounted, so
+  `apply` can already read it (`src/our/panel/data-dir.ts`);
+- `process.env.DSH_PROFILE` + `<DSH_HOME>/profiles/<name>/data` is the FALLBACK,
+  not the primary source: the harness sets that variable for the MODEL's shell
+  calls, not for the plugin process;
+- `import.meta.url` is unusable here: Node resolves symlinks, and a profile-installed
+  plugin is reached through the profile's `node_modules` link, so it would resolve
+  into its own checkout;
+- no profile name is hard-coded: the one earlier releases assumed does not exist on
+  the desktop.
+
+The file, not the seed, is the truth once it exists: `SEED_MODULES` fills a FIRST
+run only, so a deleted seed stays deleted AND a later release's new seed does not
+appear on an existing install. The settings value is deliberately left in place
+during the one-time migration — it is what keeps a code rollback working.
+
+Everything else stays in settings: the preset switches
+(`presetDisabledSections/Presets`), the section overrides and weights
+(`sectionOverrides/Weights/Originals`), `contextOverrides`,
+`suppressedInjections`, `toolRestrictions` and `panelWidth` — they are either
+another section's override or a panel preference, and mixing them into the
+definitions file would put two kinds of thing in one bag.
+
+The preset-side copies are GONE with it: the in-place edit of the plugin row in
+`.agent-presets/<id>/agent.cordis.yml` and the `context-modules.json` sidecar
+beside it had no reader (their own doc said so), so they were a third answer to the
+same question. `writeSectionBackToPreset` remains: that is the other direction —
+persisting a PRESET-owned section's text into the preset, which is a file the user
+owns.
+
+---
+
 ## 0. Pricing: upstream's models.dev registry, not a local table
 
 An earlier local change replaced upstream's price source with a hand-maintained
