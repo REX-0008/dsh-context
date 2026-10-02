@@ -326,7 +326,7 @@ type ActionHandler = (ac: ActionContext) => void | Promise<void>
 
 /** Action table (a new action is one entry). */
 const ACTION_HANDLERS: Record<string, ActionHandler> = {
-  updateModule: ({ service, p, sessionId }) => { service.updateModule(p.target as 'conversation' | 'agent', String(p.name), p.patch as never, sessionId) },
+  updateModule: ({ service, p }) => { service.updateModule(p.target as 'conversation' | 'agent', String(p.name), p.patch as never) },
   /** Drop one of OUR modules. The panel confirms before dispatching this. */
   removeModule: ({ service, p }) => { service.removeModule(String(p.name)) },
   /**
@@ -442,7 +442,7 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
     // (the settings view reads the module, the panel would read the override) and
     // the two would drift.
     if (engine?.isOwnModuleForSession(sessionId, name) === true) {
-      service.updateModule('agent', name, { text }, sessionId)
+      service.updateModule('agent', name, { text })
       return
     }
     // Every other kind keeps its real text in someone else's file (a preset's or
@@ -463,7 +463,7 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
     // "restore" means putting the seeded text back.
     const seeded = SEED_MODULES[name]?.text
     if (seeded !== undefined && engine?.isOwnModuleForSession(sessionId, name) === true) {
-      service.updateModule('agent', name, { text: seeded }, sessionId)
+      service.updateModule('agent', name, { text: seeded })
       return
     }
     const value = scope.get()
@@ -506,7 +506,7 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
     // harness's central table), so for those the weight is held locally as the
     // outgoing order and applied at send time.
     if (engine?.isOwnModuleForSession(sessionId, name) === true) {
-      service.updateModule('agent', name, { order: p.weight === null || p.weight === undefined ? undefined : Number(p.weight) }, sessionId)
+      service.updateModule('agent', name, { order: p.weight === null || p.weight === undefined ? undefined : Number(p.weight) })
       return
     }
     const value = scope.get()

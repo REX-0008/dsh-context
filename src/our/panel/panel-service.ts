@@ -48,7 +48,7 @@ export interface ContextPanelService {
    * @param patch - the fields to set.
    * @param sessionId - the session id, for the optional preset mirror.
    */
-  updateModule(target: 'conversation' | 'agent', name: string, patch: PromptModulePatch, sessionId: string): void
+  updateModule(target: 'conversation' | 'agent', name: string, patch: PromptModulePatch): void
   /**
    * The definitions file: where it is and how the last read of it went.
    * @returns the path and status.
@@ -137,14 +137,13 @@ export function createPanelService(
       return { path: modulesFileOf(ctx), status: store.status() }
     },
     /**
-     * Patch one module's definition. There is ONE definition per name, so the
-     * target is always the settings' module map — the per-conversation copy this
-     * used to branch into is gone.
+     * Patch one module's definition. There is ONE definition per name and it lives
+     * in the profile's file; the settings map and the per-conversation copy this
+     * used to branch into are both gone.
      */
-    updateModule(_target, name, patch, sessionId) {
+    updateModule(_target, name, patch) {
       store.seedIfAbsent()
       store.upsert(name, patch)
-      if (getScope().get().autoSyncPreset) engine.syncToPreset(sessionId)
     },
     /**
      * Drop one module's definition.

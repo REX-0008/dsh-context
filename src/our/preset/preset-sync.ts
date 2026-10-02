@@ -24,7 +24,6 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { appendPluginRow, renderPluginRow, updatePluginRowConfig } from './preset-edit'
-import type { PromptModule } from '../types'
 
 /** Data root (DSH_HOME is set by the dsh process; falls back to the user's home directory). */
 const HOME_ROOT = process.env.DSH_HOME ?? homedir()
@@ -58,61 +57,7 @@ function presetFilePath(agentId: string): string {
   return join(HOME_ROOT, '.agent-presets', agentId, 'agent.cordis.yml')
 }
 
-/** The sidecar archive path (a plain-JSON snapshot). */
-function snapshotFilePath(agentId: string): string {
-  return join(HOME_ROOT, '.agent-presets', agentId, 'context-modules.json')
-}
 
-/** The merged module view → the assembly's modules map (name → patch, with text/channel/order/enabled). */
-function modulesToConfig(modules: PromptModule[]): Record<string, { channel: 'section' | 'context'; order: number; enabled: boolean; text: string }> {
-  const out: Record<string, { channel: 'section' | 'context'; order: number; enabled: boolean; text: string }> = {}
-  for (const m of modules) {
-    out[m.name] = { channel: m.channel, order: m.order, enabled: m.enabled, text: m.text }
-  }
-  return out
-}
-
-/**
- * Write the sidecar archive (context-modules.json, the earlier implementation's
- * plain-JSON record, kept for redundant auditing).
- * @param agentId - the agent id.
- * @param modules - the merged module list.
- */
-export function writePresetSnapshot(agentId: string, modules: PromptModule[]): void {
-  const target = snapshotFilePath(agentId)
-  const content = JSON.stringify(
-    { version: 1, agentId, updatedAt: new Date().toISOString(), modules },
-    null,
-    2,
-  ) + '\n'
-  mkdirSync(join(target, '..'), { recursive: true })
-  if (readFileSafe(target) !== content) writeFileSync(target, content, 'utf8')
-}
-
-/**
- * Write the module assembly description in place into the agent's preset assembly
- * manifest (this plugin's row config.modules).
- * Target row exists → modify it in place; does not exist → append the row at the
- * end of the file; file does not exist → create it.
- * @param agentId - the agent id.
- * @param modules - the merged module list.
- */
-export function syncToPresetFile(agentId: string, modules: PromptModule[]): void {
-  const config = { modules: modulesToConfig(modules) }
-  const target = presetFilePath(agentId)
-  mkdirSync(join(target, '..'), { recursive: true })
-  const existing = readFileSafe(target)
-  let next: string
-  if (existing === null) {
-    next = renderPluginRow(CONTEXT_PLUGIN_ID, CONTEXT_PLUGIN_NAME, config, [
-      'context-panel 装配档案（由 @our/context-panel 同步写入；仅档案快照，运行时经 settings 注入）',
-    ])
-  } else {
-    const patched = updatePluginRowConfig(existing, CONTEXT_PLUGIN_ID, CONTEXT_PLUGIN_NAME, config)
-    next = patched ?? appendPluginRow(existing, CONTEXT_PLUGIN_ID, CONTEXT_PLUGIN_NAME, config)
-  }
-  if (existing !== next) writeFileSync(target, next, 'utf8')
-}
 
 /**
  * Modify in place the config of a given plugin row in the agent's preset assembly

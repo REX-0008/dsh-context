@@ -96,9 +96,7 @@ import {
   AGENT_INSTRUCTIONS_NAME,
   SKILL_FS_ID,
   SKILL_FS_NAME,
-  syncToPresetFile,
   updatePresetPluginConfig,
-  writePresetSnapshot,
 } from '../preset/preset-sync'
 import type { ContextAssemblerService } from './service'
 
@@ -984,16 +982,6 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
     }
   }
 
-  /** @inheritdoc */
-  syncToPreset(agentId: string): void {
-    try {
-      const modules = this.mergedModules()
-      // write in place into the assembly manifest (this plugin's row config.modules)
-      syncToPresetFile(agentId, modules)
-      // record: the sidecar plain-JSON snapshot (the earlier implementation's redundant archive)
-      writePresetSnapshot(agentId, modules)
-    } catch { /* a failed preset write does not affect the runtime */ }
-  }
 
   /** @inheritdoc */
   editSkillDirs(dirs: string[], agentId: string): void {

@@ -176,14 +176,6 @@ export interface ContextAssemblerService {
    */
   registeredOrdersForSession(sessionId: string): Record<string, number>
   /**
-   * Write the currently effective module assembly description in place into the
-   * user-level preset assembly manifest (the context-assembler row's
-   * config.modules in agent.cordis.yml), keeping the sidecar archive (it does not
-   * affect the runtime).
-   * @param agentId - the agent id.
-   */
-  syncToPreset(agentId: string): void
-  /**
    * Modify in place the skill-filesystem row's config in the agent's preset
    * assembly manifest (customSkillDirs), effective for new sessions (a new
    * generation); the runtime is not touched.
