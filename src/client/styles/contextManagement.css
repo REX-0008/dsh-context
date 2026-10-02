@@ -172,3 +172,18 @@
   min-width: 4.5em;
   text-align: right;
 }
+
+/* The filter toolbar and the add control share one row: the search takes the free
+   width and the button keeps its own at the end. */
+.lc-br-addbar { display: flex; align-items: center; gap: 6px; }
+.lc-br-addbar-search { flex: 1; min-width: 0; }
+
+/* The new-module form: a card above the list, one field per row so a narrow pane
+   folds to a readable column instead of crushing the inputs. */
+.lc-br-addform { display: flex; flex-direction: column; gap: 6px; padding: 8px; margin: 6px 0; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-bg-layer-2); }
+.lc-br-addfield { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--dsw-alias-label-secondary); }
+.lc-br-addfield > span { flex: none; min-width: 3.5em; }
+.lc-br-addfield input, .lc-br-addfield select { flex: 1; min-width: 0; font: inherit; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-module-platform); border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; padding: 3px 6px; }
+.lc-br-addtext { width: 100%; box-sizing: border-box; font: inherit; font-size: 12px; line-height: 1.5; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-module-platform); border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; padding: 6px; resize: vertical; }
+.lc-br-addactions { display: flex; gap: 6px; }
+.lc-br-adderr { color: var(--dsw-alias-state-error-primary); }

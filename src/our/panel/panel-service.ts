@@ -41,6 +41,12 @@ export interface ContextPanelService {
    */
   updateModule(target: 'conversation' | 'agent', name: string, patch: PromptModulePatch, sessionId: string): Promise<void>
   /**
+   * Drop one module's definition. The set IS the settings' module map, so a
+   * removal is a key removal.
+   * @param name - the module name.
+   */
+  removeModule(name: string): Promise<void>
+  /**
    * Copy the conversation-level overrides over the agent level in full and clear
    * this conversation's overrides (called after the client's confirmation dialog).
    * @param sessionId - the session id.
@@ -118,6 +124,18 @@ export function createPanelService(
       modules[name] = mergePatch(modules[name], patch)
       await scope.update({ modules })
       if (value.autoSyncPreset) engine.syncToPreset(sessionId)
+    },
+    /**
+     * Drop one module's definition.
+     *
+     * Nothing re-adds it: the seeds only fill the DEFAULT document, and a stored
+     * one replaces that default wholesale — so a deleted seed stays deleted, and
+     * an upgrade's new seed does not resurrect it.
+     */
+    async removeModule(name) {
+      const scope = getScope()
+      const { [name]: _removed, ...modules } = scope.get().modules
+      await scope.update({ modules })
     },
     async setToolRestriction(name, filter) {
       const scope = getScope()

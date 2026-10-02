@@ -101,6 +101,12 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
   const [weightDraft, setWeightDraft] = useState('')
   const [query, setQuery] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [newName, setNewName] = useState('our:')
+  const [newChannel, setNewChannel] = useState<'section' | 'context'>('section')
+  const [newOrder, setNewOrder] = useState('50')
+  const [newText, setNewText] = useState('')
+  const [addError, setAddError] = useState('')
 
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -125,6 +131,34 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
 
   const sections: SystemSectionInfo[] = state?.systemSections ?? []
   const stale = sections.some(section => section.staleTable)
+  /**
+   * Add one module.
+   *
+   * The name is the module's identity and cannot be changed afterwards, so it is
+   * validated before anything is written: the `our:` prefix keeps the entry in
+   * this plugin's own family (nothing else can be dropped or renamed here), a
+   * collision would shadow an existing definition, and an empty body has nothing
+   * to send.
+   */
+  const createModule = (): void => {
+    const name = newName.trim()
+    if (!name.startsWith('our:')) { setAddError(t('our.add.errPrefix')); return }
+    if (sections.some(section => section.name === name)) { setAddError(t('our.add.errDup')); return }
+    if (newText.trim() === '') { setAddError(t('our.add.errText')); return }
+    setAddError('')
+    const order = Number(newOrder)
+    void dispatch('updateModule', {
+      target: 'agent',
+      name,
+      patch: { text: newText, channel: newChannel, order: Number.isFinite(order) ? order : 50, enabled: true },
+    }).then(() => {
+      setCreating(false)
+      setNewName('our:')
+      setNewText('')
+      setNewOrder('50')
+      setNewChannel('section')
+    })
+  }
   /** The declared runtime contexts (dynamic, low-authority half of the prompt). */
   const contexts: SystemSectionInfo[] = state?.contexts ?? []
   /** The plugins that can inject (their switches). */
@@ -198,7 +232,47 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
 
         {/* The category's own filter toolbar, mounted even when nothing matches so
           the filter can always be cleared. */}
-        {atPastStep || sections.length === 0 ? null : toolbar(query, setQuery)}
+        {atPastStep || sections.length === 0 ? null : (
+          <div className="lc-br-addbar">
+            <div className="lc-br-addbar-search">{toolbar(query, setQuery)}</div>
+            <button type="button" className="lc-gran-btn"
+              title={t('our.action.addModuleTip')}
+              onClick={() => { setCreating(!creating); setAddError('') }}>
+              {t('our.action.addModule')}
+            </button>
+          </div>
+        )}
+        {creating && !atPastStep ? (
+          <div className="lc-br-addform">
+            <label className="lc-br-addfield">
+              <span>{t('our.add.name')}</span>
+              <input className="lc-br-tag" value={newName} placeholder="our:example"
+                title={t('our.add.nameTip')}
+                onChange={(event) => { setNewName(event.target.value) }} />
+            </label>
+            <label className="lc-br-addfield">
+              <span>{t('our.add.channel')}</span>
+              <select className="lc-br-tag" value={newChannel}
+                onChange={(event) => { setNewChannel(event.target.value === 'context' ? 'context' : 'section') }}>
+                <option value="section">{t('our.add.channelSection')}</option>
+                <option value="context">{t('our.add.channelContext')}</option>
+              </select>
+            </label>
+            <label className="lc-br-addfield">
+              <span>{t('our.add.order')}</span>
+              <input className="lc-br-tag" value={newOrder} title={t('our.add.orderTip')}
+                onChange={(event) => { setNewOrder(event.target.value) }} />
+            </label>
+            <textarea className="lc-br-addtext" value={newText} rows={5}
+              placeholder={t('our.add.textPlaceholder')}
+              onChange={(event) => { setNewText(event.target.value) }} />
+            {addError === '' ? null : <div className="lc-br-note lc-br-adderr">{addError}</div>}
+            <div className="lc-br-addactions">
+              <button type="button" className="lc-gran-btn" onClick={createModule}>{t('our.add.create')}</button>
+              <button type="button" className="lc-gran-btn" onClick={() => { setCreating(false); setAddError('') }}>{t('our.action.cancel')}</button>
+            </div>
+          </div>
+        ) : null}
         {sections.length > 0 && shown.length === 0 ? (
           <div className="lc-br-note">{t('our.noMatch')}</div>
         ) : null}
@@ -227,6 +301,19 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
                   <button type="button" className="lc-rich-seg-btn" title={t('our.action.restoreTip')}
                     onClick={(event) => { event.stopPropagation(); void dispatch('clearSectionText', { name: section.name }) }}>
                     {t('our.action.restore')}
+                  </button>
+                ) : null}
+                {/* Only OUR modules can be dropped: another plugin's section is its
+                    registration, and a preset's section is its own file. The
+                    confirmation is the panel's usual one, and there is no undo. */}
+                {section.kind === 'config' ? (
+                  <button type="button" className="lc-rich-seg-btn" title={t('our.action.deleteTip')}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      if (!window.confirm(t('our.action.deleteConfirm', { name: section.name }))) return
+                      void dispatch('removeModule', { name: section.name })
+                    }}>
+                    {t('our.action.delete')}
                   </button>
                 ) : null}
                 <button type="button" className={'lc-rich-seg-btn' + (open ? ' lc-rich-seg-on' : '')}
@@ -333,25 +420,16 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
                   </button>
                 ) : null}
                 {/* Three states, because two disable levels exist (the deployment
-                level is not managed here). Clicking cycles enabled → off-here →
-                off-for-preset → enabled, and the tooltip names the current level. */}
+                level is not managed here). ONE level remains: clicking toggles this
+                section for the whole PRESET, so every conversation running it agrees. */}
                 <button type="button"
                   className={'lc-br-tag' + (section.disabledAt === undefined ? '' : ' lc-br-sect-off')}
-                  title={section.disabledAt === 'preset'
-                    ? t('our.state.offPresetTip')
-                    : section.disabledAt === 'conversation'
-                      ? t('our.state.offConversationTip')
-                      : t('our.state.onTip')}
+                  title={section.disabledAt === 'preset' ? t('our.state.offPresetTip') : t('our.state.onTip')}
                   onClick={(event) => {
                     event.stopPropagation()
-                    const next = section.disabledAt === undefined
-                      ? { level: 'conversation' as const, off: true }
-                      : section.disabledAt === 'conversation'
-                        ? { level: 'preset' as const, off: true }
-                        : { level: 'conversation' as const, off: false }
-                    void dispatch('setSectionLevel', { name: section.name, ...next })
+                    void dispatch('setSectionLevel', { name: section.name, off: section.disabledAt === undefined })
                   }}>
-                  {section.disabledAt === 'preset' ? t('our.state.offPreset') : section.disabledAt === 'conversation' ? t('our.state.offConversation') : t('our.state.on')}
+                  {section.disabledAt === 'preset' ? t('our.state.offPreset') : t('our.state.on')}
                 </button>
               </>
             )

@@ -325,6 +325,8 @@ type ActionHandler = (ac: ActionContext) => void | Promise<void>
 /** Action table (a new action is one entry). */
 const ACTION_HANDLERS: Record<string, ActionHandler> = {
   updateModule: ({ service, p, sessionId }) => service.updateModule(p.target as 'conversation' | 'agent', String(p.name), p.patch as never, sessionId),
+  /** Drop one of OUR modules. The panel confirms before dispatching this. */
+  removeModule: ({ service, p }) => service.removeModule(String(p.name)),
   /**
    * Select one row for pruning, or deselect it.
    *
