@@ -465,9 +465,9 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
    * TWO groups, because they answer two different questions and mixing them made
    * the same label appear as both a switch and an entry:
    *
-   * 1. 会注入内容的插件 — WHICH producers may inject, with their switches. This is
+   * 1. plugins that can inject content — WHICH producers may inject, with their switches. This is
    *    capability, so it is populated from a static list before any turn runs.
-   * 2. 实际注入内容 — WHAT was actually injected into this conversation: the
+   * 2. what was actually injected — WHAT was actually injected into this conversation: the
    *    runtime contexts the assembly declares (sandbox policy, approval policy,
    *    subagent delegation) plus everything observed in this conversation's own
    *    step batches. This is content, so the observed part is empty until a turn
@@ -582,7 +582,7 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
    * own (one call per item), so picking three rows removes exactly those three
    * rather than everything between them.
    *
-   * The 按轮剪枝 button on the same row selects the whole round instead: the
+   * The prune by round button on the same row selects the whole round instead: the
    * run's user message, the assistant replies, the tool calls and their results.
    * It resolves to the same per-item calls, so a round can be narrowed
    * afterwards by deselecting single rows.

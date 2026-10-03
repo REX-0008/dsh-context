@@ -229,10 +229,10 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
   }
 
   /**
-   * The module set, sorted by order. Settings is the single source of module
-   * definitions: there is ONE definition per name and no per-conversation copy,
-   * so this needs no session to resolve.
-   * @returns every module the settings declare.
+   * The module set, sorted by order. The definitions file is the source (the
+   * settings value is composed over at the config reader): there is ONE definition
+   * per name and no per-conversation copy, so this needs no session to resolve.
+   * @returns every module the definitions declare.
    */
   private mergedModules(): PromptModule[] {
     const config = this.getConfig()

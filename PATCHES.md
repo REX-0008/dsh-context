@@ -47,7 +47,7 @@ appear on an existing install. The settings value is deliberately left in place
 during the one-time migration — it is what keeps a code rollback working.
 
 Everything else stays in settings: the preset switches
-(`presetDisabledSections/Presets`), the section overrides and weights
+(`presetDisabledSections` / `presetDisabledContexts`), the section overrides and weights
 (`sectionOverrides/Weights/Originals`), `contextOverrides`,
 `suppressedInjections`, `toolRestrictions` and `panelWidth` — they are either
 another section's override or a panel preference, and mixing them into the
@@ -143,7 +143,7 @@ Rewritten lines: the original `const browserCard = (` call becomes
 `const browserCard = browser()` (a builder, so the panel can inject its hooks),
 and the browser's column now renders the panel instead of `{browserCard}`.
 
-## 4. `src/client/components/browser.tsx` — system-category hooks
+## 5. `src/client/components/browser.tsx` — system-category hooks
 
 **Anchor**: `ContextBrowserProps`, right after `onDetailRetry?: () => void`
 
@@ -168,7 +168,7 @@ Rewritten lines (3): `toolCount` gains the caller's count; `singleKeyOf('system'
 returns null when the caller supplies rows; `catBody`'s system branch defers to
 them; the card title reads `titleOverride ?? t('browser.title')`.
 
-## 5. `src/client/index.ts` — our stylesheet
+## 4. `src/client/index.ts` — our stylesheet
 
 **Anchor**: after the last upstream `styles/*.css` import.
 
@@ -176,7 +176,7 @@ them; the card title reads `titleOverride ?? t('browser.title')`.
 import './styles/contextManagement.css'
 ```
 
-## 6. `src/client/components/browser.tsx` — category-head hooks
+## 6. `src/client/components/browser.tsx` — category-head hooks (toolCount / singleKeyOf / catBody)
 
 **Anchor**: `ContextBrowserProps`, after the `titleOverride` entry added above.
 
@@ -190,7 +190,7 @@ plus, in the category head: the `lc-br-cat-pruned` class on the row and a
 nesting a button in a button is invalid markup). Without these props the heads
 render exactly as before.
 
-## 8. `src/client/components/browser.tsx` — delivered system row
+## 9. `src/client/components/browser.tsx` — delivered system row
 
 **Anchor**: `catBody`'s `system` branch, right before the built-in prompt row.
 
@@ -209,7 +209,67 @@ category list mirrors `toggleCat` exactly (`(c.key === 'system' &&
 props.systemRows !== undefined)` clause) — without it a toggled-open system
 category with caller rows only never renders its body.
 
-## 9. `src/host/config.ts` — entry-config carrier for the write layer
+## 7. `src/client/components/browser.tsx` — the caller's system row list
+
+**Anchor**: `catBody`'s `system` branch, where the built-in prompt row is built.
+
+When `props.systemRows` is supplied, the category's rows come from the caller's
+`BrowserRowBuilder` instead of the built-in list, so our panel decorates the same
+frame the upstream rows use rather than re-implementing it.
+
+## 8. `src/client/components/browser.tsx` — the caller's category rows
+
+**Anchor**: the category body, where the built-in rows are mapped.
+
+`props.categoryRows?.(category, elemRow)` renders extra rows at the TOP of a
+category's body (the contexts and injection sources), using this module's own row
+builder so they carry the same frame, chips and expansion as the rows below them.
+`props.categoryHasRows?.(category)` keeps a category openable when it has ONLY
+such rows, so it is not hidden as empty.
+
+## 10. `src/client/components/browser.tsx` — the card title override
+
+**Anchor**: `ContextBrowserProps`, beside the other optional props.
+
+```ts
+  titleOverride?: string
+```
+
+The card title reads `titleOverride ?? t('browser.title')`, so the panel that
+adores the browser can name it after what it is showing. Unset changes nothing.
+
+## 11. `src/client/components/browser.tsx` — per-row actions and marks
+
+**Anchor**: `ContextBrowserProps`, beside the other optional props.
+
+```ts
+  messageRowActions?: (row: MessageRowRef) => ReactNode
+  messageRowMarked?: (row: MessageRowRef) => boolean
+```
+
+`messageRowMarked` marks ONE row (the prune selection) and `messageRowActions`
+renders its controls. The row reference carries the round's seq list, so acting on
+a row can act on the whole round — a round spans every category, which is why the
+reference is built from the WHOLE surface rather than the open category's slice.
+
+## 12. `src/client/components/browser.tsx` — category-head actions and marks
+
+**Anchor**: the category head, beside the head button.
+
+`props.categoryActions?.(category)` renders a span of controls BESIDE the head
+button (separate elements — nesting a button in a button is invalid markup), and
+`props.categoryMarked?.(category)` adds the `lc-br-cat-pruned` class.
+
+## 13. `src/client/components/browser.tsx` — a tool row's own action slot
+
+**Anchor**: the tool category's row rendering.
+
+`props.toolRowActions?.(toolName)` renders the controls for ONE tool row. Distinct
+from the tool-guidance section switch: this acts on the tool itself (its
+restriction makes CALLS fail), while the section switch only stops its guidance
+TEXT from being sent.
+
+## 14. `src/host/config.ts` — entry-config carrier for the write layer
 
 **Import** (after the upstream imports):
 
@@ -265,7 +325,7 @@ of whole-profile form projection on the per-request path. `src/our/panel/scope.t
 now wraps the resolved `config.panel` reference for reads (0.029 us measured)
 and uses the Settings service only for the merge WRITE (`update(ns, { panel })`).
 
-## 14. Registration keys — three roles, two distinct strings
+## 15. Registration keys — three roles, two distinct strings
 
 Upstream could use one string for every key because its package name, Host loader
 entry id, and settings namespace were all `dsh-context`. This fork renamed the
@@ -281,7 +341,7 @@ Collapsing these is what hid the preference card from the Plugins page;
 `tests/client/index.spec.ts` now reads both identities from `package.json` and
 `cordis.patch.yml` and asserts they stay distinct.
 
-## 15. `src/client/i18n.ts` — our added keys
+## 16. `src/client/i18n.ts` — our added keys
 
 **Anchor**: the end of `DICT_ZH` and `DICT_EN`.
 
@@ -291,7 +351,7 @@ namespaced `our.*`; the price-mapping block's labels ride the settings card's ow
 `settings.priceMap*` prefix (they are settings-card strings, and the block is
 rendered by that card).
 
-## 16. `src/client/settings.ts` — the price-mapping read/write
+## 17. `src/client/settings.ts` — the price-mapping read/write
 
 **Anchor**: `createContextSettings`, plus the `ContextSettings` interface.
 
@@ -307,7 +367,7 @@ writes through the scope, and rolls the echo back if the scope refuses. It write
 the WHOLE map (not a per-row patch) because only a wholesale write can express a
 removal — a merge could never return a row to the mechanical pass.
 
-## 17. `src/client/modelPrices.ts` — the additive observer
+## 18. `src/client/modelPrices.ts` — the additive observer
 
 **Anchor**: the end of the file, after `useModelPrices`.
 
@@ -317,7 +377,7 @@ never calls it, which is what keeps this upstreamable as a plain test/extension
 seam. It exists so the price mapping can synthesize the local routes' branches
 (`src/our/client/priceBook.ts`) without editing `cost.ts`'s lookup ladder.
 
-## 18. `src/client/components/settingsCard.tsx` — the mapping block
+## 19. `src/client/components/settingsCard.tsx` — the mapping block
 
 **Anchor**: the end of `SettingsCardProps`, both cards' `PreferenceRows` render,
 and `PriceMapBlock` appended after `makePluginConfigCard`.
@@ -334,7 +394,7 @@ built in the card FACTORY, never in the block: a component type created during
 render is a new type every render, which makes React unmount and remount the
 subtree instead of updating it, re-running its effects on every pass.
 
-## 19. `src/client/index.ts` — the mapping's seat and subscription
+## 20. `src/client/index.ts` — the mapping's seat and subscription
 
 **Anchor**: `cardFace`, and the statement after `watchHistoryFaces(ctx)`.
 

@@ -1,23 +1,14 @@
 /**
- * Preset snapshot sync (archive): write the currently effective module assembly
- * description into the user-level preset file.
+ * Editing a preset from here: the plugin's ONE deliberate write into a preset file.
  *
- * Follows plans/ §4 (syncToPreset) and §1.6
- * (in-place modification):
- * - the runtime source of truth is settings (injected in the agent scope, not via
- *   the preset); writing the preset does not affect the runtime;
- * - target: `$DSH_HOME/.agent-presets/<agentId>/agent.cordis.yml` (the assembly
- *   manifest);
- * - write mode: in-place modification — read the original text → find the matching
- *   plugin row → change that row's config → write back at the same position (no
- *   patch-style appending, no whole-file rewrite), leaving the other rows /
- *   comments / structure byte-identical;
- * - write only on a difference (diff the file); writing the file produces no
- *   generation and triggers no skill watcher (proven in §3.2).
+ * The built-in modules no longer mirror into the preset's manifest row, nor into the
+ * `context-modules.json` sidecar beside it — the definitions have a file of their own,
+ * and a third copy nothing read was only a way to disagree with it.
  *
- * Record: alongside the in-place write, the sidecar archive `context-modules.json`
- * (the earlier implementation) is kept as a redundant plain-JSON snapshot for
- * auditing/comparison, and it does not conflict with agent.cordis.yml.
+ * What remains is the other direction: a section the PRESET owns is written BACK into
+ * the preset, because that text lives in a file this user owns rather than inside a
+ * plugin's package. The edit is line-level, so the rest of the composition survives,
+ * and it takes effect for the next session (a preset composes sessions, not turns).
  * @module @our/context-panel/preset-sync
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -28,12 +19,6 @@ import { appendPluginRow, renderPluginRow, updatePluginRowConfig } from './prese
 /** Data root (DSH_HOME is set by the dsh process; falls back to the user's home directory). */
 const HOME_ROOT = process.env.DSH_HOME ?? homedir()
 
-/**
- * This plugin's row identifiers in the assembly manifest (the row name follows the
- * plugin package name; the old @our/context-assembler is merged into this plugin).
- */
-export const CONTEXT_PLUGIN_ID = 'context-panel'
-export const CONTEXT_PLUGIN_NAME = '@our/context-panel'
 
 /** skill-filesystem row identifiers. */
 export const SKILL_FS_ID = 'skill-filesystem'

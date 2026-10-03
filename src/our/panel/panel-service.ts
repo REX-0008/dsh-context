@@ -4,7 +4,8 @@
  * The client reaches it through this plugin's own routes
  * (`/api/context-panel-write/{state,action}`). It holds the engine instance
  * directly (a same-package import) and is one of the two in-process readers and
- * writers of the settings namespace that is the single source of configuration.
+ * directly (a same-package import). The module DEFINITIONS live in the profile's
+ * data file (see modules-store); the settings namespace carries everything else.
  *
  * editSkillDirs / editBaselineConfig: delegate to the engine to **modify in place**
  * the agent's preset assembly manifest (the matching plugin row's config in
@@ -16,8 +17,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { PanelScope } from './scope'
 import type { ContextAssemblerService } from '../assembler/service'
 import type { PromptModulePatch } from '../types'
-import { modulesFileOf } from './data-dir'
-import type { ModulesStore, StoreStatus } from './modules-store'
+import type { ModulesStore } from './modules-store'
 
 /** The ctx.contextPanel public contract. */
 export interface ContextPanelService {
@@ -32,14 +32,6 @@ export interface ContextPanelService {
     dirty: boolean
   }
   /**
-   * Patch one module's definition. One definition per name, so there is no level
-   * to pick; `target` is kept for the action payload's shape only.
-   * @param target - unused; the settings' module map is the only destination.
-   * @param name - the module name.
-   * @param patch - the patch.
-   * @param sessionId - the session id.
-   */
-  /**
    * Patch one module's definition. Synchronous by design: the file write is, and
    * a caller that awaited a Promise would be waiting on nothing.
    * @param target - unused; the definitions file is the only destination.
@@ -49,10 +41,6 @@ export interface ContextPanelService {
    */
   updateModule(target: 'conversation' | 'agent', name: string, patch: PromptModulePatch): void
   /**
-   * The definitions file: where it is and how the last read of it went.
-   * @returns the path and status.
-   */
-  modulesFile(): { path: string; status: StoreStatus }
   /**
    * Drop one module's definition. The set IS the settings' module map, so a
    * removal is a key removal.
@@ -125,20 +113,15 @@ export function createPanelService(
       return {
         modules,
         dirty: engine.isDirty(sessionId),
-        modulesFile: store.status(),
       }
     },
     /** The definitions file's path and last-read state, for the panel's report. */
-    modulesFile() {
-      return { path: modulesFileOf(ctx), status: store.status() }
-    },
     /**
      * Patch one module's definition. There is ONE definition per name and it lives
      * in the profile's file; the settings map and the per-conversation copy this
      * used to branch into are both gone.
      */
     updateModule(_target, name, patch) {
-      store.seedIfAbsent()
       store.upsert(name, patch)
     },
     /**

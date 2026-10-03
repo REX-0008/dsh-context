@@ -183,6 +183,25 @@ In-chart and in-card toggles stay per-view and never overwrite the stored prefer
 
 ![The Context settings card](https://raw.githubusercontent.com/bowenliang123/dsh-context/main/docs/settings.png)
 
+## Where your settings live
+
+Two carriers, split by what the thing IS:
+
+| What | Where |
+|---|---|
+| **Prompt modules** (name, text, channel, position, enabled) | `<profile>/data/context-panel-write/modules.json` |
+| Display preferences, preset switches, section overrides / weights, tool restrictions | the plugin's settings entry (Settings → Plugins) |
+
+The modules live in one file you can open, diff and back up by hand. **That file is the
+truth once it exists**: the built-in modules are a FIRST-RUN seed only, so a module you
+delete stays deleted, and a later release's new built-in module does not appear on an
+existing install. The plugin never rewrites a file it cannot parse — fix the typo and it
+reads again, rather than losing your definitions.
+
+The `<profile>` part is resolved from the running harness (`profileContext`), with
+`DSH_PROFILE` + `$DSH_HOME/profiles/<name>/data` as the fallback, so the path needs no
+hard-coded profile name.
+
 ## Good to know
 
 - **Estimates vs actuals** — category figures use dsh's own fixed-density heuristic (the same one as its built-in token meter); the pinned trend details show provider-reported actuals next to them, and the Token card pairs its ≈-estimated composition shares with the provider-exact billed total.

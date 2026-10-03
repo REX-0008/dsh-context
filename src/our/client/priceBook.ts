@@ -16,9 +16,11 @@
  * that, upstream's own answer read off the delivered book — and the branch is
  * written only once every observed model of that route has an entry.
  *
- * The delivered book is never mutated in place: each pass rebuilds the price
- * table from the book as delivered, so re-running is idempotent and a route
- * never sees its own synthesized output as input.
+ * The RATES are never mutated in place: each pass rebuilds the price table from
+ * `pristinePrices` (the book as delivered, kept aside for exactly this), so
+ * re-running is idempotent and a route never sees its own synthesized output as
+ * input. What the pass does publish is the rebuilt table on the delivered
+ * object's `prices` — the one field consumers read.
  * @module @our/context-panel-write/our/client/priceBook
  */
 

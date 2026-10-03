@@ -11,7 +11,7 @@
  * @module @our/context-panel/settings
  */
 import z from '@deepseek-ai/schemastery'
-import type { ContextPanelSettings, PromptModulePatch } from '../types'
+import type { ContextPanelSettings } from '../types'
 import { SEED_MODULES } from '../preset/seeds'
 
 /**
@@ -154,18 +154,3 @@ export const CONTEXT_PANEL_SCHEMA: z<ContextPanelSettings> = z.object(FIELDS)
  * keep resolving namespace values as plain data on the 0.1.x lines.
  */
 export const CONTEXT_PANEL_ENTRY_SCHEMA: z<ContextPanelSettings> = z.object(FIELDS)
-
-
-/** Merge two patches (the latter overrides the former; undefined fields are ignored). */
-export function mergePatch(...patches: Array<PromptModulePatch | undefined>): PromptModulePatch {
-  const out: PromptModulePatch = {}
-  for (const p of patches) {
-    if (p === undefined) continue
-    if (p.text !== undefined) out.text = p.text
-    if (p.channel !== undefined) out.channel = p.channel
-    if (p.order !== undefined) out.order = p.order
-    if (p.enabled !== undefined) out.enabled = p.enabled
-    if (p.source !== undefined) out.source = p.source
-  }
-  return out
-}
