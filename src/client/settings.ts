@@ -102,6 +102,36 @@ function prefsOf(value: unknown): Prefs {
   }
 }
 
+/** The stored overrides in the shape the mapping table consumes. */
+type PriceMap = Record<string, { vendor: string; model: string }>
+
+/**
+ * Validate a stored `priceMap` into overrides, dropping anything unusable.
+ * @param stored - the raw field value.
+ * @returns the usable overrides (empty when the field is absent or hostile).
+ */
+function mapOf(stored: unknown): PriceMap {
+  const out: PriceMap = {}
+  if (stored === null || typeof stored !== 'object' || Array.isArray(stored)) return out
+  for (const [key, value] of Object.entries(stored as Record<string, unknown>)) {
+    if (value === null || typeof value !== 'object') continue
+    const entry = value as { vendor?: unknown; model?: unknown }
+    if (typeof entry.vendor !== 'string' || typeof entry.model !== 'string') continue
+    out[key] = { vendor: entry.vendor, model: entry.model }
+  }
+  return out
+}
+
+/**
+ * A mapping's identity by CONTENT: the Host hands each section update a fresh
+ * object, so comparing references would report every read as a change.
+ * @param map - the overrides.
+ * @returns a comparable signature.
+ */
+function signatureOf(map: PriceMap): string {
+  return Object.keys(map).sort().map(key => `${key}=${map[key].vendor}/${map[key].model}`).join('\u0000')
+}
+
 export function createContextSettings(): ContextSettings {
   let state: SettingsState = { status: 'loading', placement: 'all', granularity: 'step', mode: 'total', deltaBase: 'step', toolSort: 'count', fileSort: 'count', insightsEntry: 'show', writable: false }
   let scope: SettingsScopeLike | undefined
@@ -116,14 +146,17 @@ export function createContextSettings(): ContextSettings {
    * which re-rendered the card — an unbounded update loop that took the whole
    * settings card down.
    */
-  let priceMapCache: { source: unknown; value: Record<string, { vendor: string; model: string }> } | undefined
+  let priceMapCache: { source: unknown; value: PriceMap } | undefined
+  /** The last mapping's content signature (see the sync note below). */
+  let priceSignature: string | undefined
   const listeners = new Set<() => void>()
-  const publish = (next: SettingsState): void => {
+  const publish = (next: SettingsState): boolean => {
     if (next.status === state.status && next.placement === state.placement && next.granularity === state.granularity
       && next.mode === state.mode && next.deltaBase === state.deltaBase && next.toolSort === state.toolSort
-      && next.fileSort === state.fileSort && next.insightsEntry === state.insightsEntry && next.writable === state.writable) return
+      && next.fileSort === state.fileSort && next.insightsEntry === state.insightsEntry && next.writable === state.writable) return false
     state = next
     for (const listener of listeners) listener()
+    return true
   }
   // Republish from the bound scope's current snapshot; the attach sync and
   // the failed-write rollback share this one read. Returns the scope's valid
@@ -135,10 +168,21 @@ export function createContextSettings(): ContextSettings {
     // value wins; one the plugin cannot understand degrades to the field's
     // default; a section without the field (older Host half) keeps the
     // current state.
-    raw = snap.value !== null && typeof snap.value === 'object'
+    const nextRaw = snap.value !== null && typeof snap.value === 'object'
       ? snap.value as Record<string, unknown>
       : undefined
-    publish({
+    // The pricing runtime reads the MAPPING, which the preference diff below does
+    // not compare, so a mapping-only change would go unnotified: every mapped row
+    // would stay unpriced until some unrelated preference moved. Track the
+    // mapping's content (the Host re-sends a fresh object each time) and notify
+    // when publish did not — this is what adopts the stored mapping at startup,
+    // so pricing no longer depends on the settings card being open.
+    const signature = signatureOf(mapOf(nextRaw?.priceMap))
+    const mapChanged = signature !== priceSignature
+    priceSignature = signature
+    raw = nextRaw
+    // Whether the preference diff already notified (see the mapping note below).
+    const notified = publish({
       status: snap.status === 'ready' || snap.status === 'unavailable' ? snap.status : 'loading',
       placement: prefs.placement ?? (raw?.defaultPlacement === undefined ? state.placement : 'all'),
       granularity: prefs.granularity ?? state.granularity,
@@ -149,6 +193,13 @@ export function createContextSettings(): ContextSettings {
       insightsEntry: prefs.insightsEntry ?? (raw?.insightsEntry === undefined ? state.insightsEntry : 'show'),
       writable: snap.writable,
     })
+    // The price mapping reads `raw`, not the preference fields publish() diffs,
+    // so a mapping-only change would otherwise go unnotified: the pricing runtime
+    // would keep the map it read before this scope was first bound, leaving every
+    // mapped row unpriced until something else moved. Notify exactly when publish
+    // did not — never twice for one change. This is what adopts the stored mapping
+    // at startup, so pricing no longer depends on the settings card being open.
+    if (mapChanged && !notified) for (const listener of listeners) listener()
     return { placement: prefs.placement, insightsEntry: prefs.insightsEntry }
   }
   return {
@@ -162,16 +213,9 @@ export function createContextSettings(): ContextSettings {
     priceMap() {
       const stored: unknown = raw?.priceMap
       if (priceMapCache !== undefined && priceMapCache.source === stored) return priceMapCache.value
-      const out: Record<string, { vendor: string; model: string }> = {}
-      priceMapCache = { source: stored, value: out }
-      if (stored === null || typeof stored !== 'object' || Array.isArray(stored)) return out
-      for (const [key, value] of Object.entries(stored as Record<string, unknown>)) {
-        if (value === null || typeof value !== 'object') continue
-        const entry = value as { vendor?: unknown; model?: unknown }
-        if (typeof entry.vendor !== 'string' || typeof entry.model !== 'string') continue
-        out[key] = { vendor: entry.vendor, model: entry.model }
-      }
-      return out
+      const value = mapOf(stored)
+      priceMapCache = { source: stored, value }
+      return value
     },
     setPriceMap(next) {
       // Optimistic echo, then the fenced scope write — the same shape the
@@ -182,12 +226,18 @@ export function createContextSettings(): ContextSettings {
       const before: unknown = raw?.priceMap
       const base: Record<string, unknown> = raw ?? {}
       raw = { ...base, priceMap: next }
-      publish({ ...state })
+      // Announce the new mapping directly: publish() diffs preferences only, so
+      // the table's own write would otherwise never reach the pricing runtime.
+      priceSignature = signatureOf(mapOf(next))
+      for (const listener of listeners) listener()
       const bound = scope
       if (bound === undefined) return
       void bound.set('priceMap', next).catch(() => {
+        // Roll the echo back to the scope's truth and re-announce: the runtime
+        // must forget a mapping that never persisted.
         raw = before === undefined ? { ...base } : { ...base, priceMap: before }
-        publish({ ...state })
+        priceSignature = signatureOf(mapOf(before))
+        for (const listener of listeners) listener()
       })
     },
     defaultPlacement: () => state.placement,

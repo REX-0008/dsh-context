@@ -78,6 +78,62 @@ describe('the price-map accessors', () => {
     assert.deepEqual(second, { k: { vendor: 'deepseek', model: 'deepseek-flash' } })
   })
 
+  test('a mapping-only change notifies, so pricing never waits on the settings card', () => {
+    // The regression: the runtime adopts the map from this store's notifications,
+    // and publish() diffs PREFERENCES only. A scope delivery that changed just the
+    // mapping (startup, another tab's write) therefore went unnotified, and every
+    // mapped row stayed unpriced until some unrelated preference happened to move.
+    const settings = createContextSettings()
+    const scope = makeScope({ priceMap: { k: { vendor: 'zai', model: 'glm-5.2' } } })
+    settings.attach(scope)
+    let calls = 0
+    settings.store.subscribe(() => { calls++ })
+    // A fresh object with the SAME content is not a change (the Host re-sends one
+    // on every section update, and notifying for it would loop the card).
+    scope.push({ priceMap: { k: { vendor: 'zai', model: 'glm-5.2' } } })
+    assert.equal(calls, 0, 'an unchanged mapping is not a notification')
+    scope.push({ priceMap: { k: { vendor: 'deepseek', model: 'deepseek-flash' } } })
+    assert.equal(calls, 1, 'a changed mapping notifies exactly once')
+    assert.deepEqual(settings.priceMap(), { k: { vendor: 'deepseek', model: 'deepseek-flash' } })
+  })
+
+  test('the table\'s own write reaches the runtime immediately, without a scope round-trip', () => {
+    const settings = createContextSettings()
+    const scope = makeScope({})
+    settings.attach(scope)
+    let calls = 0
+    settings.store.subscribe(() => { calls++ })
+    settings.setPriceMap({ k: { vendor: 'zai', model: 'glm-5.2' } })
+    assert.equal(calls, 1, 'the optimistic echo announces the mapping')
+    assert.deepEqual(settings.priceMap(), { k: { vendor: 'zai', model: 'glm-5.2' } })
+  })
+
+  test('a refused write rolls the mapping back and re-announces it', async () => {
+    // The runtime must forget a mapping that never persisted, so the rollback
+    // announces the restored value rather than leaving the echo in place.
+    const settings = createContextSettings()
+    const scope = makeScope({ priceMap: { k: { vendor: 'zai', model: 'glm-5.2' } } }, { failWrites: true })
+    settings.attach(scope)
+    let calls = 0
+    settings.store.subscribe(() => { calls++ })
+    settings.setPriceMap({ k: { vendor: 'deepseek', model: 'deepseek-flash' } })
+    assert.equal(calls, 1, 'the optimistic echo announces first')
+    await Promise.resolve()
+    await Promise.resolve()
+    assert.equal(calls, 2, 'the rollback announces the restored mapping')
+    assert.deepEqual(settings.priceMap(), { k: { vendor: 'zai', model: 'glm-5.2' } }, 'back to the scope\'s truth')
+  })
+
+  test('a mapping change that also moves a preference notifies once, not twice', () => {
+    const settings = createContextSettings()
+    const scope = makeScope({})
+    settings.attach(scope)
+    let calls = 0
+    settings.store.subscribe(() => { calls++ })
+    scope.push({ defaultGranularity: 'turn', priceMap: { k: { vendor: 'zai', model: 'glm-5.2' } } })
+    assert.equal(calls, 1, 'one delivery, one notification')
+  })
+
   test('a write echoes immediately and reaches the scope under its own key', async () => {
     const settings = createContextSettings()
     const scope = makeScope({})
