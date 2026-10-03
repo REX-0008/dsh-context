@@ -101,7 +101,7 @@ export interface ContextBrowserProps {
     pinnedSeq: number | null,
   ) => ReactNode
   /**
-   * OUR INSERT POINT (PATCHES.md #6): the `system` category's item count while
+   * OUR INSERT POINT (PATCHES.md #5): the `system` category's item count while
    * `systemRows` supplies the rows (the built-in count is the lone prompt row).
    */
   systemCount?: number
@@ -1264,6 +1264,22 @@ export function makeContextBrowser(
       /* v8 ignore next 1 -- the body renders only when the category is open,
          which requires count > 0 ⟺ byCat[c] exists; defensive. */
       const nodes = (byCat[c as Category] ?? []).slice().reverse()
+      // The round each node belongs to, resolved ONCE per render. A node belongs
+      // to the first request whose seq is at or after it (see the row's own note),
+      // and both the node→request walk and the turn→seqs grouping used to run per
+      // RENDERED ROW: a `.find` inside a `.filter` over every surface node, for every
+      // row, which is cubic-ish on a long session (measured 597 ms at 120 rows /
+      // 6000 nodes, against 6 ms here, same output).
+      const ownerOfNode = new Map<number, (typeof requests)[number] | undefined>()
+      for (const candidate of view.nodes) ownerOfNode.set(candidate.seq, requests.find(req => req.seq >= candidate.seq))
+      const seqsByTurn = new Map<number, number[]>()
+      for (const candidate of view.nodes) {
+        const turn = ownerOfNode.get(candidate.seq)?.turn
+        if (turn === undefined) continue
+        const seen = seqsByTurn.get(turn)
+        if (seen === undefined) seqsByTurn.set(turn, [candidate.seq])
+        else seen.push(candidate.seq)
+      }
       // Derive each row's display facts first so the text filter scans exactly
       // what the rows show (tag + preview, plus the assistant join's reasoning)
       // at derivation time, not per keystroke; the survivors render unchanged.
@@ -1396,17 +1412,13 @@ export function makeContextBrowser(
             // node carries no turn of its own, and a prune takes a whole round, so
             // the round is what the caller marks. A node belongs to the first
             // request whose seq is at or after it — the request that consumed it.
-            const owner = requests.find(req => req.seq >= n.seq)
+            const owner = ownerOfNode.get(n.seq)
             // The round's nodes, taken from the WHOLE surface (`view.nodes`), not
             // from this category's slice: a round spans every category — the user
             // message, the assistant replies, the tool calls and their results —
             // so collecting only the open category's rows would prune a fraction
             // of the round the user asked for.
-            const roundSeqs = owner?.turn === undefined
-              ? undefined
-              : view.nodes
-                .filter(candidate => requests.find(req => req.seq >= candidate.seq)?.turn === owner.turn)
-                .map(candidate => candidate.seq)
+            const roundSeqs = owner?.turn === undefined ? undefined : seqsByTurn.get(owner.turn)
             const rowRef: MessageRowRef = {
               seq: n.seq,
               category: n.cat,
