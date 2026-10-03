@@ -102,8 +102,14 @@ describe('detailOf', () => {
     }))
     assert.equal(withOps?.fileOps?.length, 1, 'junk entries drop')
     assert.equal(withOps?.fileOpsFloor, 4)
+    // The timing strip's painted spans ride through, per-item guarded too.
+    const withSpans = detailOf(detail(1, {
+      spans: [{ kind: 'ttft', start: 0, end: 100 }, null],
+    }))
+    assert.equal(withSpans?.spans?.length, 1, 'junk span entries drop')
     // Absent stays absent (the legacy inline generation's marker).
     assert.equal(detailOf(detail(1))?.fileOps, undefined)
+    assert.equal(detailOf(detail(1))?.spans, undefined)
   })
 
   test('the slim head rides through sanitized; a malformed head drops alone', () => {
@@ -246,6 +252,65 @@ describe('DetailStore', () => {
     assert.equal(store.getSnapshot().detail?.rev, 5)
     store.request(2)
     await until(() => store.getSnapshot().detail?.rev === 2, 'the refold reset never refetched')
+  })
+
+  for (const outcome of ['detail', 'absent', 'failure'] as const) {
+    for (const timerFired of [false, true]) {
+      test(`a refold ignores an old ${outcome} before a new read (timer fired: ${String(timerFired)})`, async () => {
+        vi.useFakeTimers()
+        let resolve!: (value: ContextTimelineDetail | null) => void
+        let reject!: (reason: Error) => void
+        let calls = 0
+        const first = new Promise<ContextTimelineDetail | null>((res, rej) => {
+          resolve = res
+          reject = rej
+        })
+        const store = new DetailStore(() => {
+          calls++
+          return calls === 1 ? first : Promise.resolve(detail(2))
+        }, 10)
+        store.request(5)
+        await vi.advanceTimersByTimeAsync(10)
+        store.request(2)
+        if (timerFired) await vi.advanceTimersByTimeAsync(10)
+        assert.equal(calls, 1, 'the reset never stacks a concurrent read')
+
+        if (outcome === 'failure') reject(new Error('offline'))
+        else resolve(outcome === 'detail' ? detail(5) : null)
+        await vi.advanceTimersByTimeAsync(0)
+        assert.equal(store.getSnapshot().detail, null, 'old collections must not land under the new head')
+        assert.equal(store.getSnapshot().failed, false, 'old absence or failure must not fail the new generation')
+        assert.equal(store.getSnapshot().pending, true, 'the new generation still needs its read')
+
+        await vi.advanceTimersByTimeAsync(10)
+        assert.equal(calls, 2)
+        assert.equal(store.getSnapshot().detail?.rev, 2)
+        assert.equal(store.getSnapshot().failed, false)
+        assert.equal(store.getSnapshot().pending, false)
+      })
+    }
+  }
+
+  test('several refolds during one read converge to the latest generation', async () => {
+    vi.useFakeTimers()
+    let resolve!: (value: ContextTimelineDetail | null) => void
+    let calls = 0
+    const first = new Promise<ContextTimelineDetail | null>(res => { resolve = res })
+    const store = new DetailStore(() => {
+      calls++
+      return calls === 1 ? first : Promise.resolve(detail(1))
+    }, 10)
+    store.request(5)
+    await vi.advanceTimersByTimeAsync(10)
+    store.request(3)
+    store.request(1)
+    await vi.advanceTimersByTimeAsync(10)
+    resolve(detail(5))
+    await vi.advanceTimersByTimeAsync(0)
+    assert.equal(store.getSnapshot().detail, null)
+    await vi.advanceTimersByTimeAsync(10)
+    assert.equal(calls, 2)
+    assert.equal(store.getSnapshot().detail?.rev, 1)
   })
 
   test('a transport failure with no detail arms the failed state; the backoff trailing recovers on its own', async () => {
@@ -414,6 +479,7 @@ function SourceProbe(props: { ctx: ClientCtx; sessionId: string; value?: unknown
     h('span', { 'data-k': 'rev' }, String(data?.detailRev ?? 'x')),
     h('span', { 'data-k': 'floors' }, `${String(data?.surfaceFloor ?? 'x')}/${String(data?.archiveFloor ?? 'x')}`),
     h('span', { 'data-k': 'ops' }, String(data?.fileOps?.length ?? 'x')),
+    h('span', { 'data-k': 'spans' }, String(data?.spans?.length ?? 'x')),
     h('span', { 'data-k': 'model' }, data?.model ?? 'x'),
     h('button', { 'data-k': 'retry', onClick: source.retryDetail }, 'retry'))
 }
@@ -423,6 +489,38 @@ function probeRead(container: HTMLElement, key: string): string {
 }
 
 describe('useTimelineSource', () => {
+  test('a refold never merges the previous generation into the pushed head', async () => {
+    vi.useFakeTimers()
+    const response = (value: ContextTimelineDetail) => ({ ok: true, json: async () => ({ ok: true, value }) })
+    let resolve!: (value: ReturnType<typeof response>) => void
+    let calls = 0
+    const first = new Promise<ReturnType<typeof response>>(res => { resolve = res })
+    vi.stubGlobal('fetch', () => {
+      calls++
+      return calls === 1 ? first : Promise.resolve(response(detail(2)))
+    })
+    const ctx = asClientCtx(new TestClientCtx())
+    const m = await mount(h(SourceProbe, { ctx, sessionId: 's1', value: slimHead(5) }))
+    try {
+      await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+      await m.update(h(SourceProbe, { ctx, sessionId: 's1', value: slimHead(2) }))
+      await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+      await act(async () => {
+        resolve(response(detail(5)))
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      assert.equal(probeRead(m.container, 'rev'), '2')
+      assert.equal(probeRead(m.container, 'state'), 'loading')
+      assert.equal(probeRead(m.container, 'steps'), '0', 'no rows from the discarded generation')
+      await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+      assert.equal(calls, 2)
+      assert.equal(probeRead(m.container, 'state'), 'ready')
+      assert.equal(detailStoreOf(ctx, 's1').getSnapshot().detail?.rev, 2)
+    } finally {
+      await m.unmount()
+    }
+  })
+
   test('the inline generation passes through untouched and never fetches', async () => {
     let calls = 0
     const ctx = ctxWithCall(() => {
@@ -550,6 +648,7 @@ describe('useTimelineSource', () => {
             archiveFloor: 5,
             fileOps: [{ seq: 2, path: 'a.ts', kind: 'read', tool: 'read', err: false, added: 0, removed: 0 }],
             fileOpsFloor: 4,
+            spans: [{ kind: 'ttft', start: 0, end: 100 }, { kind: 'other', start: 100, end: 1_400 }],
           }),
         },
       }
@@ -565,6 +664,7 @@ describe('useTimelineSource', () => {
     assert.equal(probeRead(m.container, 'rev'), '3')
     assert.equal(probeRead(m.container, 'floors'), '2/5', 'the detail floors merge')
     assert.equal(probeRead(m.container, 'ops'), '1', 'the op log merges')
+    assert.equal(probeRead(m.container, 'spans'), '2', 'the strip spans merge')
     assert.ok(calls >= 1)
     await m.unmount()
   })
@@ -610,4 +710,3 @@ describe('useTimelineSource', () => {
     await m.unmount()
   })
 })
-

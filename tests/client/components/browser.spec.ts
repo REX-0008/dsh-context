@@ -1923,7 +1923,7 @@ describe('ContextBrowser focus bridges', () => {
       const m = await mount(h(Browser, props({ data, headers, convNodes })))
       await m.update(h(Browser, props({
         data, headers, convNodes,
-        nodeFocus: { step: 'live', seq: 1, cat: 'user' },
+        nodeFocus: { step: 'live', key: 'n1', cat: 'user' },
         onNodeFocusHandled: () => { handled += 1 },
       })))
       assert.equal(handled, 1)
@@ -1934,7 +1934,7 @@ describe('ContextBrowser focus bridges', () => {
       // A step focus switches the assembled view.
       await m.update(h(Browser, props({
         data, headers, convNodes,
-        nodeFocus: { step: 20, seq: 1, cat: 'user' },
+        nodeFocus: { step: 20, key: 'n1', cat: 'user' },
         onNodeFocusHandled: () => { handled += 1 },
       })))
       assert.ok(text(query(m.container, '.lc-br-meta')).includes('Turn 1 · Step 1'))
@@ -1942,7 +1942,7 @@ describe('ContextBrowser focus bridges', () => {
       // A node outside the assembled surface leaves nothing to scroll to.
       await m.update(h(Browser, props({
         data, headers, convNodes,
-        nodeFocus: { step: 'live', seq: 999, cat: 'user' },
+        nodeFocus: { step: 'live', key: 'n999', cat: 'user' },
       })))
       assert.equal(queryAll(m.container, '.lc-br-elem-on').length, 0)
       await m.unmount()
@@ -2035,7 +2035,7 @@ describe('ContextBrowser open-category reporting', () => {
     assert.deepEqual(opens, [null, null], 'pinning resets the accordion')
     await m.update(h(Browser, props({
       data, onOpenCat, pinSeq: 10,
-      nodeFocus: { step: 'live', seq: 1, cat: 'tool' },
+      nodeFocus: { step: 'live', key: 'n1', cat: 'tool' },
       onNodeFocusHandled: () => {},
     })))
     assert.deepEqual(opens, [null, null, 'tool'], 'the reveal opens the node category')
@@ -2069,8 +2069,27 @@ describe('ContextBrowser DNA mode and the open-category bar pin', () => {
     return queryAll(m.container, '.lc-stacked-seg')
   }
 
-  test('the toggle redraws the composition bar as one band per item, in prompt order', async () => {
-    const m = await mount(h(Browser, props({ data: dnaData, headers: dnaHeaders })))
+  test('the DNA toggle is parent-linked when both props arrive; a lone prop is ignored', async () => {
+    // Linked on: the bar redraws and the button reflects the parent's state without a click.
+    const m = await mount(h(Browser, props({ data: dnaData, headers: dnaHeaders, dna: true, onDnaChange: () => {} })))
+    assert.equal(bands(m).length, 7)
+    assert.ok(dnaButton(m).className.includes('lc-gran-on'))
+    // A lone `dna` prop without the handler does NOT link: the mount-local toggle still rules.
+    await m.update(h(Browser, props({ data: dnaData, headers: dnaHeaders, dna: true })))
+    assert.equal(bands(m).length, 6, 'unlinked: the local toggle is off')
+    // The click reports to the parent instead of flipping local state; the bar follows the prop.
+    const calls: boolean[] = []
+    await m.update(h(Browser, props({
+      data: dnaData, headers: dnaHeaders, dna: true,
+      onDnaChange: (on) => { calls.push(on) },
+    })))
+    await click(dnaButton(m))
+    assert.deepEqual(calls, [false])
+    assert.equal(bands(m).length, 7, 'still on until the parent re-renders the prop')
+    await m.unmount()
+  })
+
+  test('the toggle redraws the composition bar as one band per item, in prompt order', async () => {    const m = await mount(h(Browser, props({ data: dnaData, headers: dnaHeaders })))
     // Category mode: one segment per category in CATS order, pick cursor off, tooltip slot unmounted.
     assert.equal(bands(m).length, 6)
     const normal = bands(m).map(seg => seg.style.width)

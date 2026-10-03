@@ -48,10 +48,20 @@ export interface ContextBrowserProps {
   /** Pin-seq: a pin selects that step; pinSeq null returns the browser to the live surface. */
   pinSeq?: number | null
   /**
-   * One-shot reveal request from the step brief: select the step, open the category and the node element, scroll it into view;
-   * handed back via `onNodeFocusHandled` so the same row can fire again.
+   * DNA mode's on/off, LINKED across cards: the Context tab passes its trend card's toggle state
+   * so both DNA switches move as one. Controlled only when BOTH props arrive; absent (the
+   * /context modal) — the browser keeps its own mount-local toggle.
    */
-  nodeFocus?: { step: number | 'live'; seq: number; cat: Category } | null
+  dna?: boolean
+  onDnaChange?: (on: boolean) => void
+  /**
+   * One-shot reveal request (the step brief's locate, a trend-DNA band pick): select the step, open the
+   * item's category and element, scroll it into view. `key` is the band key both DNA surfaces share —
+   * 'sys' (system prompt), 'tool:<name>' (a tool schema), 'n<seq>' (a message) — so the same bridge
+   * serves header bands and message nodes; handed back via `onNodeFocusHandled` so the same row can
+   * fire again.
+   */
+  nodeFocus?: { step: number | 'live'; key: string; cat: Category | 'system' | 'tools' } | null
   onNodeFocusHandled?: () => void
   hoverKey?: string | null
   onHoverKey?: (key: string | null) => void
@@ -817,8 +827,20 @@ export function makeContextBrowser(
     // Mount-time default from the plugin settings card; in-toolbar toggling
     // stays mount-local and never writes back.
     const [toolSort, setToolSort] = useState<DefaultToolSort>(() => settings.defaultToolSort())
-    // DNA mode: the composition bar redraws as ONE band per context item in prompt order (dna.ts), hovered/clicked per item.
-    const [dna, setDna] = useState(false)
+    // DNA mode: the composition bar redraws as ONE band per context item in prompt order (dna.ts), hovered/clicked per
+    // item. Parent-linked when both props arrive — the Context tab's trend toggle moves this one too; a lone
+    // prop is ignored — otherwise mount-local (the /context modal).
+    const [dnaLocal, setDnaLocal] = useState(false)
+    const dnaLinked = props.dna !== undefined && props.onDnaChange !== undefined
+    const dna = dnaLinked ? props.dna === true : dnaLocal
+    const setDna = (on: boolean): void => {
+      if (dnaLinked) {
+        /* v8 ignore next 1 -- `dnaLinked` requires both props, so the handler is always present. */
+        props.onDnaChange?.(on)
+      } else {
+        setDnaLocal(on)
+      }
+    }
     const [dnaKey, setDnaKey] = useState<string | null>(null)
     // δ baseline toggle: 'step' diffs against the immediately preceding record, 'turn' against the
     // previous turn's last step. Mount default from the plugin settings card; in-toolbar toggling
@@ -870,8 +892,10 @@ export function makeContextBrowser(
       setCat(null)
       setOpenElem(null)
     }, [pinSeq, onOpenCat])
-    // Step-brief reveal: select the owning step, open the node's category + element (the pagination effect above already pulls older
-    // history for a missing join), then arm a one-shot scroll consumed by the layout effect once the row renders.
+    // Reveal (step brief / trend-DNA pick): select the owning step, open the item's category +
+    // element (the pagination effect above already pulls older history for a missing join), clear
+    // the row lens so a stale filter cannot hide the revealed row, then arm a one-shot scroll
+    // consumed by the layout effect once the row renders.
     const rootRef = useRef<HTMLDivElement | null>(null)
     const focusScrollRef = useRef(false)
     const nodeFocus = props.nodeFocus
@@ -879,7 +903,9 @@ export function makeContextBrowser(
       if (nodeFocus === null || nodeFocus === undefined) return
       setSel(nodeFocus.step)
       setCat(nodeFocus.cat)
-      setOpenElem('n' + String(nodeFocus.seq))
+      setOpenElem(nodeFocus.key)
+      setRowQuery('')
+      setRowKind(null)
       focusScrollRef.current = true
       if (props.onNodeFocusHandled !== undefined) props.onNodeFocusHandled()
     }, [nodeFocus, props.onNodeFocusHandled, onOpenCat])
@@ -1434,7 +1460,7 @@ export function makeContextBrowser(
             <button
               type="button"
               className={'lc-gran-btn' + (dna ? ' lc-gran-on' : '')}
-              onClick={() => { setDna(on => !on) }}
+              onClick={() => { setDna(!dna) }}
             >
               {t('browser.dna')}
             </button>
