@@ -2,7 +2,7 @@
  * Line-level in-place editing of the preset file (agent.cordis.yml).
  *
  * Follows the "in-place modification" write principle of
- * plans/2026-08-19-上下文工程后端部分.md §1.6: read the original text → find the
+ * plans/ §1.6: read the original text → find the
  * matching plugin row → change that row's config → write back at the same
  * position; no patch-style appending and no whole-file rewrite (unless the change
  * is too large). Only the target plugin row's config subtree is touched; every

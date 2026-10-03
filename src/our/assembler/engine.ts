@@ -2,7 +2,7 @@
  * The engine itself: the module registry + injection + the "activate → apply at
  * the turn boundary" update model.
  *
- * Responsibilities (following plans/2026-08-19-上下文工程后端部分.md §1.4/§6):
+ * Responsibilities (following plans/ §1.4/§6):
  * - registration snapshot: the digest of each agent's last registered modules/tool
  *   restrictions, which getDirty compares against the current configuration;
  * - activation flag (pending): set by applyChanges() (a user click) or by a

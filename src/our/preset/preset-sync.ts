@@ -2,7 +2,7 @@
  * Preset snapshot sync (archive): write the currently effective module assembly
  * description into the user-level preset file.
  *
- * Follows plans/2026-08-19-上下文工程后端部分.md §4 (syncToPreset) and §1.6
+ * Follows plans/ §4 (syncToPreset) and §1.6
  * (in-place modification):
  * - the runtime source of truth is settings (injected in the agent scope, not via
  *   the preset); writing the preset does not affect the runtime;
