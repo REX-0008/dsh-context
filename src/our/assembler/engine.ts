@@ -323,45 +323,61 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
       current.preStepDisposer = agent.ctx.on('agent/pre-step', async (payload, next) => {
         const decision = await next()
         if (decision.kind !== 'enter') return decision
+        // Same posture as the assemble waterfall: recording and suppression are
+        // ours to lose, and a step that cannot run is not. Any failure here
+        // leaves the batch exactly as the other producers built it.
+        try {
         // Record what actually injected into this batch, so the panel can show the
         // CONTENT as well as the producer, and so a producer the static list does
         // not know still becomes suppressible. Labelled the same way the list and
         // the filter are (see `injectorLabel`), or the three would not meet.
-        const seen = new Map<string, InjectionSeen>()
-        for (const message of decision.messages ?? []) {
-          const label = injectorLabel((message as { source?: unknown }).source)
-          if (label === undefined) continue
-          const existing = seen.get(label)
-          const text = messageTextOf(message)
-          if (existing === undefined) {
-            seen.set(label, { label, text, count: 1 })
-          } else {
-            existing.count += 1
-            // Keep the first non-empty text: a label that injected prose is more
-            // informative than one that injected only a notice.
-            if (existing.text === '' && text !== '') existing.text = text
+          const seen = new Map<string, InjectionSeen>()
+          for (const message of decision.messages ?? []) {
+            const label = injectorLabel((message as { source?: unknown }).source)
+            if (label === undefined) continue
+            const existing = seen.get(label)
+            const text = messageTextOf(message)
+            if (existing === undefined) {
+              seen.set(label, { label, text, count: 1 })
+            } else {
+              existing.count += 1
+              // Keep the first non-empty text: a label that injected prose is more
+              // informative than one that injected only a notice.
+              if (existing.text === '' && text !== '') existing.text = text
+            }
           }
+          if (seen.size > 0) this.injectionKinds.set(agent.id, [...seen.values()])
+          const suppressed = this.getConfig().suppressedInjections?.[agent.id]
+          if (suppressed === undefined || suppressed.length === 0) return decision
+          const blocked = new Set(suppressed)
+          const admitted = decision.messages ?? []
+          const messages = admitted.filter((message) => {
+            const label = injectorLabel((message as { source?: unknown }).source)
+            return label === undefined || !blocked.has(label)
+          })
+          return messages.length === admitted.length ? decision : { ...decision, messages }
+        } catch {
+          return decision
         }
-        if (seen.size > 0) this.injectionKinds.set(agent.id, [...seen.values()])
-        const suppressed = this.getConfig().suppressedInjections?.[agent.id]
-        if (suppressed === undefined || suppressed.length === 0) return decision
-        const blocked = new Set(suppressed)
-        const admitted = decision.messages ?? []
-        const messages = admitted.filter((message) => {
-          const label = injectorLabel((message as { source?: unknown }).source)
-          return label === undefined || !blocked.has(label)
-        })
-        return messages.length === admitted.length ? decision : { ...decision, messages }
       })
     }
     if (current.waterfallDisposer === undefined) {
       current.waterfallDisposer = agent.ctx.on('system-prompt/assemble', async (assembly, _context, next) => {
         const transformed = await next()
-        // Record the UNFILTERED section list first: the panel must be able to
-        // list a disabled section (greyed out) and let the user re-enable it,
-        // so the pre-filter view is the one worth keeping.
-        this.lastSections.set(agent.id, transformed.sections.map(s => ({ name: s.name, text: s.text })))
-        return this.rewriteSections(agent.id, transformed, this.presetIdFor(agent))
+        // EVERY failure below degrades to "this layer did not apply", never to a
+        // failed assembly. This listener runs on every request, so an unguarded
+        // throw here would take the whole system prompt down for every
+        // conversation — a far worse outcome than a section override or weight
+        // that quietly stops applying until the bug is fixed.
+        try {
+          // Record the UNFILTERED section list first: the panel must be able to
+          // list a disabled section (greyed out) and let the user re-enable it,
+          // so the pre-filter view is the one worth keeping.
+          this.lastSections.set(agent.id, transformed.sections.map(s => ({ name: s.name, text: s.text })))
+          return this.rewriteSections(agent.id, transformed, this.presetIdFor(agent))
+        } catch {
+          return transformed
+        }
       })
     }
     this.reregister(agent, current)
