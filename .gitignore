@@ -36,3 +36,6 @@ yarn-error.log*
 # Environment variables
 .env
 .env.local
+# Stray commit-message files (write them under .tmp/ instead).
+.cm
+*.txt
