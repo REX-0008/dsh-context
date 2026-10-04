@@ -125,8 +125,6 @@ export const FALLBACK_CHANNEL: 'section' | 'context' = 'section'
 
 /** One agent's registration state. */
 interface RegisteredAgent {
-  /** Module name → registration disposer. */
-  disposers: Map<string, () => void>
   /** Tool restriction disposers (returned by restrict). */
   toolRestrictionsDisposers: Array<() => void>
   /** The global section-switch waterfall disposer (registered once per agent). */
@@ -305,7 +303,7 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
     this.agentBySession.set(agent.id, agent)
     let entry = this.registered.get(agent.id)
     if (entry === undefined) {
-      entry = { disposers: new Map(), toolRestrictionsDisposers: [], snapshotDigest: '', pending: false }
+      entry = { toolRestrictionsDisposers: [], snapshotDigest: '', pending: false }
       this.registered.set(agent.id, entry)
     }
     const current = entry
@@ -388,23 +386,23 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
  * from the current configuration, and update the snapshot.
  */
   private reregister(agent: Agent, entry: RegisteredAgent): void {
-    for (const dispose of entry.disposers.values()) {
-      try { dispose() } catch { /* a failed deregistration does not block the re-registration */ }
-    }
-    entry.disposers.clear()
     for (const dispose of entry.toolRestrictionsDisposers) {
       try { dispose() } catch { /* as above */ }
     }
     entry.toolRestrictionsDisposers = []
 
+    // The modules are NOT registered here.
+    //
+    // @our/prompt-modules owns the loading: it reads the definitions file and
+    // hands the modules to the harness, so the prompt content survives anything
+    // that happens to this plugin (which chases upstream and therefore changes).
+    // Registering them here as well would ALSO throw: dsh refuses a duplicate
+    // section name within a scope ("prompt section \"X\" is already registered").
+    //
+    // What stays here is the DIGEST: the dirty check below compares the
+    // definitions' current state with what was last applied, so the panel still
+    // knows when a change is waiting on the next turn.
     const modules = this.mergedModules()
-    for (const module of modules) {
-      if (!module.enabled) continue
-      const disposer = module.channel === 'section'
-        ? agent.ctx.systemPrompt.section({ name: module.name, order: module.order, text: module.text })
-        : agent.ctx.systemPrompt.context({ name: module.name, order: module.order, text: module.text })
-      entry.disposers.set(module.name, disposer)
-    }
 
     const config = this.getConfig()
     const compiled = compileRestrictions(config.toolRestrictions)
@@ -1028,7 +1026,6 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
   /** @inheritdoc */
   dispose(): void {
     for (const entry of this.registered.values()) {
-      for (const dispose of entry.disposers.values()) { try { dispose() } catch { /* ignore */ } }
       for (const dispose of entry.toolRestrictionsDisposers) { try { dispose() } catch { /* ignore */ } }
       if (entry.waterfallDisposer !== undefined) { try { entry.waterfallDisposer() } catch { /* ignore */ } }
       if (entry.preStepDisposer !== undefined) { try { entry.preStepDisposer() } catch { /* ignore */ } }
