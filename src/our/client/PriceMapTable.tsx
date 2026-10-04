@@ -16,7 +16,7 @@
  * @module @our/context-panel-write/our/client/PriceMapTable
  */
 
-import { useEffect, useMemo, useState, type ReactElement } from 'react'
+import { useMemo, useState, type ReactElement } from 'react'
 import { rowsOfSnapshot, usageTotalsOf } from '../../client/overview'
 import { formatCost, type CostCurrency } from '../../client/cost'
 import { cacheHitPercent } from '../../client/format'
@@ -24,7 +24,6 @@ import type { Translate } from '../../client/i18n'
 import { rowKey, type PriceMapOverrides } from './priceMap'
 import {
   modelChoices,
-  noteObservedPairs,
   priceMapRows,
   vendorChoices,
   type ObservedPair,
@@ -265,9 +264,6 @@ export function PriceMapTable(props: PriceMapTableProps): ReactElement {
   // rebuilt an equal overrides object, and the effect below feeds the pairs into
   // the store — that identity churn once grew into an unbounded render loop.
   const { pairs, tokens } = useMemo(() => observedOf(snapshot), [snapshot])
-  // The runtime synthesizes from the same pair list this table renders, so the
-  // estimate and the table can never disagree about what is billed.
-  useEffect(() => { noteObservedPairs(pairs) }, [pairs])
   // The rows picked in THIS view, by row key. Local first, and this is
   // load-bearing: the stored map arrives through a round-trip (optimistic echo,
   // fenced scope write, republish), and nothing the user sees may wait on it —

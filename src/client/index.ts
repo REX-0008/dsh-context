@@ -36,6 +36,7 @@ import { makeContextView } from './components/contextView'
 import { makeContextJumpButton } from './components/contextJump'
 import { noteBook, priceMapStore, setOverrides } from '../our/client/priceBook'
 import { observeModelPrices } from './modelPrices'
+import { watchObservedPairs } from '../our/client/pairObserver'
 import { watchHistoryFaces } from './historyPage'
 import { watchPlacement } from './placement'
 import { watchSidebarContextTab } from './sidebar'
@@ -101,6 +102,10 @@ function apply(ctx: ClientCtx): void {
   // our/client/priceBook). Mounted here rather than in a component so the
   // estimate is already mapped on the first render that reads it.
   ctx.effect(() => observeModelPrices(noteBook), 'dsh-context: price map follows the book')
+  // The billed pairs must be feeding the runtime whether or not the settings card
+  // is open: a component that mounts only there would leave every local route
+  // unpriced until someone opened it (see our/client/pairObserver).
+  ctx.effect(() => watchObservedPairs(ctx), 'dsh-context: price map follows the sessions list')
   const settings = createContextSettings()
   // The stored overrides reach the runtime from the STORE, not from the settings
   // card: the mapping must price a session whether or not that card is open.
