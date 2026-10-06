@@ -210,16 +210,17 @@ function stateHandler(wiring: Wiring) {
         const edited = own !== undefined
           ? seeded !== undefined && own.text !== seeded
           : overrides[section.name] !== undefined
-        // The module view carries the LIVE order (from settings), while the
-        // registry's is the order captured at registration — an edit does not
-        // move it. Reporting the registry's is why a changed weight looked
-        // unapplied until the next assembly picked it up.
+        // Placement: the module view carries the LIVE order, the registry's the
+        // one captured at registration — an edit does not move the latter.
         const liveOrder = own?.order
         const effectiveOrder = liveOrder ?? origin.order
-        const seededOrder = SEED_MODULES[section.name]?.order
-        const weightEdited = own !== undefined
-          ? liveOrder !== undefined && liveOrder !== seededOrder
-          : weights[section.name] !== undefined
+        // "Weight edited" means ONE thing: a stored override this layer applies
+        // at assemble time. The baseline is therefore what the SYSTEM already
+        // uses (the order the section registers with / the file declares), never
+        // a seed in this codebase: comparing against the seed made every module
+        // whose file placement differed from the seed's look edited, so an
+        // untouched row offered a revert that had nothing to revert TO.
+        const weightEdited = weights[section.name] !== undefined
         const backup = originals[section.name]
         // "Changed" compares the ONE stored backup against the plugin's CURRENT
         // text: the backup is what the text looked like when it was edited, so a
@@ -497,17 +498,16 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
     await scope.update({ sectionOriginals: originals })
   },
   /** Set (or clear, with null) one section's ordering weight. */
-  setSectionWeight: async ({ scope, p, sessionId, service, engine }) => {
+  setSectionWeight: async ({ scope, p }) => {
     const name = String(p.name)
-    // Our own module's placement IS its body field, so the weight is written
-    // there. A plugin's or preset's placement is decided by its own registration
-    // (a preset entry exposes no order key — persona's order comes from the
-    // harness's central table), so for those the weight is held locally as the
-    // outgoing order and applied at send time.
-    if (engine?.isOwnModuleForSession(sessionId, name) === true) {
-      service.updateModule('agent', name, { order: p.weight === null || p.weight === undefined ? undefined : Number(p.weight) })
-      return
-    }
+    // Uniform for EVERY module, including our own.
+    //
+    // The registered placement (what the loader hands the harness, i.e. the
+    // definitions file) is the BASELINE, and an adjustment lives here as a stored
+    // override that the assemble waterfall applies. Writing our own modules' weight
+    // into the file instead made the file hold both roles at once, so "revert" —
+    // which clears the override — had nothing to fall back to and wrote an absent
+    // order, dropping the module to 0.
     const value = scope.get()
     const weights = { ...(value.sectionWeights ?? {}) }
     if (p.weight === null || p.weight === undefined) {
