@@ -39,3 +39,6 @@ yarn-error.log*
 # Stray commit-message files (write them under .tmp/ instead).
 .cm
 *.txt
+
+# Local code-intelligence index (tool scratch, not source).
+.codegraph/
