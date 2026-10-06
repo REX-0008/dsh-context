@@ -36,7 +36,6 @@ import { createSectionRegistry, type SectionRegistry } from './section-registry'
 import { KNOWN_SECTIONS_SOURCE, knownSectionOf } from './known-sections'
 import { KNOWN_INJECTORS } from './known-injectors'
 import { presetEntryForSection } from './preset/section-entries'
-import { SEED_MODULES } from './preset/seeds'
 import type { ContextPanelSettings } from './types'
 import type { Config } from '../host/config'
 
@@ -201,15 +200,14 @@ function stateHandler(wiring: Wiring) {
       const observed = engine === undefined ? [] : engine.observedInjectionsForSession(sessionId)
       const systemSections = sections === null ? null : sections.map((section) => {
         const origin = resolveOrigin(wiring.sections, section.name, registeredOrders, wiring.bridge?.toolOwnerOf)
-        // "Edited" means different things per kind, because the write path
-        // differs. Our own module's body IS the record, so an edit shows up as a
-        // body that no longer matches its seeded default; every other kind keeps
-        // a local override, so its presence is the marker.
+        // "Edited" describes a SEPARATE record kept beside someone else's text.
+        // Our own modules have no such record: their body IS the text, storing it
+        // in the definitions file, so an edit is simply the new body — there is
+        // no "original" to differ from and nothing to restore (see the edit and
+        // clear handlers below). Only another plugin's or a preset's section can
+        // be edited, and its marker is the presence of the override.
         const own = ownModules.get(section.name)
-        const seeded = SEED_MODULES[section.name]?.text
-        const edited = own !== undefined
-          ? seeded !== undefined && own.text !== seeded
-          : overrides[section.name] !== undefined
+        const edited = own === undefined && overrides[section.name] !== undefined
         // Placement: the module view carries the LIVE order, the registry's the
         // one captured at registration — an edit does not move the latter.
         const liveOrder = own?.order
@@ -221,14 +219,12 @@ function stateHandler(wiring: Wiring) {
         // whose file placement differed from the seed's look edited, so an
         // untouched row offered a revert that had nothing to revert TO.
         const weightEdited = weights[section.name] !== undefined
-        const backup = originals[section.name]
         // "Changed" compares the ONE stored backup against the plugin's CURRENT
         // text: the backup is what the text looked like when it was edited, so a
         // difference means the plugin moved on underneath our edit. Only the
-        // kinds that keep a backup can report this.
-        const originalChanged = backup !== undefined && overrides[section.name] === undefined
-          ? false
-          : edited && backup !== undefined && backup !== section.text
+        // kinds that keep a backup can report this, and ours never do.
+        const backup = originals[section.name]
+        const originalChanged = edited && backup !== undefined && backup !== section.text
         return {
           name: section.name,
           // Our own module's text already IS the edited text (the section was
@@ -436,17 +432,17 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
   setSectionText: async ({ scope, p, sessionId, service, engine }) => {
     const name = String(p.name)
     const text = typeof p.text === 'string' ? p.text : ''
-    // A section this plugin injects has no separate body: this plugin's persisted
-    // module registry IS both its source and its body, so the edit goes straight
-    // into that record. Keeping a shadow override for it would leave two bodies
-    // (the settings view reads the module, the panel would read the override) and
-    // the two would drift.
+    // Our own module is edited IN PLACE: its body IS the text, stored in the
+    // definitions file, so an edit is just the new body. No override and no
+    // backup are kept — a backup is what the panel turns into a restore button,
+    // and there is nothing here to restore TO (the file holds the only original).
     if (engine?.isOwnModuleForSession(sessionId, name) === true) {
       service.updateModule('agent', name, { text })
       return
     }
     // Every other kind keeps its real text in someone else's file (a preset's or
-    // a plugin's), so the edit is held locally and applied on the way out.
+    // a plugin's), so the edit is held locally and applied on the way out — and
+    // the first edit stores that plugin text as the restore target.
     const value = scope.get()
     const overrides = { ...(value.sectionOverrides ?? {}) }
     overrides[name] = text
@@ -456,16 +452,15 @@ const ACTION_HANDLERS: Record<string, ActionHandler> = {
     }
     await scope.update({ sectionOverrides: overrides, sectionOriginals: originals })
   },
-  /** Drop an edit: the plugin's own text is used again (its backup goes too). */
-  clearSectionText: async ({ scope, p, sessionId, service, engine }) => {
+  /**
+   * Drop an edit: someone else's text applies again (its backup goes too).
+   *
+   * Our own modules have nothing to drop. Their body IS the text, edited in
+   * place, so there is no override to clear and no original to go back to — the
+   * panel offers them no restore button, and this handler never sees one.
+   */
+  clearSectionText: async ({ scope, p }) => {
     const name = String(p.name)
-    // Our own module has no override to clear — the body IS the edit — so
-    // "restore" means putting the seeded text back.
-    const seeded = SEED_MODULES[name]?.text
-    if (seeded !== undefined && engine?.isOwnModuleForSession(sessionId, name) === true) {
-      service.updateModule('agent', name, { text: seeded })
-      return
-    }
     const value = scope.get()
     const { [name]: _override, ...overrides } = value.sectionOverrides ?? {}
     const { [name]: _original, ...originals } = value.sectionOriginals ?? {}
