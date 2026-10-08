@@ -123,6 +123,19 @@ export interface ModuleDefinition {
  */
 export const FALLBACK_CHANNEL: 'section' | 'context' = 'section'
 
+/**
+ * The parts of the harness assembly this layer reads.
+ *
+ * Structural on purpose (the same discipline as the rest of this file): the real
+ * type lives in the harness runtime, and a type-only import of its package would
+ * still be erased while dragging in declarations that collide with the narrow
+ * shapes used here.
+ */
+export interface SystemPromptAssembly {
+  sections: Array<{ name: string; text: string }>
+  contexts: Array<{ name: string; text: string }>
+}
+
 /** One agent's registration state. */
 interface RegisteredAgent {
   /** Tool restriction disposers (returned by restrict). */
@@ -555,24 +568,40 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
     }
   }
 
-  /** @inheritdoc */
-  async contextsForSession(sessionId: string): Promise<Array<{ name: string; order: number; text: string }> | null> {
+  /**
+   * Assemble the agent's prompt ONCE, for the readers that need it.
+   *
+   * Both the section list and the runtime contexts are halves of the SAME
+   * assembly, and a panel fetch reads both. Assembling per reader ran the whole
+   * prompt build twice for one open — including a `structuredClone` of every tool
+   * schema the harness contributes. Returning the raw assembly lets each reader
+   * do its own shaping off one build.
+   * @param sessionId - the session whose agent to assemble for.
+   * @returns the assembly, or null when there is no live agent or it threw.
+   */
+  async assembleForSession(sessionId: string): Promise<SystemPromptAssembly | null> {
     const agent = this.agentFor(sessionId)
     if (agent === undefined) return null
-    // Contexts are the declared half of the runtime context: they ride the same
-    // assembly as sections (PromptAssembly.contexts) and the same waterfall, so
-    // they are read from the assembly rather than from a second registry walk.
     try {
-      const assembly = await agent.ctx.systemPrompt.assemble(this.assembleContext(agent))
-      const orders = this.registrySections(agent, 'contexts')
-      return assembly.contexts.map(entry => ({
-        name: entry.name,
-        order: orders?.get(entry.name) ?? 0,
-        text: entry.text,
-      }))
+      return await agent.ctx.systemPrompt.assemble(this.assembleContext(agent))
     } catch {
       return null
     }
+  }
+
+  /** @inheritdoc */
+  contextsOfSession(sessionId: string, assembly: SystemPromptAssembly | null): Array<{ name: string; order: number; text: string }> | null {
+    const agent = this.agentFor(sessionId)
+    if (agent === undefined || assembly === null) return null
+    // Contexts are the declared half of the runtime context: they ride the same
+    // assembly as sections (PromptAssembly.contexts), so they are read from the
+    // given assembly rather than from a second registry walk.
+    const orders = this.registrySections(agent, 'contexts')
+    return assembly.contexts.map(entry => ({
+      name: entry.name,
+      order: orders?.get(entry.name) ?? 0,
+      text: entry.text,
+    }))
   }
 
   /**
@@ -840,7 +869,7 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
   }
 
   /** @inheritdoc */
-  async assembleSectionsForSession(sessionId: string): Promise<Array<{ name: string; text: string }> | null> {
+  sectionsOfSession(sessionId: string, assembly: SystemPromptAssembly | null): Array<{ name: string; text: string }> | null {
     // The UNFILTERED list captured by the assemble waterfall is the real
     // assembly the loop built (and it includes sections this layer is currently
     // suppressing, which the panel must still show). It only exists once a turn
@@ -858,13 +887,9 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
     // panel showed a fraction of the sections. The capture still matters for
     // sections this layer currently suppresses (they are absent from the filtered
     // view), so it is merged in rather than dropped.
-    let assemblySections: Array<{ name: string; text: string }> | undefined
-    try {
-      const assembly = await agent.ctx.systemPrompt.assemble(this.assembleContext(agent))
-      assemblySections = assembly.sections.map(section => ({ name: section.name, text: section.text }))
-    } catch {
-      assemblySections = undefined
-    }
+    const assemblySections: Array<{ name: string; text: string }> | undefined = assembly === null
+      ? undefined
+      : assembly.sections.map(section => ({ name: section.name, text: section.text }))
     let captured: Array<{ name: string; text: string }> | undefined
     for (const candidate of sessionIdVariants(sessionId)) {
       const hit = this.lastSections.get(candidate)

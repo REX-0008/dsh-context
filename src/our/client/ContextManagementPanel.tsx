@@ -16,7 +16,7 @@
  *
  * @module @our/context-panel-write/our/client/ContextManagementPanel
  */
-import { useCallback, useEffect, useState, type ReactElement, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactElement, type ReactNode } from 'react'
 import type { BrowserRowBuilder, MessageRowRef } from '../../client/components/browser'
 import type { Translate } from '../../client/i18n'
 import { dispatchAction, fetchState, type PanelState, type SectionKind, type SystemSectionInfo } from './panel-api'
@@ -109,6 +109,7 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
   const [addError, setAddError] = useState('')
 
 
+
   const refresh = useCallback(async (): Promise<void> => {
     try {
       setState(await fetchState(sessionId))
@@ -130,6 +131,29 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
   }, [refresh, sessionId])
 
   const sections: SystemSectionInfo[] = state?.systemSections ?? []
+
+  /**
+   * The section rows to render: the text filter and the placement sort, computed
+   * ONCE per (sections, query) pair.
+   *
+   * Kept at the top level because the consumer is `systemRows`, a callback prop —
+   * a hook inside it would break the Rules of Hooks. Without this, every render
+   * re-filtered and re-sorted the whole list with three `toLowerCase()` calls per
+   * row, and the panel re-renders on every keystroke and every state refresh.
+   */
+  const shownSections = useMemo(() => {
+    const needle = query.trim().toLowerCase()
+    const listed = needle === ''
+      ? sections
+      : sections.filter(section =>
+        section.name.toLowerCase().includes(needle)
+        || (section.plugin ?? '').toLowerCase().includes(needle)
+        || section.text.toLowerCase().includes(needle))
+    // Sorted by the effective placement so an edit reorders the list AT ONCE: the
+    // delivered order is the last ASSEMBLY's snapshot, which only moves on the
+    // next turn.
+    return listed.slice().sort((a, b) => placeOf(a) - placeOf(b))
+  }, [sections, query])
   const stale = sections.some(section => section.staleTable)
   /**
    * Add one module.
@@ -201,19 +225,10 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
     // configuration) is replaced by a note rather than pretending those rows
     // can be changed: edits only ever apply to the current conversation.
     const atPastStep = pinnedSeq !== null
-    // The row filter: matches a section's name, its source plugin, and its text,
-    // which is what makes a long section list navigable.
-    const needle = query.trim().toLowerCase()
-    const listed = needle === ''
-      ? sections
-      : sections.filter(section =>
-        section.name.toLowerCase().includes(needle)
-        || (section.plugin ?? '').toLowerCase().includes(needle)
-        || section.text.toLowerCase().includes(needle))
-    // Sorted by the effective weight so an edit reorders the list AT ONCE: the
-    // delivered order is the last ASSEMBLY's snapshot, which only moves on the
-    // next turn (engine.assembleSectionsForSession).
-    const shown = listed.slice().sort((a, b) => placeOf(a) - placeOf(b))
+    // The filtered + placement-sorted rows, computed once per (sections, query)
+    // at the panel's top level (see `shownSections`): this callback runs on every
+    // render, and re-filtering the whole list here would do it per keystroke.
+    const shown = shownSections
     return (
       <>
         {atPastStep ? (

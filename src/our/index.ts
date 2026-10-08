@@ -173,7 +173,10 @@ function stateHandler(wiring: Wiring) {
       // Per-section assembly (the ONLY source of section-level truth: the
       // rendered system message is already joined into one string before it is
       // logged, so the split is read in-process from systemPrompt.assemble()).
-      const sections = engine === undefined ? null : await engine.assembleSectionsForSession(sessionId)
+      // ONE assembly per fetch: both halves below read this same build (the
+      // section list and the runtime contexts are two halves of one assembly).
+      const assembly = engine === undefined ? null : await engine.assembleForSession(sessionId)
+      const sections = engine === undefined ? null : engine.sectionsOfSession(sessionId, assembly)
       const value = scope === undefined ? null : readPanel(scope.get())
       // Decorate each section for the panel: source kind, whether it is
       // currently suppressed, whether its text was edited, and — when the
@@ -195,7 +198,7 @@ function stateHandler(wiring: Wiring) {
       // rather than per section.
       const registeredOrders = engine === undefined ? {} : engine.registeredOrdersForSession(sessionId)
       // The declared runtime contexts: same assembly, same waterfall as sections.
-      const contexts = engine === undefined ? null : await engine.contextsForSession(sessionId)
+      const contexts = engine === undefined ? null : engine.contextsOfSession(sessionId, assembly)
       // What injected into this conversation's batches, with its content.
       const observed = engine === undefined ? [] : engine.observedInjectionsForSession(sessionId)
       const systemSections = sections === null ? null : sections.map((section) => {

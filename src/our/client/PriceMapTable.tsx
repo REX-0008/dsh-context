@@ -149,6 +149,10 @@ function PriceMapRowCells(props: {
   row: PriceMapRow
   t: Translate
   vendors: ReadonlyArray<{ id: string; name: string }>
+  /** The vendor ids, hoisted so no row rebuilds the list. */
+  vendorIds: readonly string[]
+  /** The chosen vendor's model ids, hoisted so no row re-sorts them. */
+  modelOptions: readonly string[]
   chosenVendor: string
   usage: PairTokens | undefined
   currency: CostCurrency
@@ -157,8 +161,11 @@ function PriceMapRowCells(props: {
   onClear: () => void
 }): ReactElement {
   const { row, t, currency } = props
-  const targetOptions = props.chosenVendor === '' ? [] : modelChoices(props.chosenVendor)
-  const vendorIds = props.vendors.map(vendor => vendor.id)
+  // Both option lists arrive from the parent, computed ONCE per render:
+  // `modelChoices` sorts a vendor's whole model list, and rebuilding it (or the
+  // vendor ids) inside every row made the table O(rows x models log models).
+  const targetOptions = props.modelOptions
+  const vendorIds = props.vendorIds
   // A datalist id must be unique per field, or the browser binds one list to both
   // cells and the model field suggests vendors.
   const listPrefix = 'lc-pricemap-list-' + rowKey(row.provider, row.model).replace(/[^A-Za-z0-9_-]/g, '_')
@@ -242,6 +249,9 @@ function PriceMapRowCells(props: {
 }
 
 /** The block. */
+/** One shared empty list: a blank vendor keeps a stable identity across renders. */
+const EMPTY_OPTIONS: readonly string[] = []
+
 export function PriceMapTable(props: PriceMapTableProps): ReactElement {
   const { t } = props
   const currency: CostCurrency = props.currencyOf?.() ?? 'usd'
@@ -281,6 +291,21 @@ export function PriceMapTable(props: PriceMapTableProps): ReactElement {
     [pairs, overrides, props.revision],
   )
   const vendors = useMemo(() => vendorChoices(), [props.revision])
+  // Hoisted out of the rows: the vendor ids, and a per-vendor model list built
+  // ONCE per book revision. `modelChoices` sorts a vendor's whole model list, so
+  // calling it per row made the table O(rows x models log models) per render.
+  const vendorIds = useMemo(() => vendors.map(vendor => vendor.id), [vendors])
+  const modelOptionsByVendor = useMemo(() => {
+    const byVendor = new Map<string, string[]>()
+    return (vendor: string): readonly string[] => {
+      if (vendor === '') return EMPTY_OPTIONS
+      const cached = byVendor.get(vendor)
+      if (cached !== undefined) return cached
+      const models = modelChoices(vendor)
+      byVendor.set(vendor, models)
+      return models
+    }
+  }, [props.revision])
 
   return (
     <div className="lc-pricemap">
@@ -316,6 +341,8 @@ export function PriceMapTable(props: PriceMapTableProps): ReactElement {
                       row={row}
                       t={t}
                       vendors={vendors}
+                      vendorIds={vendorIds}
+                      modelOptions={modelOptionsByVendor(chosenVendor)}
                       chosenVendor={chosenVendor}
                       usage={tokens.get(key)}
                       currency={currency}

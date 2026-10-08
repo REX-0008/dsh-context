@@ -14,7 +14,7 @@
  * and cannot import them, so the semantics are reproduced here.
  * @module @our/context-panel/panel/modules-store
  */
-import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import {
   MODULES_FILE_VERSION,
@@ -101,12 +101,22 @@ export function openModulesStore(path: string): ModulesStore {
   /** Write the document atomically and adopt it as the cache. */
   const write = (next: ModulesDocument): StoreStatus => {
     mkdirSync(dirname(path), { recursive: true })
-    // Unique per call, so two writers cannot collide on the temp name (the rename
-    // is what makes either of them safe).
+    // Same directory, so the rename stays atomic (a cross-device rename is a copy).
+    // Unique per call, so two writers cannot collide on the temp name.
+    // ponytail: a crash between the write and the rename can leave one temp file
+    // behind. It is inert (nothing reads it) and the next successful write of the
+    // same pid+version overwrites it; reap stale ones if this ever shows up in a
+    // listing as clutter.
     const suffix = [MODULES_FILE_VERSION, process.pid, Date.now()].join('-')
     const temp = join(dirname(path), `.${suffix}.tmp`)
-    writeFileSync(temp, serializeModulesFile(next), 'utf8')
-    renameSync(temp, path)
+    try {
+      writeFileSync(temp, serializeModulesFile(next), 'utf8')
+      renameSync(temp, path)
+    } catch (error) {
+      // Leave no litter on a failed write, then let the caller see the failure.
+      try { rmSync(temp, { force: true }) } catch { /* nothing to clean */ }
+      throw error
+    }
     document = next
     readMtime = mtimeOf(path)
     status = { kind: 'loaded', dropped: 0, document: next }

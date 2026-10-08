@@ -197,7 +197,7 @@ describe('introspection', () => {
       { provider: 'dycp', model: 'mystery' },
     ]
     noteObservedPairs(observed)
-    const rows = priceMapRows(observed)
+    const rows = priceMapRows(observed, {})
     assert.deepEqual(
       rows.map(r => [r.source, r.edited, r.target?.vendor ?? null, r.rate?.miss ?? null]),
       [
@@ -215,7 +215,9 @@ describe('introspection', () => {
     const observed = [{ provider: 'dycp', model: 'mystery' }]
     noteObservedPairs(observed)
     setOverrides({ [rowKey('dycp', 'mystery')]: { vendor: 'deepseek', model: 'deepseek-flash' } })
-    const [row] = priceMapRows(observed)
+    // The overrides are the CALLER's map now (the param is required): a render must
+    // resolve against exactly what it is about to write back.
+    const [row] = priceMapRows(observed, { [rowKey('dycp', 'mystery')]: { vendor: 'deepseek', model: 'deepseek-flash' } })
     assert.equal(row.source, 'override')
     assert.equal(row.edited, true)
     assert.equal(row.rate?.miss, 0.15)

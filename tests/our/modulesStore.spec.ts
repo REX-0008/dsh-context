@@ -128,6 +128,24 @@ describe('writes', () => {
   })
 })
 
+describe('a failed write', () => {
+  test('a write that cannot finish leaves no temp file behind', () => {
+    // The temp file is written into the SAME directory (so the rename stays atomic),
+    // which means a failure between the write and the rename could litter. Block the
+    // RENAME, not the write: a directory cannot be replaced by a file, so the rename
+    // fails with the temp file already on disk — exactly the cleanup path.
+    const target = join(dir, 'as-a-directory')
+    mkdirSync(target, { recursive: true })
+    const broken = openModulesStore(target)
+    assert.throws(() => { broken.upsert('our:x', { text: 'x' }) })
+    assert.deepEqual(
+      readdirSync(dir).filter(name => name.endsWith('.tmp')),
+      [],
+      'the temp file was cleaned up',
+    )
+  })
+})
+
 describe('a hand-edited file', () => {
   test('an edit is picked up by the mtime check', () => {
     store.seedIfAbsent()

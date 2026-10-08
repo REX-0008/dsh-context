@@ -125,11 +125,35 @@ export function noteBook(next: ModelBook): void {
   bump()
 }
 
-/** Replace the observed pairs and rebuild. */
+/**
+ * Replace the observed pairs and rebuild.
+ *
+ * An UNCHANGED pair set is a no-op, for the same reason `setOverrides` guards its
+ * map: this is fed from the sessions list, which mutates on every streaming step,
+ * so rebuilding unconditionally would recompute the price table and notify every
+ * subscriber on each token while the panel is open.
+ * @param next - the pairs observed now.
+ */
 export function noteObservedPairs(next: readonly ObservedPair[]): void {
+  if (samePairs(pairs, next)) return
   pairs = next
   apply()
   bump()
+}
+
+/**
+ * Whether two pair lists name the same (provider, model) set. ORDER is ignored:
+ * the fold walks a snapshot's rows, whose order carries no meaning here, and a
+ * reordered list would otherwise count as a change.
+ * @param a - the current pairs.
+ * @param b - the incoming pairs.
+ * @returns whether they are the same set.
+ */
+function samePairs(a: readonly ObservedPair[], b: readonly ObservedPair[]): boolean {
+  if (a.length !== b.length) return false
+  const seen = new Set(a.map(p => p.provider + '\u0000' + p.model))
+  for (const pair of b) if (!seen.has(pair.provider + '\u0000' + pair.model)) return false
+  return true
 }
 
 /** Whether two override maps are equivalent (they are small: one row per pair). */
@@ -181,10 +205,9 @@ export function vendorBranches(): ModelPrices {
  * @param current - the overrides to resolve against (the caller's own map).
  * @returns the rows in the order given.
  */
-export function priceMapRows(observed: readonly ObservedPair[], current?: PriceMapOverrides): PriceMapRow[] {
-  const effective = current ?? overrides
+export function priceMapRows(observed: readonly ObservedPair[], current: PriceMapOverrides): PriceMapRow[] {
   return observed.map((pair) => {
-    const resolved = resolveTarget(pair.provider, pair.model, vendorBranches(), effective)
+    const resolved = resolveTarget(pair.provider, pair.model, vendorBranches(), current)
     const target = resolved?.target ?? null
     const edited = resolved?.edited ?? false
     const mapped = target === null ? undefined : rateOfTarget(target)

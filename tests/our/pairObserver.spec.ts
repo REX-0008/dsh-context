@@ -89,7 +89,7 @@ describe('watchObservedPairs', () => {
     resetPriceBook()
     const { face } = makeFace(snapshotWith({ a: { dycp: { 'glm-5.3-flash': {} } } }))
     const dispose = watchObservedPairs(face)
-    const rows = priceMapRows([{ provider: 'dycp', model: 'glm-5.3-flash' }])
+    const rows = priceMapRows([{ provider: 'dycp', model: 'glm-5.3-flash' }], {})
     assert.equal(rows.length, 1)
     dispose()
   })
@@ -101,7 +101,7 @@ describe('watchObservedPairs', () => {
     assert.equal(listeners.size, 1, 'the observer subscribed')
     push(snapshotWith({ a: { dycp: { 'glm-5.2': {} } } }))
     assert.deepEqual(
-      (priceMapRows([{ provider: 'dycp', model: 'glm-5.2' }])[0] !== undefined),
+      (priceMapRows([{ provider: 'dycp', model: 'glm-5.2' }], {})[0] !== undefined),
       true,
       'the new pair reached the table derivation',
     )

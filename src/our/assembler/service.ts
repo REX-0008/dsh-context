@@ -7,7 +7,7 @@
 import type { AgentFace as Agent } from '../agent-face'
 import type { PresetEntryInfo } from './preset-entries'
 import type { PromptModule } from '../types'
-import type { InjectionSeen } from './engine'
+import type { InjectionSeen, SystemPromptAssembly } from './engine'
 
 /** The engine service contract (injected by panel-service and by future memory/other consumers). */
 export interface ContextAssemblerService {
@@ -105,7 +105,17 @@ export interface ContextAssemblerService {
    * @param sessionId - the agent (= session) id.
    * @returns the sections; null when the agent or its assembly is unavailable.
    */
-  assembleSectionsForSession(sessionId: string): Promise<Array<{ name: string; text: string }> | null>
+  assembleForSession(sessionId: string): Promise<SystemPromptAssembly | null>
+  /**
+   * The assembled SECTIONS off an assembly the caller already built.
+   *
+   * Split from {@link assembleForSession} so one panel fetch assembles once and
+   * each reader shapes its own half: sections here, contexts next.
+   * @param sessionId - the agent (= session) id.
+   * @param assembly - the assembly to read, or null when there was none.
+   * @returns the sections; null when the agent is unavailable.
+   */
+  sectionsOfSession(sessionId: string, assembly: SystemPromptAssembly | null): Array<{ name: string; text: string }> | null
   /**
    * Park a prune request for the next turn boundary (see the engine's
    * `requestPrune`): nothing happens until then, so the request stays
@@ -166,7 +176,7 @@ export interface ContextAssemblerService {
    * @returns each context's name, placement order and text; null when the agent
    * or its assembly is unavailable.
    */
-  contextsForSession(sessionId: string): Promise<Array<{ name: string; order: number; text: string }> | null>
+  contextsOfSession(sessionId: string, assembly: SystemPromptAssembly | null): Array<{ name: string; order: number; text: string }> | null
   /**
    * Section name to its real placement order, read from the prompt registry —
    * includes sections registered before this plugin mounted, which the live
