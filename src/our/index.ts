@@ -33,7 +33,7 @@ import { createPanelService, type ContextPanelService } from './panel/panel-serv
 import type { ContextAssemblerService } from './assembler/service'
 import { ContextAssemblerEngine } from './assembler/engine'
 import { createSectionRegistry, type SectionRegistry } from './section-registry'
-import { KNOWN_SECTIONS_SOURCE, knownSectionOf } from './known-sections'
+import { knownSectionOf } from './known-sections'
 import { KNOWN_INJECTORS } from './known-injectors'
 import { presetEntryForSection } from './preset/section-entries'
 import type { ContextPanelSettings } from './types'
@@ -106,43 +106,27 @@ function resolveOrigin(
   order?: number
   plugin?: string
   from: 'observed' | 'table' | 'none'
-  staleTable: boolean
 } {
   const seen = registry?.originOf(name)
   const known = knownSectionOf(name)
   // The registry read is the widest source (it holds every registration's own
-  // argument, boot-time ones included); it outranks the stale generated table.
+  // argument, boot-time ones included), and it is the ONLY source of placement:
+  // there is no order snapshot to compare it against, and none is wanted — a copy
+  // would only be a second answer that can fall out of date.
   const real = registered?.[name]
-  if (seen === undefined && real !== undefined) {
-    return {
-      order: real,
-      ...(known !== undefined ? { plugin: known.plugin } : {}),
-      from: 'observed',
-      staleTable: known !== undefined && known.order !== real,
-    }
-  }
-  if (seen !== undefined) {
-    return {
-      order: seen.order,
-      ...(seen.plugin !== undefined ? { plugin: seen.plugin } : (known !== undefined ? { plugin: known.plugin } : {})),
-      from: 'observed',
-      staleTable: known !== undefined && known.order !== seen.order,
-    }
-  }
   // A tool-guidance section is named `tool:<tool>`, so the host's own
   // tool→plugin attribution answers for it — the same resolver the tool row
-  // uses, which covers third-party and MCP providers the table cannot know.
+  // uses, which covers third-party and MCP providers no static list could.
   const toolName = name.startsWith('tool:') ? name.slice('tool:'.length) : undefined
   const ownedBy = toolName === undefined ? undefined : toolOwnerOf?.(toolName)
-  if (known !== undefined) {
-    return { order: known.order, plugin: ownedBy ?? known.plugin, from: 'table', staleTable: false }
-  }
-  if (ownedBy !== undefined) {
-    return { order: undefined, plugin: ownedBy, from: 'observed', staleTable: false }
-  }
-  // Nothing knows it: report the position it actually arrived at, marked as
-  // unattributed, instead of inventing a number.
-  return { from: 'none', staleTable: false, order: undefined }
+  // The owner, best source first: what the registrant told us, then the host's
+  // tool attribution, then the static index for boot-time harness sections.
+  const plugin = seen?.plugin ?? ownedBy ?? known?.plugin
+  if (seen !== undefined) return { order: seen.order, ...(plugin !== undefined ? { plugin } : {}), from: 'observed' }
+  if (real !== undefined) return { order: real, ...(plugin !== undefined ? { plugin } : {}), from: 'observed' }
+  if (plugin !== undefined) return { plugin, from: 'table' }
+  // Nothing knows it: report no placement rather than inventing a number.
+  return { from: 'none' }
 }
 
 /**
@@ -242,13 +226,10 @@ function stateHandler(wiring: Wiring) {
           ...(presetOff.has(section.name) ? { disabledAt: 'preset' as const } : {}),
           edited,
           originalChanged,
-          // Placement/owner resolved above: observed live, filled from the
-          // generated table, or unknown. `staleTable` means the table disagrees
           // with the live order, i.e. the table needs regenerating.
           ...(effectiveOrder === undefined ? {} : { order: effectiveOrder }),
           ...(origin.plugin === undefined ? {} : { plugin: origin.plugin }),
           originFrom: origin.from,
-          staleTable: origin.staleTable,
           /** The plugin's current text, delivered only for the comparison. */
           ...(originalChanged ? { originalText: section.text } : {}),
           weight: weights[section.name],
@@ -264,7 +245,6 @@ function stateHandler(wiring: Wiring) {
           presetEntries: engine === undefined ? [] : engine.presetEntriesForSession(sessionId),
           systemSections,
           /** Where the fallback table was generated from (shown in the panel). */
-          knownSectionsSource: KNOWN_SECTIONS_SOURCE,
           /** The preset this conversation runs on (labels the preset-level state). */
           ...(presetId === undefined ? {} : { presetId }),
           /**

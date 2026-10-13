@@ -1,68 +1,69 @@
 /**
- * Fallback table: prompt-section NAME to its placement order and owning
- * package, for sections this plugin cannot observe being registered.
+ * Static owner index: prompt-section NAME to the package that registers it.
  *
- * Why a fallback is needed at all: the assemble interface hands over
- * `{ name, text }` only — the placement order and the registering plugin are
- * stripped before a section reaches a listener, and this plugin's interception
- * (section-registry.ts) can only see registrations that happen AFTER it mounts.
- * The harness's own sections are registered during boot, so they must be looked
- * up here.
+ * WHY THIS IS STILL NEEDED, AND WHY IT IS THIS SMALL
  *
- * The fallback is used ONLY when interception missed a section, and the panel
- * flags a mismatch when the observed order disagrees with the table (the table
- * is a snapshot and a dsh upgrade can move a section).
+ * The panel answers two questions per row: its placement order and who registered
+ * it. Placement is read LIVE from the running registry (`registrySections`), which
+ * holds each registration's own argument — boot-time registrations included — so
+ * no order is copied here any more: a snapshot would only ever be an out-of-date
+ * duplicate of a value that is already available.
  *
- * GENERATED from deepseek-harness commit/tag in use: `0.1.5-rc.1`
- * (`packages/core/system-prompt/src/index.ts` SECTION_ORDERS plus each
- * registering package's literal). Regenerate rather than hand-edit.
+ * The OWNER has no such live source. `assemble()` strips it, and this plugin's
+ * interception only sees registrations that happen after it mounts, while the
+ * harness registers its own sections during boot. So the owner of those sections
+ * cannot be asked for; it is recorded here.
+ *
+ * The table holds ONLY what nothing else can answer:
+ *   - sections NOT named `tool:<tool>` (that family resolves live, through the
+ *     host's own tool→plugin attribution, which also covers third-party providers
+ *     this file could never list);
+ *   - sections this plugin cannot observe registering (i.e. not its own).
+ * Everything else is dead weight: it would restate a live answer, and a restated
+ * answer is one that can be wrong.
+ *
+ * Names verified against the runtime in use (dsh 0.2.0-rc.2): every entry below
+ * was found as a live `systemPrompt.section({ name })` call with this exact owner.
  * @module @our/context-panel-write/our/known-sections
  */
 
-/** One known section's placement and owner. */
+/** One known section's owning package. */
 export interface KnownSection {
-  /** Placement order the harness sorts by. */
-  order: number
   /** The package that registers the section. */
   plugin: string
 }
 
-/** Where the table was generated from (shown in the panel for audits). */
-export const KNOWN_SECTIONS_SOURCE = 'dsh 0.1.5-rc.1'
+/** Where the owner names were verified, shown in the panel for audits. */
+export const KNOWN_SECTIONS_SOURCE = 'dsh 0.2.0-rc.2'
 
-/** Known sections by name. */
+/**
+ * Sections whose owner nothing else can answer for.
+ *
+ * A harness section registered at boot: no observation saw it, and the assembled
+ * value drops the owner. Package names change far more rarely than placements, so
+ * this list needs verifying only when a harness section is renamed or moved.
+ */
 export const KNOWN_SECTIONS: Record<string, KnownSection> = {
-  'harness:identity': { order: -1000, plugin: '@deepseek-ai/dsh-system-prompt' },
-  'deployment:persona-prefix': { order: 0, plugin: '@deepseek-ai/dsh-persona' },
-  'plan:policy': { order: 500, plugin: '@deepseek-ai/dsh-plan-mode' },
-  'team:policy': { order: 600, plugin: '@deepseek-ai/dsh-tool-agent-team' },
-  'tools:ptc-only': { order: 800, plugin: '@deepseek-ai/dsh-tools' },
-  'context:file-reference': { order: 900, plugin: '@deepseek-ai/dsh-file-reference-local' },
-  'tool:bash': { order: 1000, plugin: '@deepseek-ai/dsh-tool-bash' },
-  'tool:pwsh': { order: 1010, plugin: '@deepseek-ai/dsh-tool-pwsh' },
-  'tool:read': { order: 1100, plugin: '@deepseek-ai/dsh-tool-fs' },
-  'tool:write': { order: 1200, plugin: '@deepseek-ai/dsh-tool-fs' },
-  'tool:edit': { order: 1300, plugin: '@deepseek-ai/dsh-tool-fs' },
-  'tool:glob': { order: 1400, plugin: '@deepseek-ai/dsh-tool-fs-search' },
-  'tool:grep': { order: 1500, plugin: '@deepseek-ai/dsh-tool-fs-search' },
-  'tool:jobs': { order: 1600, plugin: '@deepseek-ai/dsh-tool-jobs' },
-  'tool:pty': { order: 1700, plugin: '@deepseek-ai/dsh-tool-terminal' },
-  'tool:web_search': { order: 2000, plugin: '@deepseek-ai/dsh-tool-web' },
-  'tool:web_fetch': { order: 2100, plugin: '@deepseek-ai/dsh-tool-web' },
-  'tool:lsp': { order: 2200, plugin: '@deepseek-ai/dsh-tool-lsp' },
-  'tool:session-query': { order: 2300, plugin: '@deepseek-ai/dsh-tool-session-query' },
-  'tool:goal': { order: 2400, plugin: '@deepseek-ai/dsh-tool-goal' },
-  'tool:cordis': { order: 2500, plugin: '@deepseek-ai/dsh-tool-cordis' },
-  'tool:ralph': { order: 2700, plugin: '@deepseek-ai/dsh-tool-ralph' },
-  'tools:sdk': { order: 5000, plugin: '@deepseek-ai/dsh-tools' },
-  'ui:deliverable-file-references': { order: 9000, plugin: '@deepseek-ai/dsh-client-ui-deliverables' },
-  'app:web-surface': { order: 10100, plugin: '@deepseek-ai/dsh-web-app' },
+  'harness:identity': { plugin: '@deepseek-ai/dsh-system-prompt' },
+  // The persona sections are registered TWICE by design: dsh-system-prompt puts the
+  // deployment default in the global layer, and dsh-persona registers the same names
+  // in an agent's scope to SHADOW it (dsh-subagent does the same for subagents). The
+  // feature owner is what the panel should name, so it is the scoped registrant.
+  'deployment:persona-prefix': { plugin: '@deepseek-ai/dsh-persona' },
+  'deployment:persona-suffix': { plugin: '@deepseek-ai/dsh-persona' },
+  'plan:policy': { plugin: '@deepseek-ai/dsh-plan-mode' },
+  'team:policy': { plugin: '@deepseek-ai/dsh-experimental-tool-agent-team' },
+  'tools:ptc-only': { plugin: '@deepseek-ai/dsh-tools' },
+  'tools:sdk': { plugin: '@deepseek-ai/dsh-tools' },
+  'context:file-reference': { plugin: '@deepseek-ai/dsh-file-reference-local' },
+  'ui:deliverable-file-references': { plugin: '@deepseek-ai/dsh-client-ui-deliverables' },
+  'app:web-surface': { plugin: '@deepseek-ai/dsh-web-app' },
 }
 
 /**
- * Look one section up.
+ * Look one section's owner up.
  * @param name - the section name as the assembly reports it.
- * @returns its known placement and owner, or undefined when the table has none.
+ * @returns its known owner, or undefined when nothing here knows it.
  */
 export function knownSectionOf(name: string): KnownSection | undefined {
   return KNOWN_SECTIONS[name]

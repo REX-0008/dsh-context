@@ -154,7 +154,6 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
     // next turn.
     return listed.slice().sort((a, b) => placeOf(a) - placeOf(b))
   }, [sections, query])
-  const stale = sections.some(section => section.staleTable)
   /**
    * Add one module.
    *
@@ -234,11 +233,6 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
         {atPastStep ? (
           <div className="lc-br-note">
             {t('our.pastStep')}
-          </div>
-        ) : null}
-        {stale && !atPastStep ? (
-          <div className="lc-br-note" title={t('our.staleTableTip')}>
-            {'⚠ ' + t('our.staleTable', { src: state?.knownSectionsSource ?? '—' })}
           </div>
         ) : null}
         {sections.length === 0 && !atPastStep ? (
@@ -411,13 +405,11 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
                     }} />
                 ) : (
                   <button type="button"
-                    className={'lc-br-tag' + (weightEdited ? ' lc-br-sect-edited' : '') + (section.staleTable ? ' lc-br-sect-stale' : '')}
+                    className={'lc-br-tag' + (weightEdited ? ' lc-br-sect-edited' : '')}
                     style={{ width: '4.5em', textAlign: 'center' }}
-                    title={section.staleTable
-                      ? t('our.weightTip.stale')
-                      : weightEdited
-                        ? t('our.weightTip.edited', { orig: String(section.order ?? '—') })
-                        : section.order === undefined ? t('our.weightTip.unknown') : t('our.weightTip')}
+                    title={weightEdited
+                      ? t('our.weightTip.edited', { orig: String(section.order ?? '—') })
+                      : section.order === undefined ? t('our.weightTip.unknown') : t('our.weightTip')}
                     onClick={(event) => { event.stopPropagation(); setWeightDraft(weightValue === undefined ? '' : String(weightValue)); setWeightOpen(section.name) }}>
                     {weightValue === undefined ? '—' : String(weightValue)}
                   </button>
