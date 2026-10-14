@@ -1,4 +1,4 @@
-// SettingsCard (src/client/components/settingsCard.tsx) rendered with real
+// The preference card (src/client/components/settingsCard.tsx) rendered with real
 // React against the real DICT_EN strings; the select rows open the REAL
 // Menu primitive (portaled into document.body) and pick through it. The
 // "Open in Settings" jump path mounts the card pre-expanded (settingsJump.ts
@@ -7,7 +7,7 @@
 import { createElement as h, useState, useSyncExternalStore } from 'react'
 import assert from 'node:assert/strict'
 import { beforeEach, describe, test } from 'vitest'
-import { makePluginConfigCard, makeSettingsCard } from '../../../src/client/components/settingsCard'
+import { makePluginConfigCard } from '../../../src/client/components/settingsCard'
 import type { SettingsState } from '../../../src/client/settings'
 import { DICT_EN } from '../../../src/client/i18n'
 import { blur, click, focus, keydown, makeKit, mount, query, queryAll, text, typeText } from '../helpers/kit'
@@ -15,7 +15,6 @@ import { rowKey } from '../../../src/our/client/priceMap'
 import { noteBook, priceMapStore, resetPriceBook } from '../../../src/our/client/priceBook'
 
 const kit = makeKit()
-const SettingsCard = makeSettingsCard(kit)
 const PluginConfigCard = makePluginConfigCard(kit)
 
 function hookFor(state: SettingsState) {
@@ -313,7 +312,7 @@ describe('PluginConfigCard (the Plugins-page seat)', () => {
   })
 })
 
-describe('SettingsCard: the model-price mapping block', () => {
+describe('PluginConfigCard: the model-price mapping block', () => {
   // The runtime store is module state shared across cases; each one starts empty.
   beforeEach(() => { resetPriceBook() })
 
@@ -361,15 +360,13 @@ describe('SettingsCard: the model-price mapping block', () => {
 
   test('the block stays collapsed until opened, and is absent without the seat', async () => {
     priceSeat.written = undefined
-    const without = await mount(h(SettingsCard, { useContextSettings: hookFor(stateOf()) }))
+    const without = await mount(h(PluginConfigCard, { useContextSettings: hookFor(stateOf()) }))
     assert.equal(queryAll(without.container, '.lc-settings-pricemap').length, 0, 'no seat, no block')
 
-    const m = await mount(h(SettingsCard, {
+    const m = await mount(h(PluginConfigCard, {
       useContextSettings: hookFor(stateOf()),
       usePriceMap: priceSeat(),
     }))
-    // The card itself starts collapsed; the block lives in its body.
-    await click(query(m.container, '.lc-settings-head') as HTMLElement)
     const head = query(m.container, '.lc-settings-subhead') as HTMLElement
     assert.ok(head, 'the block renders collapsed')
     assert.equal(queryAll(m.container, '.lc-pricemap-table').length, 0, 'the table is not mounted while collapsed')
@@ -380,15 +377,13 @@ describe('SettingsCard: the model-price mapping block', () => {
   })
 
   test('a billed pair renders one row with its mapping and source', async () => {
-    const m = await mount(h(SettingsCard, {
+    const m = await mount(h(PluginConfigCard, {
       useContextSettings: hookFor(stateOf()),
       usePriceMap: priceSeat(),
       useSessions: sessionsSeat({
         dycp: { 'glm-5.3-flash': { peak: { uncached: 2_000_000, cacheRead: 0, cacheWrite: 0, output: 1_000_000 } } },
       }),
     }))
-    // The card itself starts collapsed; the block lives in its body.
-    await click(query(m.container, '.lc-settings-head') as HTMLElement)
     await click(query(m.container, '.lc-settings-subhead') as HTMLElement)
     const cells = queryAll(m.container, '.lc-pricemap-table tbody tr td').map(td => text(td))
     assert.equal(cells[0], 'dycp')
@@ -400,14 +395,13 @@ describe('SettingsCard: the model-price mapping block', () => {
 
   test('opening the block does not re-render without bound when the seat rebuilds its overrides', async () => {
     const churning = churningPriceSeat()
-    const m = await mount(h(SettingsCard, {
+    const m = await mount(h(PluginConfigCard, {
       useContextSettings: hookFor(stateOf()),
       usePriceMap: churning.seat,
       useSessions: sessionsSeat({
         dycp: { 'glm-5.3-flash': { peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } },
       }),
     }))
-    await click(query(m.container, '.lc-settings-head') as HTMLElement)
     await click(query(m.container, '.lc-settings-subhead') as HTMLElement)
     // The table renders, and the preference rows are still on the page: a render
     // loop would have taken the whole card down instead.
@@ -420,13 +414,12 @@ describe('SettingsCard: the model-price mapping block', () => {
   test('a throwing table is fenced: the preference rows survive it', async () => {
     // The reported failure was the whole settings card disappearing. Whatever our
     // block does, the host card's own rows must stay on the page.
-    const m = await mount(h(SettingsCard, {
+    const m = await mount(h(PluginConfigCard, {
       useContextSettings: hookFor(stateOf()),
       usePriceMap: priceSeat(),
       useSessions: sessionsSeat({}),
       currencyOf: () => { throw new Error('boom') },
     }))
-    await click(query(m.container, '.lc-settings-head') as HTMLElement)
     await click(query(m.container, '.lc-settings-subhead') as HTMLElement)
     assert.equal(queryAll(m.container, '.lc-pricemap-table').length, 0, 'the broken table is not rendered')
     assert.equal(queryAll(m.container, '.lc-settings-select').length, 9, 'every preference row survives')
@@ -440,14 +433,13 @@ describe('SettingsCard: the model-price mapping block', () => {
       prices: { zai: { 'glm-5.2': { hit: 1, miss: 2, write: 3, out: 4 }, 'glm-5.3': { hit: 1, miss: 2, write: 3, out: 4 } } },
       index: { byModel: new Map() },
     } as never)
-    const m = await mount(h(SettingsCard, {
+    const m = await mount(h(PluginConfigCard, {
       useContextSettings: hookFor(stateOf()),
       usePriceMap: priceSeat(),
       useSessions: sessionsSeat({
         dycp: { 'glm-5.3-flash': { peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } },
       }),
     }))
-    await click(query(m.container, '.lc-settings-head') as HTMLElement)
     await click(query(m.container, '.lc-settings-subhead') as HTMLElement)
     const inputs = queryAll(m.container, '.lc-pricemap-pick') as HTMLInputElement[]
     const modelList = inputs[1].getAttribute('list') ?? ''
@@ -460,14 +452,13 @@ describe('SettingsCard: the model-price mapping block', () => {
 
   test('an unloaded catalogue says so instead of offering nothing', async () => {
     resetPriceBook()
-    const m = await mount(h(SettingsCard, {
+    const m = await mount(h(PluginConfigCard, {
       useContextSettings: hookFor(stateOf()),
       usePriceMap: priceSeat(),
       useSessions: sessionsSeat({
         dycp: { 'glm-5.3-flash': { peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } },
       }),
     }))
-    await click(query(m.container, '.lc-settings-head') as HTMLElement)
     await click(query(m.container, '.lc-settings-subhead') as HTMLElement)
     assert.ok(text(m.container).includes(DICT_EN['settings.priceMapNoVendors']), 'the empty catalogue is stated')
     await m.unmount()
@@ -483,14 +474,13 @@ describe('SettingsCard: the model-price mapping block', () => {
       const [map, setMap] = useState<Record<string, { vendor: string; model: string }>>({})
       return { overrides: map, write: (next: Record<string, { vendor: string; model: string }>) => { setMap(next) }, revision: 0 }
     }
-    const m = await mount(h(SettingsCard, {
+    const m = await mount(h(PluginConfigCard, {
       useContextSettings: hookFor(stateOf()),
       usePriceMap: live,
       useSessions: sessionsSeat({
         dycp: { 'glm-5.3-flash': { peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } },
       }),
     }))
-    await click(query(m.container, '.lc-settings-head') as HTMLElement)
     await click(query(m.container, '.lc-settings-subhead') as HTMLElement)
     const inputs = queryAll(m.container, '.lc-pricemap-pick') as HTMLInputElement[]
     const modelList = inputs[1].getAttribute('list') ?? ''
@@ -504,14 +494,13 @@ describe('SettingsCard: the model-price mapping block', () => {
     // Seed a book so the vendor list is non-empty (the seats are the module's
     // own store, which is unseeded in jsdom).
     noteBook({ prices: { zai: { 'glm-5.2': { hit: 0.1, miss: 1, write: 0, out: 2 } } }, index: { byModel: new Map() } } as never)
-    const m = await mount(h(SettingsCard, {
+    const m = await mount(h(PluginConfigCard, {
       useContextSettings: hookFor(stateOf()),
       usePriceMap: priceSeat(),
       useSessions: sessionsSeat({
         dycp: { 'glm-5.3-flash': { peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } },
       }),
     }))
-    await click(query(m.container, '.lc-settings-head') as HTMLElement)
     await click(query(m.container, '.lc-settings-subhead') as HTMLElement)
     const inputs = queryAll(m.container, '.lc-pricemap-pick') as HTMLInputElement[]
     assert.equal(inputs.length, 2, 'a vendor field and a model field')
@@ -531,14 +520,13 @@ describe('SettingsCard: the model-price mapping block', () => {
     // An unresolvable pair has no vendor, so the model picker has NO options at
     // all — a menu with only a label row. The primitives' keyboard walk is the
     // kind of code that assumes a selectable row exists.
-    const m = await mount(h(SettingsCard, {
+    const m = await mount(h(PluginConfigCard, {
       useContextSettings: hookFor(stateOf()),
       usePriceMap: priceSeat(),
       useSessions: sessionsSeat({
         dycp: { 'mystery-model': { peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } },
       }),
     }))
-    await click(query(m.container, '.lc-settings-head') as HTMLElement)
     await click(query(m.container, '.lc-settings-subhead') as HTMLElement)
     const picks = queryAll(m.container, '.lc-pricemap-pick') as HTMLElement[]
     assert.equal(picks.length, 2, 'a vendor and a model picker')
@@ -572,12 +560,11 @@ describe('SettingsCard: the model-price mapping block', () => {
       },
     }
     const seat = <T,>(sel: (value: unknown) => T): T => sel(slim)
-    const m = await mount(h(SettingsCard, {
+    const m = await mount(h(PluginConfigCard, {
       useContextSettings: hookFor(stateOf()),
       usePriceMap: priceSeat(),
       useSessions: seat,
     }))
-    await click(query(m.container, '.lc-settings-head') as HTMLElement)
     await click(query(m.container, '.lc-settings-subhead') as HTMLElement)
     assert.ok(query(m.container, '.lc-pricemap-table'), 'the table rendered from a slim head')
     assert.equal(queryAll(m.container, '.lc-settings-select').length, 9, 'the card survives')
@@ -585,28 +572,24 @@ describe('SettingsCard: the model-price mapping block', () => {
   })
 
   test('an empty bill says so instead of drawing an empty table', async () => {
-    const m = await mount(h(SettingsCard, {
+    const m = await mount(h(PluginConfigCard, {
       useContextSettings: hookFor(stateOf()),
       usePriceMap: priceSeat(),
       useSessions: sessionsSeat({}),
     }))
-    // The card itself starts collapsed; the block lives in its body.
-    await click(query(m.container, '.lc-settings-head') as HTMLElement)
     await click(query(m.container, '.lc-settings-subhead') as HTMLElement)
     assert.equal(queryAll(m.container, '.lc-pricemap-table').length, 0)
     assert.ok(text(m.container).includes(DICT_EN['settings.priceMapEmpty']))
   })
 
   test('a stored override marks the row edited and offers the revert control', async () => {
-    const m = await mount(h(SettingsCard, {
+    const m = await mount(h(PluginConfigCard, {
       useContextSettings: hookFor(stateOf()),
       usePriceMap: priceSeat({ [rowKey('dycp', 'glm-5.3-flash')]: { vendor: 'zai', model: 'glm-5.2' } }),
       useSessions: sessionsSeat({
         dycp: { 'glm-5.3-flash': { peak: { uncached: 1_000_000, cacheRead: 0, cacheWrite: 0, output: 0 } } },
       }),
     }))
-    // The card itself starts collapsed; the block lives in its body.
-    await click(query(m.container, '.lc-settings-head') as HTMLElement)
     await click(query(m.container, '.lc-settings-subhead') as HTMLElement)
     const tr = query(m.container, '.lc-pricemap-table tbody tr') as HTMLElement
     assert.equal(tr.className, 'lc-pricemap-edited')
@@ -620,21 +603,3 @@ describe('SettingsCard: the model-price mapping block', () => {
 })
 
 
-describe('SettingsCard: the card shell', () => {
-  test('renders nothing without the settings hook, and nothing while the namespace is unavailable', async () => {
-    const withoutHook = await mount(h(SettingsCard, {}))
-    assert.equal(withoutHook.container.childElementCount, 0, 'no hook, no card')
-    await withoutHook.unmount()
-    const unavailable = await mount(h(SettingsCard, { useContextSettings: hookFor(stateOf({ status: 'unavailable' })) }))
-    assert.equal(unavailable.container.childElementCount, 0, 'an unserved namespace renders nothing')
-    await unavailable.unmount()
-  })
-
-  test('a ready-but-not-writable namespace still renders, with the read-only notice', async () => {
-    const m = await mount(h(SettingsCard, { useContextSettings: hookFor(stateOf({ status: 'ready', writable: false })) }))
-    assert.ok(query(m.container, '.lc-settings-card'))
-    await click(query(m.container, '.lc-settings-head'))
-    assert.ok(text(query(m.container, '.lc-settings-body')).includes(DICT_EN['settings.readOnly']), 'the notice names the read-only state')
-    await m.unmount()
-  })
-})

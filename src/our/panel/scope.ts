@@ -1,7 +1,7 @@
 /**
- * The settings face the write layer reads/writes, unified across the harness
- * generations.
+ * The settings face the write layer reads and writes.
  *
+
  * 0.2.x made the entry's own Config the settings surface: host/config.ts carries
  * our tree under `panel`, marked volatile, and the Loader keeps that field's
  * reference live. The official contract is that a business plugin reads its own
@@ -17,12 +17,12 @@
  * model request) pay that cost. Only the WRITE goes through the service, via
  * `update(ns, patch)`, which is the contract's own write operation.
  *
- * 0.1.x has neither face: it registers a dedicated namespace
- * (`settings.register`) and hands back a live scope.
+ * Every supported line (0.1.7-rc.2 and 0.2.0-rc.2) is this Config-form generation;
+ * the 0.1.x `settings.register` face is gone, so there is no second path to keep.
  * @module @our/context-panel/panel/scope
  */
 import type { ContextPanelSettings } from '../types'
-import { CONTEXT_PANEL_NS, DEFAULT_SETTINGS } from './settings'
+import { DEFAULT_SETTINGS } from './settings'
 
 /** The unified read/write face for the context-panel settings. */
 export interface PanelScope {
@@ -32,16 +32,6 @@ export interface PanelScope {
   update(patch: Partial<ContextPanelSettings>): Promise<void>
 }
 
-/** The scope object the 0.1.x `settings.register` hands back. */
-export interface LegacySettingsScope {
-  get(): ContextPanelSettings
-  update(patch: Partial<ContextPanelSettings>): Promise<void>
-}
-
-/** The 0.1.x settings service face. */
-export interface LegacySettingsFace {
-  register(ns: string, schema: unknown, options?: { base?: unknown; applies?: string }): unknown
-}
 
 /** The 0.2.x settings service face, as far as the write path consumes it. */
 export interface SettingsFormsFace {
@@ -72,13 +62,9 @@ function deepMerge(base: Record<string, unknown>, patch: Record<string, unknown>
   return out
 }
 
-/** Wrap the 0.1.x registration scope into the unified face. */
-export function wrapLegacyScope(scope: LegacySettingsScope): PanelScope {
-  return { get: () => scope.get(), update: patch => scope.update(patch) }
-}
 
 /**
- * Build the 0.2.x face over the entry's own resolved Config reference.
+ * Build the settings face over the entry's own resolved Config reference.
  *
  * @param ref - the resolved `config.panel` volatile reference (see host/config.ts).
  *              `undefined` on a composition whose schema lacks the field, which
@@ -109,8 +95,4 @@ export function createEntryScope(
   }
 }
 
-/**
- * The 0.1.x-only namespace name, kept for the register face. On 0.2.x the
- * settings surface is the entry config, so nothing registers this namespace.
- */
-export { CONTEXT_PANEL_NS }
+

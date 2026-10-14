@@ -1,13 +1,9 @@
 /**
- * The context-panel settings schema + defaults, and the two roots the two
- * harness generations register them through.
+ * The context-panel settings schema + defaults.
  *
- * The field set is declared once (`FIELDS`) and built into two SEPARATE roots:
- * 0.1.x registers `CONTEXT_PANEL_SCHEMA` on its own settings namespace, while
- * 0.2.x nests `CONTEXT_PANEL_ENTRY_SCHEMA` under the entry config's `panel`
- * field, marked volatile (host/config.ts). Separate roots because `.volatile()`
- * mutates the node it is applied to, and the 0.1.x registration must keep
- * resolving plain values.
+ * The field set is declared once (`FIELDS`) and built into the one root the
+ * supported lines use: `CONTEXT_PANEL_SCHEMA` rides the entry config's `panel`
+ * field, marked volatile (host/config.ts).
  * @module @our/context-panel/settings
  */
 import z from '@deepseek-ai/schemastery'
@@ -145,12 +141,8 @@ export function readPanel(value: ContextPanelSettings): ContextPanelSettings {
 }
 
 /** Namespace schema (schemastery primitives: z.dict replaces zod's z.record; fields are optional by default). */
-export const CONTEXT_PANEL_SCHEMA: z<ContextPanelSettings> = z.object(FIELDS)
-
 /**
- * The entry-config carrier for harness 0.2+ (host/config.ts nests it under
- * `panel` and marks it volatile). A separate ROOT node: the volatile mark
- * mutates the node it is applied to, and the registration schema above must
- * keep resolving namespace values as plain data on the 0.1.x lines.
+ * The entry-config carrier: host/config.ts nests it under `panel` and marks it
+ * volatile, so the Loader keeps the field's reference live.
  */
-export const CONTEXT_PANEL_ENTRY_SCHEMA: z<ContextPanelSettings> = z.object(FIELDS)
+export const CONTEXT_PANEL_SCHEMA: z<ContextPanelSettings> = z.object(FIELDS)

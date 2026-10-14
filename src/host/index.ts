@@ -16,7 +16,6 @@ import { createContextActivityDefinition } from './activity'
 import { watchAttachmentChannel } from './attachment'
 import { createToolAttribution } from './attribution'
 import { watchBalanceChannel } from './balance'
-import { installSettings } from './settings'
 import { watchActivityBackfill } from './backfill'
 import { watchPromptInjection } from './promptInjection'
 import { makeColdReadGate } from './coldRead'
@@ -79,7 +78,6 @@ export function apply(ctx: Context, config: Config): void {
   watchActivityBackfill(ctx, coldReads)
   // The configured prefix/suffix sections (upstream's promptInjection.ts).
   watchPromptInjection(ctx, config)
-  installSettings(ctx)
   // OUR INSERT POINT (PATCHES.md #2): mount the write layer alongside upstream's
   // read-only projections. It registers its own settings namespace, its own
   // projection key (contextSections), and its own web routes.

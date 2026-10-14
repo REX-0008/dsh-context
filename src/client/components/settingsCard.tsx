@@ -245,52 +245,6 @@ function PreferenceRows(props: { t: Translate; state: SettingsState; set?: Setti
   )
 }
 
-export function makeSettingsCard(kit: ViewKit): (props: SettingsCardProps) => ReactElement | null {
-  const { t } = kit
-  const PriceMapBoundary = makeErrorBoundary(t)
-  return function SettingsCard(props: SettingsCardProps): ReactElement | null {
-    const [open, setOpen] = useState(false)
-    const itemRef = useRef<HTMLLIElement | null>(null)
-    const state = typeof props.useContextSettings === 'function' ? props.useContextSettings(s => s) : undefined
-    if (state === undefined || state.status === 'unavailable') return null
-    return (
-      <li ref={itemRef} className={'lc-settings-card' + (open ? ' lc-settings-open' : '')}>
-        <button
-          type="button"
-          className="lc-settings-head"
-          aria-expanded={open}
-          aria-label={`${t(open ? 'settings.collapse' : 'settings.expand')}: ${t('settings.title')}`}
-          onClick={() => { setOpen(!open) }}
-        >
-          <span className="lc-settings-headtext">
-            <span className="lc-settings-name">{t('settings.title')}</span>
-            <span className="lc-settings-desc">{t('settings.desc')}</span>
-          </span>
-          <IconChevronDown className="lc-settings-chevron" />
-        </button>
-        {open
-          ? (
-            <div className="lc-settings-body">
-              {!state.writable && state.status === 'ready'
-                ? <p className="lc-settings-note" role="status">{t('settings.readOnly')}</p>
-                : null}
-              <PreferenceRows t={t} state={state} set={props.set} />
-              <PriceMapBlock {...props} t={t} boundary={PriceMapBoundary} />
-            </div>
-          )
-          : null}
-      </li>
-    )
-  }
-}
-
-/**
- * The Plugins-page card (the Config-form generation's `plugins.bundle.config`
- * seat, `view: 'page'`): the page owns the bundle's page and section chrome,
- * so the rows render flat. Same unserved/absent degradation as the
- * settings-section card.
- */
-
 export function makePluginConfigCard(kit: ViewKit): (props: SettingsCardProps) => ReactElement | null {
   const { t } = kit
   const PriceMapBoundary = makeErrorBoundary(t)

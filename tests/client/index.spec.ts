@@ -8,7 +8,7 @@ import { DICT_EN, DICT_ZH } from '../../src/client/i18n'
 import { modalStoreOf, type ModalStore } from '../../src/client/modalStore'
 import type { SettingsField, SettingsScopeLike, SettingsState } from '../../src/client/settings'
 import { TestClientCtx, TestSessions, asClientCtx } from './helpers/harness'
-import { click, mount, query, queryAll, text } from './helpers/kit'
+import { mount, query, queryAll, text } from './helpers/kit'
 
 // The entry ships via `module.exports` (bundle handoff shape); its runtime exports are the plugin triple, opaque to the static import type.
 const { name, inject, apply } = (await import('../../src/client/index')) as unknown as {
@@ -368,39 +368,6 @@ describe('client entry: Context Insights page seats', () => {
   })
 })
 
-describe('client entry: settingsScope inject', () => {
-  test('absent at apply time: the inject stays pending — no settings.plugin.item slot', () => {
-    const ctx = new TestClientCtx()
-    applyTo(ctx)
-    assert.equal(ctx.slots.of('settings.plugin.item').length, 0)
-    ctx.dispose()
-  })
-
-  test('armed later: the pending inject runs — scope attached and card slot registered', () => {
-    const ctx = new TestClientCtx()
-    applyTo(ctx)
-    const scope = makeScope({ status: 'ready', value: {}, writable: true })
-    const specs: { namespace: string }[] = []
-    ctx.setService('settingsScope', {
-      bind: (spec: { namespace: string }) => {
-        specs.push(spec)
-        return scope
-      },
-    })
-    assert.deepEqual(specs, [{ namespace: 'context-panel-write' }])
-    assert.equal(scope.subscribes, 1)
-    assert.equal(ctx.slots.of('settings.plugin.item').length, 1)
-    ctx.dispose()
-  })
-
-  test('defensive arm: service key present but undefined — early return, no slot, no throw', () => {
-    const ctx = new TestClientCtx()
-    ctx.setService('settingsScope', undefined)
-    applyTo(ctx)
-    assert.equal(ctx.slots.of('settings.plugin.item').length, 0)
-    ctx.dispose()
-  })
-})
 
 describe('client entry: configForms inject (the Config-form generation)', () => {
 
@@ -472,6 +439,41 @@ describe('client entry: configForms inject (the Config-form generation)', () => 
     ctx.dispose()
   })
 })
+describe('client entry: the price-mapping seat', () => {
+  test('reports the store revision and reads/writes the mapping through the settings store', async () => {
+    const ctx = new TestClientCtx()
+    applyTo(ctx)
+    const scope = makeScope({ status: 'ready', value: {}, writable: true })
+    const forms = fakeConfigForms(scope)
+    ctx.setService('configForms', forms)
+    forms.register()
+    const entry = ctx.slots.of('plugins.bundle.config')[0]
+    const face = (entry.registration as never as { inject?: () => Record<string, unknown> }).inject?.() as {
+      hooks: { priceMapRevision: { getSnapshot(): number; subscribe(fn: () => void): () => void } }
+      usePriceMap: () => {
+        overrides: Record<string, { vendor: string; model: string }>
+        write: (next: Record<string, { vendor: string; model: string }>) => void
+        revision: number
+      }
+    }
+    // The seat's hook must run inside a component body (React's rules), so mount
+    // a throwaway one that hands the seat's own triple back to the test.
+    const seen: { revision: number; write: (n: Record<string, { vendor: string; model: string }>) => void }[] = []
+    function Probe(): ReactElement {
+      const seat = face.usePriceMap()
+      seen.push({ revision: seat.revision, write: seat.write })
+      return h('div', { className: 'probe' }, String(seat.revision) + ':' + String(Object.keys(seat.overrides).length))
+    }
+    const m = await mount(h(Probe))
+    assert.equal(typeof seen[0].revision, 'number')
+    assert.equal(text(m.container), '0:0', 'no overrides, revision 0')
+    seen[0].write({ x: { vendor: 'zai', model: 'glm-5.3' } })
+    assert.deepEqual(scope.sets, [{ field: 'priceMap', value: { x: { vendor: 'zai', model: 'glm-5.3' } } }])
+    await m.unmount()
+    ctx.dispose()
+  })
+})
+
 
 describe('client entry: right Sidebar Context tab', () => {
   test('absent sidebar registry at apply time: no tab, no body seat, no throw', () => {
@@ -502,99 +504,6 @@ describe('client entry: right Sidebar Context tab', () => {
   })
 })
 
-describe('client entry: settings card slot', () => {
-  function setup(): {
-    ctx: TestClientCtx
-    scope: ReturnType<typeof makeScope>
-    registration: { name: string; key?: string; locale?: string; inject?: () => unknown }
-    component: (props: Record<string, unknown>) => unknown
-  } {
-    const scope = makeScope({ status: 'loading', value: null, writable: false })
-    const ctx = new TestClientCtx({
-      services: { settingsScope: { bind: () => scope } },
-    })
-    applyTo(ctx)
-    const entry = ctx.slots.of('settings.plugin.item')[0]
-    return {
-      ctx,
-      scope,
-      registration: entry.registration as never,
-      component: entry.component as never,
-    }
-  }
-
-  test('registers the keyed card; inject exposes the settings store and a set verb', () => {
-    const { ctx, scope, registration } = setup()
-    assert.equal(registration.name, 'settings.plugin.item')
-    assert.equal(registration.key, '@our/context-panel-write')
-    assert.equal(registration.locale, '@our/context-panel-write')
-
-    const face = registration.inject?.() as {
-      hooks: { contextSettings: { getSnapshot(): SettingsState }; priceMapRevision: unknown }
-      set: (field: SettingsField, value: string) => void
-      usePriceMap: () => {
-        overrides: Record<string, { vendor: string; model: string }>
-        write: (next: Record<string, { vendor: string; model: string }>) => void
-        revision: number
-      }
-    }
-    assert.equal(face.hooks.contextSettings.getSnapshot().granularity, 'step')
-    face.set('defaultGranularity', 'turn')
-    assert.equal(face.hooks.contextSettings.getSnapshot().granularity, 'turn')
-    assert.deepEqual(scope.sets, [{ field: 'defaultGranularity', value: 'turn' }])
-    // The price-mapping seat rides the same face. Its reader is a real hook, so
-    // it is exercised in the render test below, not called out of band.
-    assert.ok(face.hooks.priceMapRevision, 'the revision observable is exposed')
-    ctx.dispose()
-  })
-
-  test('the price-mapping seat reads the stored overrides and writes them back', async () => {
-    const { ctx, scope } = setup()
-    const face = ctx.slots.of('settings.plugin.item')[0].registration.inject?.() as {
-      usePriceMap: () => {
-        overrides: Record<string, { vendor: string; model: string }>
-        write: (next: Record<string, { vendor: string; model: string }>) => void
-        revision: number
-      }
-    }
-    // The seat is a hook, so a component calls it exactly as the card does.
-    let seen: { overrides: Record<string, { vendor: string; model: string }>; revision: number } | undefined
-    let write: ((next: Record<string, { vendor: string; model: string }>) => void) | undefined
-    function Probe(): ReactElement {
-      const seat = face.usePriceMap()
-      seen = { overrides: seat.overrides, revision: seat.revision }
-      write = seat.write
-      return h('span', null, String(seat.revision))
-    }
-    const m = await mount(h(Probe as never, {}))
-    assert.deepEqual(seen?.overrides, {}, 'no overrides stored yet')
-    assert.equal(typeof seen?.revision, 'number')
-    write?.({ k: { vendor: 'zai', model: 'glm-5.2' } })
-    assert.deepEqual(scope.sets, [{ field: 'priceMap', value: { k: { vendor: 'zai', model: 'glm-5.2' } } }])
-    await m.unmount()
-    ctx.dispose()
-  })
-
-  test('the component renders the card DOM (loading status → disabled selects)', async () => {
-    const { ctx, component } = setup()
-    const el = component({}) as ReactElement
-    assert.equal(typeof el.type, 'function')
-    assert.equal((el.type as { name: string }).name, 'SettingsCard')
-    const store = (ctx.slots.of('settings.plugin.item')[0].registration.inject?.() as {
-      hooks: { contextSettings: { getSnapshot(): SettingsState } }
-    }).hooks.contextSettings
-    const m = await mount(h(el.type as never, {
-      useContextSettings: <T,>(sel: (state: SettingsState) => T): T => sel(store.getSnapshot()),
-    }))
-    assert.ok(query(m.container, '.lc-settings-card'))
-    await click(query(m.container, '.lc-settings-head'))
-    const selects = queryAll(m.container, '.lc-settings-select')
-    assert.equal(selects.length, 9)
-    for (const s of selects) assert.ok((s as HTMLButtonElement).disabled)
-    await m.unmount()
-    ctx.dispose()
-  })
-})
 
 describe('client entry: placement gating', () => {
   /** The sidebar registry stand-in counting registrations and disposer calls. */

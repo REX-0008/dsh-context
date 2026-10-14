@@ -25,10 +25,10 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 // No compaction type import: the capability is optional and its package name is
 // not resolvable from every install, so the `compaction/summary` guard below
 // compares by string instead of relying on the merged event table.
-import { CONTEXT_PANEL_NS, CONTEXT_PANEL_SCHEMA, DEFAULT_SETTINGS, readPanel } from './panel/settings'
+import { CONTEXT_PANEL_NS, readPanel } from './panel/settings'
 import { modulesFileOf } from './panel/data-dir'
 import { openModulesStore } from './panel/modules-store'
-import { createEntryScope, wrapLegacyScope, type LegacySettingsFace, type LegacySettingsScope, type PanelScope, type SettingsFormsFace, type VolatileRef } from './panel/scope'
+import { createEntryScope, type PanelScope, type SettingsFormsFace, type VolatileRef } from './panel/scope'
 import { createPanelService, type ContextPanelService } from './panel/panel-service'
 import type { ContextAssemblerService } from './assembler/service'
 import { ContextAssemblerEngine, type SectionLevel } from './assembler/engine'
@@ -574,17 +574,14 @@ export function applyOur(ctx: Context, config: Config | undefined, bridge?: OurH
   ctx.effect(() => {
     const wiring: Wiring = bridge === undefined ? {} : { bridge }
     const disposeCore = ctx.inject(['settings', 'sessionProjections'], (sctx) => {
-      // Two harness generations. 0.1.x registers a live namespace scope. 0.2.x
-      // made the entry config the settings surface (host/config.ts nests our tree
+      // The entry config is the settings surface (host/config.ts nests our tree
       // under `panel`, marked volatile): the READ is the entry's own resolved
       // Config reference — the contract's business-plugin path — and only the
       // write goes through the Settings service.
-      const settings = sctx.settings as unknown as Partial<LegacySettingsFace & SettingsFormsFace>
-      const scope: PanelScope = typeof settings.register === 'function'
-        ? wrapLegacyScope(settings.register(CONTEXT_PANEL_NS, CONTEXT_PANEL_SCHEMA, { base: DEFAULT_SETTINGS, applies: 'live' }) as LegacySettingsScope)
-        : createEntryScope(panelRefOf(config), settings as SettingsFormsFace, CONTEXT_PANEL_NS)
+      const settings = sctx.settings as unknown as SettingsFormsFace
+      const scope: PanelScope = createEntryScope(panelRefOf(config), settings, CONTEXT_PANEL_NS)
       // The raw entry-config form would duplicate our panel UI; keep the entry
-      // out of the auto-generated settings pages (a no-op on the register face).
+      // out of the auto-generated settings pages.
       settings.configure?.({ auto: false }, ctx.fiber)
       const engine = new ContextAssemblerEngine()
       // The engine resolves agents on demand (an agent created before this

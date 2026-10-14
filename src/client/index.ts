@@ -7,11 +7,11 @@ import { DICT_EN, DICT_ZH } from './i18n'
 import { registerContextCommand } from './command'
 import { makeContextModal } from './components/contextModal'
 import { makeOverviewPanel } from './components/overviewPanel'
-import { makePluginConfigCard, makeSettingsCard } from './components/settingsCard'
+import { makePluginConfigCard } from './components/settingsCard'
 import { watchInsightPage } from './insightPage'
 import { modalStoreOf } from './modalStore'
 import { entrySeated, type ClientCtx } from './services'
-import { createContextSettings, type ConfigFormsFace, type SettingsField, type SettingsScopeBinderFace } from './settings'
+import { createContextSettings, type ConfigFormsFace, type SettingsField } from './settings'
 import { makeContextView } from './components/contextView'
 import { makeContextJumpButton } from './components/contextJump'
 import { noteBook, priceMapStore, setOverrides } from '../our/client/priceBook'
@@ -194,33 +194,14 @@ function apply(ctx: ClientCtx): void {
     },
   })
 
-  // Per-user display preferences. Two generations, two transports and seats,
-  // switched by SERVICE PRESENCE (each deferred inject fires on exactly one
-  // side; a host without its service never runs the callback):
-  //   - the settingsScope generation registers the card on the keyed
-  //     `settings.plugin.item` slot (Settings → Plugins → Plugin
-  //     configuration), binding the Host-served `dsh-context` namespace;
-  //   - the Config-form generation (dsh 0.1.7+) retired that pair — there the
-  //     card rides the configForms transport and the Plugins page's keyed
-  //     `plugins.bundle.config` seat, alive only while the Host serves the
-  //     entry (its Config's volatile preference fields).
-  // The two seats key differently (see the NS/SETTINGS_NS note above): the slot
-  // key is the bundle package name, the transport namespace the loader entry id.
-  ctx.inject(['settingsScope'], (raw) => {
-    const c = raw as ClientCtx & { settingsScope?: SettingsScopeBinderFace }
-    const binder = c.settingsScope
-    if (binder === undefined) return
-    c.effect(() => settings.attach(binder.bind({ namespace: SETTINGS_NS })), 'dsh-context: settings scope')
-    const SettingsCard = makeSettingsCard(kit)
-    c.slots.inject('settings.plugin.item', () => {
-      return c.slots.register(
-        { name: 'settings.plugin.item', key: NS, locale: NS, inject: cardFace },
-        // Root-scope keyed slot: no sessionId on these props — the face
-        // (hooks + set) arrives through the registration's inject.
-        props => h(SettingsCard, props as unknown as Parameters<typeof SettingsCard>[0]),
-      )
-    })
-  })
+  // Per-user display preferences. A single generation: every supported line is on
+  // the Config-form transport (dsh 0.1.7+), where the card rides `configForms` and
+  // the Plugins page's keyed `plugins.bundle.config` seat, alive only while the Host
+  // serves the entry (its Config's volatile preference fields). The 0.1.x
+  // settingsScope/`settings.plugin.item` pair is gone, as is its Host half
+  // (host/settings.ts, upstream's own removal in a988c9a).
+  // The seat key is the bundle package name, the transport namespace the loader
+  // entry id (see the NS/SETTINGS_NS note above).
   ctx.inject(['configForms'], (raw) => {
     const c = raw as ClientCtx & { configForms?: ConfigFormsFace }
     const forms = c.configForms
