@@ -1,53 +1,32 @@
-/**
- * dsh-context — Client half (installed package bundle entry).
- *
- * Registers a "上下文/Context" tab in the conversation view ring
- * (`conversation.view` slot, beside Chat/Trajectory) and renders the
- * context-composition timeline: current makeup, per-request stacked-bar
- * history, context events, and the live message list.
- *
- * Since v0.9 the tab rides the harness's session-projection pipeline
- * (`contextTimeline` projection key), read from the framework standard kit
- * (`useProjection('contextTimeline')`, a standard prop on every session-scope
- * slot component). The wire value is the split generation's slim head; the
- * heavy collections arrive on demand from the host's detail endpoint, one
- * read per viewing client (timelineSource.ts). No polling, no stale-while-
- * revalidate cache.
- *
- * This module is the body of the package's `./client` bundle: tsdown
- * (tsdown.config.ts) bundles it (external `react` — the browser module table
- * supplies it via the injected `require`) into the web boot handoff
- * (`window.__ModuleLoader__.load({id, factory})`). All imports from other
- * client modules are inlined by the bundler; everything here is zero-runtime
- * beyond the bundled source.
- */
+/** dsh-context — client half bundle entry. The Context view reads the harness session projection
+ * `contextTimeline` (the split generation's slim head); heavy collections arrive on demand from the
+ * host's detail endpoint, one read per viewing client (timelineSource.ts). */
 
 import { createElement as h, useSyncExternalStore } from 'react'
 import { DICT_EN, DICT_ZH } from './i18n'
 import { registerContextCommand } from './command'
 import { makeContextModal } from './components/contextModal'
-import { makeOverviewButton } from './components/overviewButton'
 import { makeOverviewPanel } from './components/overviewPanel'
-import { makeSettingsCard, makePluginConfigCard } from './components/settingsCard'
+import { makePluginConfigCard, makeSettingsCard } from './components/settingsCard'
+import { watchInsightPage } from './insightPage'
 import { modalStoreOf } from './modalStore'
-import type { ClientCtx } from './services'
+import { entrySeated, type ClientCtx } from './services'
 import { createContextSettings, type ConfigFormsFace, type SettingsField, type SettingsScopeBinderFace } from './settings'
 import { makeContextView } from './components/contextView'
 import { makeContextJumpButton } from './components/contextJump'
 import { noteBook, priceMapStore, setOverrides } from '../our/client/priceBook'
 import { observeModelPrices } from './modelPrices'
 import { watchObservedPairs } from '../our/client/pairObserver'
+import { makeFleetView } from './components/fleetView'
+import { watchFleetTab } from './fleetTab'
+import { makeAgentHeads } from './agentHeads'
 import { watchHistoryFaces } from './historyPage'
 import { watchPlacement } from './placement'
 import { watchSidebarContextTab } from './sidebar'
 import { makeViewKit } from './viewkit'
 
-// Theme-native styles: the bundle's global-CSS channel injects each sheet as
-// a plugin-owned <style data-plugin> tag at factory execution (the web boot
-// loader and the HMR receiver claim tags carrying data-plugin). Import order
-// IS cascade order across same-specificity rules: the Tailwind utilities
-// first (the sibling sheets keep winning same-specificity ties), then base,
-// then the per-component sheets in their original section order.
+// Import order IS cascade order among same-specificity rules: the Tailwind utilities sheet stays first,
+// then base, then the per-component sheets, which keep winning the ties.
 import './styles/tailwind.css'
 import './styles/base.css'
 import './styles/stats.css'
@@ -63,7 +42,9 @@ import './styles/browser.css'
 import './styles/detailSections.css'
 import './styles/attachments.css'
 import './styles/agentGraph.css'
+import './styles/fleet.css'
 import './styles/overview.css'
+import './styles/dateRange.css'
 // Ours last, so our additions win on equal specificity without editing upstream
 // sheets (all classes here are new; see contextManagement.css).
 import './styles/contextManagement.css'
@@ -79,23 +60,29 @@ import './styles/contextManagement.css'
 const NS = '@our/context-panel-write'
 const SETTINGS_NS = 'context-panel-write'
 
+/** The chat→Context jump entry doubles as this bundle's mount marker: no
+ * preference gates it, so a ledger seating it means a mount already registered
+ * the bundle's seats. */
+const JUMP_SLOT = 'conversation.chat.assistant-actions'
+const JUMP_ID = 'context-jump'
+
 function apply(ctx: ClientCtx): void {
-  // Bilingual dictionaries, registered via ctx.effect so a stop or HMR reload
-  // disposes them; the tab label thunk and all UI text follow the active
-  // locale through the bound translate — missing keys resolve through the
-  // harness chain (en fallback, then the key).
+  // One live mount per page (dsh-context#137). Two mounts of this bundle share
+  // one slot ledger, and the client-plugin runner force-assigns a fresh
+  // shadowing priority to every registration, so the registry's same-id guard
+  // never fires across them and the session header — which renders the raw
+  // ledger and matches the active view by id — paints both copies of every
+  // seat. A marker already in the ledger means a mount is live: this one adds
+  // nothing. Fails open, so a face without the ledger view still mounts.
+  if (entrySeated(ctx, JUMP_SLOT, JUMP_ID)) return
   ctx.effect(() => {
     return ctx.locale.register(NS, { zh: DICT_ZH, en: DICT_EN })
   }, 'dsh-context: dictionaries')
   const t = ctx.locale.bind(NS)
 
   const kit = makeViewKit(t)
-  // History face of the harness gateway remotes, resolved through the
-  // DECLARED inject — a non-declared read of the traced `remote.session`
-  // proxy throws ("cannot get property … without inject") and would take
-  // the browser down with the view. Injection waits for the service; a
-  // harness that never composes the namespace never fires the callback and
-  // the targeted fetches simply stay absent.
+  // History faces are resolved through the DECLARED inject: a non-declared read of the traced remote proxy
+  // throws "cannot get property … without inject" and takes the view down (see historyPage.ts).
   watchHistoryFaces(ctx)
   // The price-mapping runtime follows the price book: each published book is
   // adopted, and the local routes' branches are synthesized from it (see
@@ -107,7 +94,7 @@ function apply(ctx: ClientCtx): void {
   // unpriced until someone opened it (see our/client/pairObserver).
   ctx.effect(() => watchObservedPairs(ctx), 'dsh-context: price map follows the sessions list')
   const settings = createContextSettings()
-  // The stored overrides reach the runtime from the STORE, not from the settings
+  // The stored overrides reach the runtime from the STORE, not the settings
   // card: the mapping must price a session whether or not that card is open.
   // (The card's own push was an identity-keyed effect, and its churn is what once
   // spun an unbounded render loop.) setOverrides ignores an equal map, so the
@@ -117,41 +104,44 @@ function apply(ctx: ClientCtx): void {
     push()
     return settings.store.subscribe(push)
   }, 'dsh-context: price map follows the settings store')
-  const ContextView = makeContextView(ctx, kit, settings)
+  // Poll the sessions list so the mapping's observed pairs are in force before any
+  // surface reads a price (see our/client/pairObserver).
+  ctx.effect(() => watchObservedPairs(ctx), 'dsh-context: price map follows the sessions list')
+  // One page-scope cold-head cache for every agent-data reader: the Context view's stats cell and inline card
+  // (right Sidebar host), and the Fleet tab's card — all of which can be mounted at the same time.
+  const heads = makeAgentHeads()
+  const ContextView = makeContextView(ctx, kit, settings, heads)
+  const FleetView = makeFleetView(ctx, kit, heads)
 
-  // Placement: the per-user `defaultPlacement` preference picks which
-  // registration carries the view — the conversation tab, the right Sidebar
-  // (dsh 0.1.5-rc.1+, optional by contract), or both (the default). Each
-  // mount owns its disposer so the watcher takes down exactly what a
-  // preference flip drops (see placement.ts).
   ctx.effect(() => watchPlacement(settings, {
-    tab: () => ctx.slots.inject('conversation.view', () => {
-      return ctx.slots.register(
-        // order 20 renders right of Chat (0) and Trajectory (10); the locale
-        // namespace put the framework `t` seat on the component's props too.
-        { name: 'conversation.view', id: 'context', order: 20, locale: NS, label: () => t('tab') },
-        props => h(ContextView, props),
-      )
-    }),
+    tab: () => ctx.slots.inject('conversation.view', () => ctx.slots.register(
+      // order 20 renders right of Chat (0) and Trajectory (10).
+      { name: 'conversation.view', id: 'context', order: 20, locale: NS, label: () => t('tab.context') },
+      props => h(ContextView, props),
+    )),
     sidebar: () => watchSidebarContextTab(ctx, ContextView, t, NS),
   }), 'dsh-context: placement')
 
-  // Chat → Context jump: an icon in each finalized reply's action row that
-  // opens the Context tab on the right Sidebar pinned to that reply's turn —
-  // falling back to the conversation tab wherever the sidebar serves no tab
-  // (see contextJump.tsx; the relay and view activation live in viewFocus.ts).
+  // The Fleet tab: its own show/hide preference on top of the placement gate (fleetTab.ts).
+  ctx.effect(() => watchFleetTab(
+    ctx,
+    settings,
+    props => h(FleetView, props as unknown as Parameters<typeof FleetView>[0]),
+    t,
+    NS,
+  ), 'dsh-context: fleet tab')
+
+  // Chat → Context jump: opens the right Sidebar's tab pinned to the reply's turn where served, else the
+  // conversation tab (contextJump.tsx; relay and activation in viewFocus.ts).
   const ContextJump = makeContextJumpButton(ctx, kit)
-  ctx.slots.inject('conversation.chat.assistant-actions', () => {
+  ctx.slots.inject(JUMP_SLOT, () => {
     return ctx.slots.register(
       // After the shipped feedback entry (10), still inside the icon row.
-      { name: 'conversation.chat.assistant-actions', id: 'context-jump', order: 20, locale: NS },
+      { name: JUMP_SLOT, id: JUMP_ID, order: 20, locale: NS },
       props => h(ContextJump, props),
     )
   })
 
-  // `/context` slash command: opens the context modal (see command.ts for
-  // the trigger source). The modal itself renders from the input overlay
-  // slot, opened per session through the hooks-compartment store.
   registerContextCommand(ctx, kit)
   const ContextModal = makeContextModal(ctx, kit, settings)
   ctx.slots.inject('conversation.input.overlay', () => {
@@ -165,30 +155,18 @@ function apply(ctx: ClientCtx): void {
     )
   })
 
-  // The Context Dashboard (see components/overviewPanel.tsx): the cross-session
-  // insight surface. The entry is a footer action — the harness stacks those
-  // directly above Settings on the sidebar foot; the overlay it opens renders
-  // from the frame-wide shell.overlay seat, and the module store
-  // (overviewStore.ts) carries the open flag between the two registrations.
-  // Both seats are root-scope list slots present since the supported baseline.
-  const OverviewButton = makeOverviewButton(kit, settings)
-  ctx.slots.inject('sidebar.footer.action', () => {
-    return ctx.slots.register(
-      { name: 'sidebar.footer.action', id: 'context-overview', order: 10, locale: NS },
-      // Root-scope seats: the owner props (wide, the standard kit) arrive untyped.
-      props => h(OverviewButton, props as unknown as Parameters<typeof OverviewButton>[0]),
-    )
-  })
+  // Context Insights page: the panel on the keyed `main` slot and its sidebar entry on
+  // `sidebar.panellist`, both mounted or unwound by the `insightsEntry` preference (insightPage.ts).
   const OverviewPanel = makeOverviewPanel(ctx, kit)
-  ctx.slots.inject('shell.overlay', () => {
-    return ctx.slots.register(
-      { name: 'shell.overlay', id: 'context-overview', order: 10, locale: NS },
-      props => h(OverviewPanel, props as unknown as Parameters<typeof OverviewPanel>[0]),
-    )
-  })
+  ctx.effect(() => watchInsightPage(
+    ctx,
+    settings,
+    // Root-scope seats: the owner props (the standard kit) arrive untyped.
+    props => h(OverviewPanel, props as unknown as Parameters<typeof OverviewPanel>[0]),
+    t,
+    NS,
+  ), 'dsh-context: insight page')
 
-  /** The injected face both preference cards ride: the settings store as the
-   *  framework's hooks-compartment `useContextSettings` seat, plus the set verb. */
   const cardFace = (): {
     hooks: { contextSettings: typeof settings.store; priceMapRevision: typeof priceMapStore }
     set: (field: SettingsField, value: string) => void

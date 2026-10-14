@@ -8,7 +8,8 @@
  * cell — never a whole session's spend dumped on the day it was last
  * active. The two series scale on their OWN window maxima (a $2 week must
  * not flatten under a 169M-token week), so each bar reads as a share of its
- * series' peak; the tooltip carries the exact figures. The window is fixed
+ * series' peak; the tooltip (the page's portaled hover tip, off the column's
+ * `data-lc-tip`) carries the exact figures. The window is fixed
  * to the last 7 days — the range selector above scopes the KPI figures, not
  * this calendar.
  *
@@ -16,10 +17,10 @@
  * each series' own peak, a solid baseline at 0, and a tick rail on each
  * side — TOKENS on the left, COST on the right, computed from the same
  * maxima the bars scale to. The cost rail reads '—' until some day actually
- * prices.
+ * prices. Each tokens bar carries its own day's figure above it, so the
+ * common case reads without hovering.
  */
 
-import { Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ReactElement } from 'react'
 import { formatCost, type CostCurrency } from '../cost'
 import { type DayTotals } from '../overview'
@@ -53,7 +54,7 @@ export function makeOverviewUsage(kit: ViewKit): (props: OverviewUsageProps) => 
   const { t, fmt } = kit
   return function OverviewUsage(props: OverviewUsageProps): ReactElement {
     const window = usageWindowOf(props.today)
-    // Widened honestly: a Record index read can miss at runtime.
+    // Widened: a Record index read can miss at runtime.
     const byKey: Record<string, DayTotals | undefined> = props.days
     const columns = window.map(key => ({ key, entry: byKey[key] }))
     const empty = columns.every(c => c.entry === undefined || (c.entry.tokens <= 0 && c.entry.cost === null))
@@ -67,8 +68,7 @@ export function makeOverviewUsage(kit: ViewKit): (props: OverviewUsageProps) => 
     const heightOf = (value: number, max: number): string => (max <= 0 || value <= 0 ? '0%' : `${Math.max(4, Math.round((value / max) * 100))}%`)
     const tickOf = (percent: number): string => fmt(Math.round((maxTokens * percent) / 100))
     // '—' while nothing prices (an all-zero rail would read as free); the 0
-    // tick reads bare — formatCost's toPrecision renders the floor as the
-    // odd "¥0.0".
+    // tick reads bare — formatCost's toPrecision renders the floor as the odd "¥0.0".
     const costTickOf = (percent: number): string => {
       if (maxCost <= 0) return '—'
       return percent === 0 ? '0' : formatCost((maxCost * percent) / 100, props.currency)
@@ -87,36 +87,38 @@ export function makeOverviewUsage(kit: ViewKit): (props: OverviewUsageProps) => 
                   {TICKS.map(p => <span key={p} className="lc-ov-usage-tick" style={{ top: `${100 - p}%` }}>{tickOf(p)}</span>)}
                 </div>
                 <div className="lc-ov-usage-grid">
-                  {TICKS.map(p => (
-                    <span
-                      key={p}
-                      className={'lc-ov-usage-line' + (p === 0 ? ' lc-ov-usage-line-0' : '')}
-                      style={{ bottom: `${p}%` }}
-                      aria-hidden="true"
-                    />
-                  ))}
                   <div className="lc-ov-usage-cols">
+                    {/* The gridlines resolve against the bars' own box, so the headroom the value labels
+                        take above the tallest bar never shifts the scale they mark. */}
+                    {TICKS.map(p => (
+                      <span
+                        key={p}
+                        className={'lc-ov-usage-line' + (p === 0 ? ' lc-ov-usage-line-0' : '')}
+                        style={{ bottom: `${p}%` }}
+                        aria-hidden="true"
+                      />
+                    ))}
                     {columns.map((c) => {
                       const tokens = c.entry?.tokens ?? 0
                       const cost = c.entry?.cost ?? null
-                      // The tooltip line reads the BARE label — the legend's
-                      // qualifier ("仅含支持计价映射的模型") stays off the bubble.
+                      // The tooltip line reads the BARE label; the legend's priced-models qualifier stays off the bubble.
                       const label = `${c.key}\n${t('ov.usage.tokens')} ${fmt(tokens)}\n${t('ov.usage.costTip')} ${cost === null ? '—' : formatCost(cost, props.currency)}`
                       return (
-                        <Tooltip key={c.key} label={label} side="top">
-                          <div className="lc-ov-usage-col">
-                            <div className="lc-ov-usage-bars">
-                              <span
-                                className="lc-ov-usage-bar lc-ov-usage-tokens"
-                                style={{ height: heightOf(tokens, maxTokens) }}
-                              />
-                              <span
-                                className="lc-ov-usage-bar lc-ov-usage-cost"
-                                style={{ height: cost === null ? '0%' : heightOf(cost, maxCost) }}
-                              />
-                            </div>
+                        <div key={c.key} className="lc-ov-usage-col" data-lc-tip={label}>
+                          <div className="lc-ov-usage-bars">
+                            <span
+                              className="lc-ov-usage-bar lc-ov-usage-tokens"
+                              style={{ height: heightOf(tokens, maxTokens) }}
+                            >
+                              {/* The day's own figure, riding its bar's top — a day with no tokens has nothing to say. */}
+                              {tokens > 0 && <span className="lc-ov-usage-value">{fmt(tokens)}</span>}
+                            </span>
+                            <span
+                              className="lc-ov-usage-bar lc-ov-usage-cost"
+                              style={{ height: cost === null ? '0%' : heightOf(cost, maxCost) }}
+                            />
                           </div>
-                        </Tooltip>
+                        </div>
                       )
                     })}
                   </div>
@@ -124,11 +126,12 @@ export function makeOverviewUsage(kit: ViewKit): (props: OverviewUsageProps) => 
                 <div className="lc-ov-usage-rail lc-ov-usage-rail-r" aria-hidden="true">
                   {TICKS.map(p => <span key={p} className="lc-ov-usage-tick" style={{ top: `${100 - p}%` }}>{costTickOf(p)}</span>)}
                 </div>
-              </div>
-              {/* The day strip mirrors the columns' flex geometry (same flex
-                  basis, same gap), so every label sits under its column. */}
-              <div className="lc-ov-usage-days" aria-hidden="true">
-                {columns.map(c => <span key={c.key} className="lc-ov-usage-day">{c.key.slice(5)}</span>)}
+                {/* The day strip is the plot grid's row 2 in the chart's own
+                    column, so every label centers under its column by
+                    construction — no mirrored geometry to keep in sync. */}
+                <div className="lc-ov-usage-days" aria-hidden="true">
+                  {columns.map(c => <span key={c.key} className="lc-ov-usage-day">{c.key.slice(5)}</span>)}
+                </div>
               </div>
             </>
           )}

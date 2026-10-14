@@ -21,14 +21,11 @@ jobs:
       - name: Check the DeeSeek Harness plugin
         # `next` = the newest published generation (0.2.0-rc.2), whose npm
         # dependency closure is complete; `latest` still serves the other
-        # supported line (0.1.7-rc.2). The 0.1.5-rc line is transitively broken
-        # on npm right now: web-app 0.1.5-rc.3 was published without the
-        # dsh-client-ui-sidebar-documentpreview rc.3 it requests, and every
-        # ^0.1.5-rc range resolves to it. Revisit when upstream republishes a
-        # complete stable closure.
+        # supported line (0.1.7-rc.2).
         uses: bowenliang123/dsh-plugin-checker@v1
 
-      # Reads the pinned pnpm version from `packageManager` in package.json.
+      # No `packageManager` field in this plugin's package.json, so both
+      # workflows pin the version explicitly.
       - uses: pnpm/action-setup@v6
         with:
           version: latest
@@ -48,6 +45,9 @@ jobs:
       - name: Lint
         run: pnpm run lint
 
+      - name: Typecheck
+        run: pnpm run typecheck
+
       # The `compat` vitest project inside `pnpm test` stages the REAL harness
       # sources at every supported baseline tag (tests/baselines.ts is the
       # source of truth — keep this fetch list in step when a baseline is
@@ -61,7 +61,6 @@ jobs:
           git init -q
           git remote add origin https://github.com/deepseek-ai/deepseek-harness.git
           git fetch --depth 1 -q origin \
-            refs/tags/dsh-v0.1.5-rc.1:refs/tags/dsh-v0.1.5-rc.1 \
             refs/tags/dsh-v0.1.7-rc.2:refs/tags/dsh-v0.1.7-rc.2 \
             refs/tags/dsh-v0.2.0-rc.2:refs/tags/dsh-v0.2.0-rc.2
 

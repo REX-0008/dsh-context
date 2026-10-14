@@ -1,9 +1,3 @@
-// The first row's usage chart (src/client/components/overviewUsage.tsx):
-// the fixed last-7-days window off the injected today key, the two series'
-// independent maxima, bar heights, the tick rails and gridlines framed off
-// the same maxima, unpriced/zero days, and the empty and degraded paths —
-// rendered with real React.
-
 import { createElement as h } from 'react'
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
@@ -99,7 +93,6 @@ describe('OverviewUsage', () => {
       currency: 'usd',
       today: TODAY,
     }))
-    // Five hairlines, the 0 one solid (the baseline).
     assert.equal(queryAll(m.container, '.lc-ov-usage-line').length, 5)
     assert.ok(query(m.container, '.lc-ov-usage-line-0') !== null)
     const baseline = query(m.container, '.lc-ov-usage-line-0') as HTMLElement
@@ -134,6 +127,43 @@ describe('OverviewUsage', () => {
     }))
     assert.equal(queryAll(m.container, '.lc-ov-usage-col').length, 7)
     assert.equal(text(m.container).includes('No usage in the last 7 days'), false)
+    await m.unmount()
+  })
+
+  test('each tokens bar carries its own day’s figure, and only where there are tokens', async () => {
+    const m = await mount(h(OverviewUsage, {
+      days: {
+        '2026-09-16': day({ tokens: 1_200_000 }),
+        '2026-09-15': day({ tokens: 5000 }),
+        // 09-14 stays absent — a day with no tokens has no figure to print.
+      },
+      currency: 'usd',
+      today: TODAY,
+    }))
+    const labelIn = (col: number): string | null =>
+      queryAll(m.container, '.lc-ov-usage-col')[col].querySelector('.lc-ov-usage-value')?.textContent ?? null
+    assert.equal(labelIn(6), '1.2M')
+    assert.equal(labelIn(5), '5.0k')
+    assert.equal(labelIn(4), null)
+    assert.equal(queryAll(m.container, '.lc-ov-usage-value').length, 2)
+    // The label is the tokens bar's own child, so it rides that bar's height; cost bars never carry one.
+    assert.equal(queryAll(m.container, '.lc-ov-usage-bar.lc-ov-usage-tokens .lc-ov-usage-value').length, 2)
+    assert.equal(queryAll(m.container, '.lc-ov-usage-cost .lc-ov-usage-value').length, 0)
+    await m.unmount()
+  })
+
+  test('the gridlines share the bars’ box, so the label headroom never shifts the scale', async () => {
+    const m = await mount(h(OverviewUsage, {
+      days: { '2026-09-16': day({ tokens: 1000, cost: 1 }), '2026-09-15': day({ tokens: 500, cost: 0.5 }) },
+      currency: 'usd',
+      today: TODAY,
+    }))
+    // `bottom: N%` only reads the bar scale while the gridlines resolve against the same box the bars
+    // fill — the plot above them takes the headroom the labels need.
+    const cols = query(m.container, '.lc-ov-usage-cols')
+    assert.equal(queryAll(cols, '.lc-ov-usage-line').length, 5)
+    assert.equal(queryAll(m.container, '.lc-ov-usage-grid > .lc-ov-usage-line').length, 0)
+    assert.equal((query(cols, '.lc-ov-usage-line-0') as HTMLElement).style.bottom, '0%')
     await m.unmount()
   })
 })

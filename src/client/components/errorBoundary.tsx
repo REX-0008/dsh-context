@@ -11,6 +11,9 @@
  * 'length')" with no way to tell which of the plugin's many folds produced it —
  * the reporter can read the culprit straight off the card instead.
  */
+/** A subtree render error degrades to this styled card with a working Retry; the harness's own slot boundary
+ * would leave an empty error placeholder instead. */
+
 
 import { Component, type ComponentType, type ErrorInfo, type ReactNode } from 'react'
 import type { Translate } from '../i18n'

@@ -2,7 +2,6 @@ import { type ReactElement } from 'react'
 import type { PartsPart } from '../categories'
 import type { Headline } from '../headline'
 import type { ViewKit } from '../viewkit'
-import { AUTO_COMPACT_RATIO } from './stackedBar'
 import type { StackedBarProps } from './stackedBar'
 
 type LegendFn = (props: {
@@ -26,9 +25,6 @@ export function makeCurrentComposition(
   const { t, fmt } = kit
   return function CurrentComposition(props: CurrentCompositionProps): ReactElement {
     const head = props.head
-    const reserve = head.window != null && head.window > 0
-      ? { ratio: AUTO_COMPACT_RATIO, label: t('overview.compactReserve', { pct: Math.round(AUTO_COMPACT_RATIO * 100) }) }
-      : undefined
     return (
       <div className="lc-card" data-lc-current>
         <div className="lc-card-title">
@@ -46,7 +42,8 @@ export function makeCurrentComposition(
           </span>
           {head.pct !== null ? (
             <span className="lc-overview-pct">
-              <b>{`${head.pct}%`}</b>
+              {/* One decimal: the card's reading of the kernel's occupancy percent (headline.ts). */}
+              <b>{`${head.pct.toFixed(1)}%`}</b>
               {t('overview.used')}
             </span>
           ) : null}
@@ -57,7 +54,7 @@ export function makeCurrentComposition(
           max={head.window}
           hoverKey={props.hoverKey}
           onHoverKey={props.onHoverKey}
-          reserve={reserve}
+          reserve={head.reserve}
         />
         <Legend parts={head.parts} hoverKey={props.hoverKey} onHoverKey={props.onHoverKey} />
       </div>

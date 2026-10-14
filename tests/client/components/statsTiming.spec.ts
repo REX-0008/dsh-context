@@ -1,22 +1,15 @@
-// StatsTiming (src/client/components/statsTiming.tsx) rendered with real
-// React: the active-time donut (TTFT + generation vs tools vs overhead) and
-// the pct-led slice rows with call counts and true durations — plus the
-// bottom session-time strip (the fold's per-step spans packed by their share
-// of the active time in occurrence order, joined into the hover link by
-// KIND), and the empty and hostile-timing degrades.
-
 import { createElement as h } from 'react'
 import assert from 'node:assert/strict'
 import { describe, test } from 'vitest'
-import { makeDonut } from '../../../src/client/components/donut'
+import { Donut } from '../../../src/client/components/donut'
 import { makeStatsTiming } from '../../../src/client/components/statsTiming'
 import type { TimingSpan, TimingTotals } from '../../../src/shared/types'
 import { makeKit, mount, query, queryAll, text, hover } from '../helpers/kit'
 
 const kit = makeKit()
 const kitZh = makeKit('zh')
-const StatsTiming = makeStatsTiming(kit, makeDonut(kit))
-const StatsTimingZh = makeStatsTiming(kitZh, makeDonut(kitZh))
+const StatsTiming = makeStatsTiming(kit, Donut)
+const StatsTimingZh = makeStatsTiming(kitZh, Donut)
 
 /** Local HH:MM:SS exactly as the kit's fmtTime renders it (a timezone-free assertion). */
 const timeOf = (ms: number): string => new Date(ms).toLocaleTimeString('en-GB', { hour12: false })
@@ -80,7 +73,6 @@ describe('StatsTiming', () => {
     // slice paints no arc AND its legend row is omitted: 3 circles, 3 rows.
     assert.equal(queryAll(m.container, '.lc-donut circle').length, 3)
     assert.equal(queryAll(m.container, '.lc-sl-row').length, 3)
-    // The hover link: a painted row dims the ring and lights its own arc.
     const rows = queryAll(m.container, '.lc-sl-row')
     await hover(rows[2])
     assert.ok(rows[2].className.includes('lc-sl-row-on'))
@@ -109,7 +101,7 @@ describe('StatsTiming', () => {
     }
     const m = await mount(h(StatsTiming, { timing }))
     const labels = queryAll(m.container, '.lc-sl-label').map(n => n.textContent)
-    assert.deepEqual(labels, ['TTFT', 'Answer'], 'zero buckets and zero tools are gone')
+    assert.deepEqual(labels, ['TTFT', 'Answers'], 'zero buckets and zero tools are gone')
     assert.equal(queryAll(m.container, '.lc-sl-row').length, queryAll(m.container, '.lc-donut-seg').length)
     await m.unmount()
   })
@@ -136,7 +128,7 @@ describe('StatsTiming — the generation split', () => {
     assert.equal(queryAll(m.container, '.lc-sl-row').length, 6)
     assert.deepEqual(rowOf(m.container, 0), { pct: '16.7%', label: 'TTFT', count: '1m40s · 10 calls', dim: false })
     assert.deepEqual(rowOf(m.container, 1), { pct: '15.0%', label: 'Thinking', count: '1m30s', dim: false })
-    assert.deepEqual(rowOf(m.container, 2), { pct: '5.0%', label: 'Answer', count: '30.0s', dim: false })
+    assert.deepEqual(rowOf(m.container, 2), { pct: '5.0%', label: 'Answers', count: '30.0s', dim: false })
     assert.deepEqual(rowOf(m.container, 3), { pct: '3.3%', label: 'Tool args', count: '20.0s', dim: false })
     assert.deepEqual(rowOf(m.container, 4), { pct: '50.0%', label: 'Tool runs', count: '5m0s · 25 runs', dim: false })
     assert.deepEqual(rowOf(m.container, 5), { pct: '10.0%', label: 'Overhead', count: '1m0s', dim: false })
@@ -164,7 +156,7 @@ describe('StatsTiming — the generation split', () => {
     const timing: TimingTotals = { ...SPLIT, reasoningBlocks: 14, textBlocks: 5, toolArgBlocks: 26 }
     const m = await mount(h(StatsTiming, { timing }))
     assert.deepEqual(rowOf(m.container, 1), { pct: '15.0%', label: 'Thinking', count: '1m30s · 14 blocks', dim: false })
-    assert.deepEqual(rowOf(m.container, 2), { pct: '5.0%', label: 'Answer', count: '30.0s · 5 blocks', dim: false })
+    assert.deepEqual(rowOf(m.container, 2), { pct: '5.0%', label: 'Answers', count: '30.0s · 5 blocks', dim: false })
     assert.deepEqual(rowOf(m.container, 3), { pct: '3.3%', label: 'Tool args', count: '20.0s · 26 blocks', dim: false })
     await m.unmount()
   })
@@ -183,7 +175,7 @@ describe('StatsTiming — the generation split', () => {
   test('the split labels localize', async () => {
     const m = await mount(h(StatsTimingZh, { timing: SPLIT }))
     assert.equal(rowOf(m.container, 1).label, '模型思考')
-    assert.equal(rowOf(m.container, 2).label, '模型输出')
+    assert.equal(rowOf(m.container, 2).label, '模型回复')
     assert.equal(rowOf(m.container, 3).label, '工具参数')
     await m.unmount()
   })
@@ -208,39 +200,39 @@ describe('StatsTiming — the generation split', () => {
     const timing: TimingTotals = { ...SPLIT, reasoningMs: 400_000, textMs: 100_000, toolArgMs: 0 }
     const m = await mount(h(StatsTiming, { timing }))
     assert.deepEqual(rowOf(m.container, 1), { pct: '66.7%', label: 'Thinking', count: '6m40s', dim: false })
-    assert.deepEqual(rowOf(m.container, 2), { pct: '16.7%', label: 'Answer', count: '1m40s', dim: false })
-    // The zero tool-args bucket is omitted whole, so Tools follows Answer.
+    assert.deepEqual(rowOf(m.container, 2), { pct: '16.7%', label: 'Answers', count: '1m40s', dim: false })
+    // The zero tool-args bucket is omitted whole, so Tools follows Answers.
     assert.equal(rowOf(m.container, 3).label, 'Tool runs')
     await m.unmount()
   })
 })
 
-describe('StatsTiming — the throughput chip', () => {
+describe('StatsTiming — the throughput figure', () => {
   const paired: TimingTotals = { ...TIMING, speedTokens: 12_345, speedMs: 42_720 }
 
-  test('the paired seat renders the harness-formatted figure in the title row', async () => {
+  test('the paired seat renders the output-speed figure in the title row', async () => {
     const m = await mount(h(StatsTiming, { timing: paired }))
-    const chip = query(m.container, '.lc-timing-tps')
-    assert.equal(chip?.textContent, '289 tok/s', '12345 tokens over 42.72s')
-    assert.ok(chip?.getAttribute('title')?.includes('Output speed (TPS)'))
+    const rate = query(m.container, '.lc-card-rate')
+    assert.equal(rate?.textContent, 'TPS 289 tok/s', '12345 tokens over 42.72s')
+    assert.ok(rate?.getAttribute('title')?.includes('Output speed (TPS)'))
     await m.unmount()
   })
 
-  test('the chip localizes its tooltip and stays in the title row', async () => {
+  test('the figure localizes its label and tooltip in the title row', async () => {
     const m = await mount(h(StatsTimingZh, { timing: paired }))
-    const chip = query(m.container, '.lc-timing-tps')
-    assert.equal(chip?.textContent, '289 tok/s')
-    assert.ok(chip?.getAttribute('title')?.includes('输出速度（TPS）'))
+    const rate = query(m.container, '.lc-card-rate')
+    assert.equal(rate?.textContent, '输出速度 289 tok/s')
+    assert.ok(rate?.getAttribute('title')?.includes('输出速度（TPS）'))
     await m.unmount()
   })
 
   test('a sub-10 figure keeps one decimal', async () => {
     const m = await mount(h(StatsTiming, { timing: { ...TIMING, speedTokens: 26, speedMs: 10_000 } }))
-    assert.equal(query(m.container, '.lc-timing-tps')?.textContent, '2.6 tok/s')
+    assert.equal(query(m.container, '.lc-card-rate')?.textContent, 'TPS 2.6 tok/s')
     await m.unmount()
   })
 
-  test('an unpaired, zero-window, or hostile seat renders no chip', async () => {
+  test('an unpaired, zero-window, or hostile seat renders no figure', async () => {
     for (const timing of [
       TIMING,
       { ...TIMING, speedTokens: 500, speedMs: 0 },
@@ -248,14 +240,13 @@ describe('StatsTiming — the throughput chip', () => {
       { ...TIMING, speedTokens: -5, speedMs: 1_000 },
     ] as TimingTotals[]) {
       const m = await mount(h(StatsTiming, { timing }))
-      assert.equal(queryAll(m.container, '.lc-timing-tps').length, 0, JSON.stringify(timing.speedTokens))
+      assert.equal(queryAll(m.container, '.lc-card-rate').length, 0, JSON.stringify(timing.speedTokens))
       await m.unmount()
     }
   })
 })
 
 describe('StatsTiming — the session-time strip', () => {
-  // The generation-split timing: genMs 140s splits into thinking 90s, answer 30s, tool args 20s.
   const SPLIT: TimingTotals = {
     wallMs: 600_000, ttftMs: 100_000, genMs: 140_000, reasoningMs: 90_000, textMs: 30_000, toolArgMs: 20_000,
     calls: 10, toolsMs: 300_000, toolCalls: 25, tools: { bash: { calls: 15, ms: 200_000 } },
