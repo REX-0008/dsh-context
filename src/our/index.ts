@@ -31,7 +31,7 @@ import { openModulesStore } from './panel/modules-store'
 import { createEntryScope, wrapLegacyScope, type LegacySettingsFace, type LegacySettingsScope, type PanelScope, type SettingsFormsFace, type VolatileRef } from './panel/scope'
 import { createPanelService, type ContextPanelService } from './panel/panel-service'
 import type { ContextAssemblerService } from './assembler/service'
-import { ContextAssemblerEngine } from './assembler/engine'
+import { ContextAssemblerEngine, type SectionLevel } from './assembler/engine'
 import { createSectionRegistry, type SectionRegistry } from './section-registry'
 import { knownSectionOf } from './known-sections'
 import { KNOWN_INJECTORS } from './known-injectors'
@@ -181,12 +181,19 @@ function stateHandler(wiring: Wiring) {
       // The registry read is the widest source, so it is fetched once per request
       // rather than per section.
       const registeredOrders = engine === undefined ? {} : engine.registeredOrdersForSession(sessionId)
+      // Which LAYER each section registered in. Read separately from the orders:
+      // the orders come from the registry's merged view, while the layer only
+      // survives in the unmerged scope chain (see engine.sectionLevels).
+      const sectionLevels = engine === undefined ? {} : engine.sectionLevelsForSession(sessionId)
       // The declared runtime contexts: same assembly, same waterfall as sections.
       const contexts = engine === undefined ? null : engine.contextsOfSession(sessionId, assembly)
       // What injected into this conversation's batches, with its content.
       const observed = engine === undefined ? [] : engine.observedInjectionsForSession(sessionId)
       const systemSections = sections === null ? null : sections.map((section) => {
         const origin = resolveOrigin(wiring.sections, section.name, registeredOrders, wiring.bridge?.toolOwnerOf)
+        // A name the chain does not carry has no level, which the Record type alone
+        // cannot express.
+        const level = sectionLevels[section.name] as SectionLevel | undefined
         // "Edited" describes a SEPARATE record kept beside someone else's text.
         // Our own modules have no such record: their body IS the text, storing it
         // in the definitions file, so an edit is simply the new body — there is
@@ -230,6 +237,7 @@ function stateHandler(wiring: Wiring) {
           ...(effectiveOrder === undefined ? {} : { order: effectiveOrder }),
           ...(origin.plugin === undefined ? {} : { plugin: origin.plugin }),
           originFrom: origin.from,
+          ...(level === undefined ? {} : { level }),
           /** The plugin's current text, delivered only for the comparison. */
           ...(originalChanged ? { originalText: section.text } : {}),
           weight: weights[section.name],

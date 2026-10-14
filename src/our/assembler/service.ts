@@ -7,7 +7,7 @@
 import type { AgentFace as Agent } from '../agent-face'
 import type { PresetEntryInfo } from './preset-entries'
 import type { PromptModule } from '../types'
-import type { InjectionSeen, SystemPromptAssembly } from './engine'
+import type { InjectionSeen, SectionLevel, SystemPromptAssembly } from './engine'
 
 /** The engine service contract (injected by panel-service and by future memory/other consumers). */
 export interface ContextAssemblerService {
@@ -185,6 +185,16 @@ export interface ContextAssemblerService {
    * @returns the map; empty when the agent or registry is unavailable.
    */
   registeredOrdersForSession(sessionId: string): Record<string, number>
+  /**
+   * Section name to the LAYER it registered in (global / preset / agent).
+   *
+   * Separate from the orders read because the two use different registry
+   * accesses: orders come from the merged effective view, the layer can only be
+   * read from the unmerged scope chain.
+   * @param sessionId - the agent (= session) id.
+   * @returns the map; empty when the agent or chain is unavailable.
+   */
+  sectionLevelsForSession(sessionId: string): Record<string, SectionLevel>
   /**
    * Modify in place the skill-filesystem row's config in the agent's preset
    * assembly manifest (customSkillDirs), effective for new sessions (a new

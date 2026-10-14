@@ -57,15 +57,20 @@ export interface SystemSectionInfo {
   plugin?: string
   /**
    * Where `order`/`plugin` came from: observed live at registration, filled
-   * from the generated table, or unknown.
+   * from the generated owner index, or unknown.
    */
   originFrom: 'observed' | 'table' | 'none'
   /**
-   * The generated table disagrees with the live order — the table is stale and
-   * needs regenerating. The panel flags this instead of showing a stale number.
-   */  /**
-   * Which level switched this section off: this conversation alone, or the
-   * preset (every conversation running it). Absent while it is enabled.
+   * The LAYER this section registered in, when the scope chain could be read.
+   *
+   * The harness layers registrations and lets the nearest scope win a name: the
+   * context-global layer, then the agent's preset, then the agent itself (a
+   * subagent is another agent scope, not a fourth layer).
+   */
+  level?: 'global' | 'preset' | 'agent'
+  /**
+   * The preset-level switch, when it is what disabled the section: off for the
+   * whole preset (every conversation running it). Absent while it is enabled.
    */
   disabledAt?: 'conversation' | 'preset'
 }

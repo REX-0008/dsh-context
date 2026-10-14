@@ -14,6 +14,7 @@ type Listener = (...args: unknown[]) => unknown
 /** A minimal agent whose context records the listeners the engine registers. */
 function makeAgent(id: string): {
   agent: never
+  ctx: Record<string, unknown>
   listeners: Map<string, Listener>
   disposed: string[]
 } {
@@ -24,11 +25,22 @@ function makeAgent(id: string): {
     return () => { disposed.push(name) }
   }
   const ctx = { on, systemPrompt: { section: () => () => {}, context: () => () => {} } }
-  return { agent: { id, ctx } as never, listeners, disposed }
+  return { agent: { id, ctx } as never, ctx, listeners, disposed }
 }
 
 /** A config reader that throws, standing in for any failure inside our layer. */
 const throwingReader = (): never => { throw new Error('config is broken') }
+
+/** A fake registry: one global layer plus a chain of scope layers. */
+function makeLayers(...scoped: string[][]): { chainLayers: (scope: unknown) => unknown[]; global: unknown } {
+  const layer = (names: string[]) => ({ sections: new Map(names.map(n => [n, { order: 0 }])) })
+  // The chain is farthest-first: global is NOT in it (it lives beside it), and the
+  // LAST entry is the agent's own scope.
+  return {
+    global: layer(scoped[0] ?? []),
+    chainLayers: () => scoped.slice(1).map(layer),
+  }
+}
 
 describe('the assemble waterfall', () => {
   test('a throwing config leaves the assembly UNTOUCHED instead of failing it', async () => {
@@ -88,6 +100,43 @@ describe('the pre-step waterfall', () => {
     const decision = { kind: 'skip' }
     const result = await listener!({}, async () => decision)
     assert.deepEqual(result, decision)
+  })
+})
+
+describe('section levels (the scope chain read)', () => {
+  test('a layer chain reports global / preset / agent, nearest winning a name', () => {
+    const engine = new ContextAssemblerEngine()
+    engine.setConfigReader(() => ({ modules: {}, toolRestrictions: {} }) as never)
+    const { agent, ctx } = makeAgent('lv1')
+    const layers = makeLayers(
+      ['shared', 'global-only'],
+      ['shared', 'preset-only'],
+      ['shared', 'agent-only'],
+    )
+    ;(ctx as { systemPrompt: unknown }).systemPrompt = { section: () => () => {}, context: () => () => {}, layers }
+    engine.registerForAgent(agent)
+    const levels = engine.sectionLevelsForSession('lv1')
+    // The nearest scope wins a name: the agent's own registration is what ships.
+    assert.equal(levels.shared, 'agent')
+    assert.equal(levels['global-only'], 'global')
+    assert.equal(levels['preset-only'], 'preset')
+    assert.equal(levels['agent-only'], 'agent')
+  })
+
+  test('an unreadable or absent chain reports no levels rather than throwing', () => {
+    const engine = new ContextAssemblerEngine()
+    engine.setConfigReader(() => ({ modules: {}, toolRestrictions: {} }) as never)
+    const { agent, ctx } = makeAgent('lv2')
+    ;(ctx as { systemPrompt: unknown }).systemPrompt = { section: () => () => {}, context: () => () => {} }
+    engine.registerForAgent(agent)
+    assert.deepEqual(engine.sectionLevelsForSession('lv2'), {})
+    assert.deepEqual(engine.sectionLevelsForSession('nobody'), {})
+    // A chain that is not an array is refused whole.
+    ;(ctx as { systemPrompt: unknown }).systemPrompt = { section: () => () => {}, context: () => () => {}, layers: { chainLayers: () => 'nope' } }
+    assert.deepEqual(engine.sectionLevelsForSession('lv2'), {})
+    // A layer whose sections table is not a Map is skipped.
+    ;(ctx as { systemPrompt: unknown }).systemPrompt = { section: () => () => {}, context: () => () => {}, layers: { chainLayers: () => [{ sections: 'not a map' }] } }
+    assert.deepEqual(engine.sectionLevelsForSession('lv2'), {})
   })
 })
 

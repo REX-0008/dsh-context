@@ -375,7 +375,13 @@ export function ContextManagementPanel({ sessionId, browser, t }: ContextManagem
                 {/* The registering plugin, in the same chip the tool rows use for
                 theirs — required on the COLLAPSED row, not only when expanded. */}
                 {section.plugin !== undefined ? (
-                  <span className="lc-br-tag lc-br-tool-plugin" title={t('our.chip.pluginTip')}>{section.plugin}</span>
+                  <span
+                    className={'lc-br-tag lc-br-tool-plugin' + (section.level === undefined ? '' : ' lc-br-lvl-' + section.level)}
+                    title={section.level === undefined
+                      ? t('our.chip.pluginTip')
+                      : t('our.chip.pluginLevelTip', { level: t('our.level.' + section.level) })}>
+                    {section.plugin}
+                  </span>
                 ) : (
                   <span className="lc-br-tag lc-br-sect-unknown" title={t('our.chip.unknownSourceTip')}>
                     {t('our.chip.unknownSource')}

@@ -187,3 +187,12 @@
 .lc-br-addtext { width: 100%; box-sizing: border-box; font: inherit; font-size: 12px; line-height: 1.5; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-module-platform); border: 1px solid var(--dsw-alias-border-l2); border-radius: 6px; padding: 6px; resize: vertical; }
 .lc-br-addactions { display: flex; gap: 6px; }
 .lc-br-adderr { color: var(--dsw-alias-state-error-primary); }
+
+/* Which LAYER a section registered in, tinting the plugin chip rather than adding a
+   second one. The three tokens are the sheet's own, each already carrying a meaning
+   the level can borrow: the neutral secondary label (the deployment-wide base), the
+   brand tint (the preset that shapes a run), and the warn tint (an agent's own
+   scope, the most specific and most transient of the three). */
+.lc-br-lvl-global { color: var(--dsw-alias-label-secondary); }
+.lc-br-lvl-preset { color: var(--dsw-alias-brand-primary); border-color: color-mix(in srgb, var(--dsw-alias-brand-primary) 45%, transparent); }
+.lc-br-lvl-agent { color: var(--dsw-alias-state-warn-primary); border-color: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 55%, transparent); }

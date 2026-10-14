@@ -131,6 +131,17 @@ export const FALLBACK_CHANNEL: 'section' | 'context' = 'section'
  * still be erased while dragging in declarations that collide with the narrow
  * shapes used here.
  */
+/**
+ * Which layer a prompt registration came from.
+ *
+ * The harness composes registrations in layers and gives the NEAREST scope the
+ * final word (`dsh-scope`: a context-global layer, then the scope chain). An agent
+ * is a scope whose parent is its preset's standing mount, so the chain an agent
+ * sees is: global -> its preset -> itself. A subagent is another agent scope, not
+ * a fourth layer.
+ */
+export type SectionLevel = 'global' | 'preset' | 'agent'
+
 export interface SystemPromptAssembly {
   sections: Array<{ name: string; text: string }>
   contexts: Array<{ name: string; text: string }>
@@ -569,6 +580,54 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
   }
 
   /**
+   * Which LAYER each registered section comes from.
+   *
+   * {@link registrySections} reads `merge`, the effective view: it answers "what
+   * wins", having collapsed the layers, so the layer a name came from is gone by
+   * the time it returns. `chainLayers` hands back the SAME layers unmerged
+   * (farthest ancestor first), which is what preserves that fact.
+   *
+   * The chain an agent sees is global -> its preset's standing mount -> the agent
+   * itself, so the position in the chain names the layer. A name registered in
+   * more than one layer reports the NEAREST one, because that is the registration
+   * whose text the model actually receives (the nearer layer shadows the farther).
+   * @param agent - the agent whose scope chain is read.
+   * @returns section name to level, or undefined when the chain is unreadable.
+   */
+  private sectionLevels(agent: Agent): Map<string, SectionLevel> | undefined {
+    try {
+      const prompt = (agent.ctx as unknown as { systemPrompt?: { layers?: unknown } }).systemPrompt
+      const layers = prompt?.layers as {
+        chainLayers?: (scope: unknown) => unknown
+      } | undefined
+      const chainLayers = layers?.chainLayers
+      if (typeof chainLayers !== 'function') return undefined
+      const chain = chainLayers.call(layers, agent)
+      if (!Array.isArray(chain)) return undefined
+      // The global layer is not part of the chain: `layers.global` is separate, and
+      // `merge` seeds its result from it. Reading both is what makes 'global'
+      // distinguishable from a scope layer rather than being reported as absent.
+      const levels = new Map<string, SectionLevel>()
+      const collect = (layer: unknown, level: SectionLevel): void => {
+        const table = (layer as Record<string, unknown> | undefined)?.sections
+        if (table === undefined || typeof (table as { keys?: unknown }).keys !== 'function') return
+        for (const name of (table as Map<string, unknown>).keys()) {
+          if (typeof name === 'string') levels.set(name, level)
+        }
+      }
+      collect((layers as { global?: unknown } | undefined)?.global, 'global')
+      for (const [index, layer] of chain.entries()) {
+        // The chain is farthest-first, so the LAST entry is the agent's own scope
+        // and anything before it belongs to the preset chain it was mounted under.
+        collect(layer, index === chain.length - 1 ? 'agent' : 'preset')
+      }
+      return levels.size > 0 ? levels : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
    * Assemble the agent's prompt ONCE, for the readers that need it.
    *
    * Both the section list and the runtime contexts are halves of the SAME
@@ -866,6 +925,14 @@ export class ContextAssemblerEngine implements ContextAssemblerService {
     if (agent === undefined) return {}
     const registry = this.registrySections(agent)
     return registry === undefined ? {} : Object.fromEntries(registry)
+  }
+
+  /** @inheritdoc */
+  sectionLevelsForSession(sessionId: string): Record<string, SectionLevel> {
+    const agent = this.agentFor(sessionId)
+    if (agent === undefined) return {}
+    const levels = this.sectionLevels(agent)
+    return levels === undefined ? {} : Object.fromEntries(levels)
   }
 
   /** @inheritdoc */
