@@ -618,3 +618,23 @@ describe('SettingsCard: the model-price mapping block', () => {
     assert.deepEqual(priceSeat.written, {}, 'reverting drops the override')
   })
 })
+
+
+describe('SettingsCard: the card shell', () => {
+  test('renders nothing without the settings hook, and nothing while the namespace is unavailable', async () => {
+    const withoutHook = await mount(h(SettingsCard, {}))
+    assert.equal(withoutHook.container.childElementCount, 0, 'no hook, no card')
+    await withoutHook.unmount()
+    const unavailable = await mount(h(SettingsCard, { useContextSettings: hookFor(stateOf({ status: 'unavailable' })) }))
+    assert.equal(unavailable.container.childElementCount, 0, 'an unserved namespace renders nothing')
+    await unavailable.unmount()
+  })
+
+  test('a ready-but-not-writable namespace still renders, with the read-only notice', async () => {
+    const m = await mount(h(SettingsCard, { useContextSettings: hookFor(stateOf({ status: 'ready', writable: false })) }))
+    assert.ok(query(m.container, '.lc-settings-card'))
+    await click(query(m.container, '.lc-settings-head'))
+    assert.ok(text(query(m.container, '.lc-settings-body')).includes(DICT_EN['settings.readOnly']), 'the notice names the read-only state')
+    await m.unmount()
+  })
+})
